@@ -1,0 +1,2 @@
+* * * * * PATH=/home/kai/.nvm/versions/node/v24.13.0/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /home/kai/agent-os/bin/run_dispatcher.sh >> /home/kai/agent-os/runtime/logs/dispatcher.log 2>&1
+* * * * * PATH=/home/kai/.nvm/versions/node/v24.13.0/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /home/kai/agent-os/bin/run_queue.sh >> /home/kai/agent-os/runtime/logs/cron.log 2>&1
