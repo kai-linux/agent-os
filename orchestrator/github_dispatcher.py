@@ -12,6 +12,7 @@ from orchestrator.gh_project import (
     set_item_status,
     edit_issue_labels,
     add_issue_comment,
+    list_ready_issues,
 )
 from orchestrator.task_formatter import format_task
 
@@ -103,6 +104,66 @@ def build_mailbox_task(cfg: dict, project_key: str, repo_cfg: dict, issue: dict)
     return task_id, body
 
 
+def _dispatch_item(cfg, paths, owner, repo_to_project, info, ready_items) -> bool:
+    """Try to dispatch one ready item. Returns True if dispatched."""
+    for item in ready_items:
+        repo_full = item["repo"]
+        if repo_full not in repo_to_project:
+            continue
+
+        pk, pcfg, rcfg = repo_to_project[repo_full]
+
+        # Skip items with excluded labels
+        excluded = {x.lower() for x in pcfg.get("excluded_labels", [])}
+        if item["labels"].intersection(excluded):
+            continue
+
+        # Build issue dict for build_mailbox_task
+        issue = {
+            "number": item["number"],
+            "title": item["title"],
+            "body": item["body"],
+            "url": item["url"],
+            "labels": [{"name": l} for l in item["labels"]],
+        }
+
+        task_id, task_md = build_mailbox_task(cfg, pk, rcfg, issue)
+        task_path = paths["INBOX"] / f"{task_id}.md"
+        task_path.write_text(task_md, encoding="utf-8")
+
+        # Update labels for visibility
+        edit_issue_labels(
+            repo_full,
+            item["number"],
+            add=["in-progress", "agent-dispatched"],
+            remove=pcfg.get("required_labels", []),
+        )
+
+        add_issue_comment(
+            repo_full,
+            item["number"],
+            f"🤖 Dispatched to orchestrator.\n\nTask ID: `{task_id}`\nProject key: `{pk}`",
+        )
+
+        # Set project Status to In Progress
+        in_progress_value = pcfg.get("in_progress_value", "In Progress")
+        option_id = info["status_options"].get(in_progress_value)
+        if info["status_field_id"] and option_id:
+            try:
+                set_item_status(
+                    info["project_id"],
+                    item["item_id"],
+                    info["status_field_id"],
+                    option_id,
+                )
+            except Exception as e:
+                print(f"Warning: failed to set project status: {e}")
+
+        print(f"Dispatched {repo_full}#{item['number']} -> {task_path}")
+        return True
+    return False
+
+
 def dispatch_one():
     cfg = load_config()
     paths = runtime_paths(cfg)
@@ -116,6 +177,7 @@ def dispatch_one():
 
     # Query each unique project_number only once
     queried: dict[int, tuple[dict, list[dict]]] = {}
+    graphql_ok = True
     for project_key, project_cfg in cfg["github_projects"].items():
         pn = project_cfg["project_number"]
         if pn in queried:
@@ -126,65 +188,41 @@ def dispatch_one():
             queried[pn] = (info, ready)
         except Exception as e:
             print(f"Warning: failed to query project {pn}: {e}")
+            graphql_ok = False
             continue
 
-    # Dispatch first matching ready item
+    # Dispatch first matching ready item (Status-based)
     for pn, (info, ready_items) in queried.items():
-        for item in ready_items:
-            repo_full = item["repo"]
-            if repo_full not in repo_to_project:
-                continue
-
-            pk, pcfg, rcfg = repo_to_project[repo_full]
-
-            # Skip items with excluded labels
-            excluded = {x.lower() for x in pcfg.get("excluded_labels", [])}
-            if item["labels"].intersection(excluded):
-                continue
-
-            # Build issue dict for build_mailbox_task
-            issue = {
-                "number": item["number"],
-                "title": item["title"],
-                "body": item["body"],
-                "url": item["url"],
-                "labels": [{"name": l} for l in item["labels"]],
-            }
-
-            task_id, task_md = build_mailbox_task(cfg, pk, rcfg, issue)
-            task_path = paths["INBOX"] / f"{task_id}.md"
-            task_path.write_text(task_md, encoding="utf-8")
-
-            # Update labels for visibility
-            edit_issue_labels(
-                repo_full,
-                item["number"],
-                add=["in-progress", "agent-dispatched"],
-                remove=pcfg.get("required_labels", []),
-            )
-
-            add_issue_comment(
-                repo_full,
-                item["number"],
-                f"🤖 Dispatched to orchestrator.\n\nTask ID: `{task_id}`\nProject key: `{pk}`",
-            )
-
-            # Set project Status to In Progress
-            in_progress_value = pcfg.get("in_progress_value", "In Progress")
-            option_id = info["status_options"].get(in_progress_value)
-            if info["status_field_id"] and option_id:
-                try:
-                    set_item_status(
-                        info["project_id"],
-                        item["item_id"],
-                        info["status_field_id"],
-                        option_id,
-                    )
-                except Exception as e:
-                    print(f"Warning: failed to set project status: {e}")
-
-            print(f"Dispatched {repo_full}#{item['number']} -> {task_path}")
+        dispatched = _dispatch_item(cfg, paths, owner, repo_to_project, info, ready_items)
+        if dispatched:
             return
+
+    # Fallback: label-based dispatch if GraphQL failed
+    if not graphql_ok:
+        print("Falling back to label-based dispatch...")
+        for project_key, project_cfg in cfg["github_projects"].items():
+            for repo_cfg in project_cfg.get("repos", []):
+                repo_full = repo_cfg["github_repo"]
+                issues = list_ready_issues(repo_full, limit=20)
+                for issue in issues:
+                    labels = {lbl["name"].lower() for lbl in issue.get("labels", [])}
+                    excluded = {x.lower() for x in project_cfg.get("excluded_labels", [])}
+                    if labels.intersection(excluded):
+                        continue
+                    task_id, task_md = build_mailbox_task(cfg, project_key, repo_cfg, issue)
+                    task_path = paths["INBOX"] / f"{task_id}.md"
+                    task_path.write_text(task_md, encoding="utf-8")
+                    edit_issue_labels(
+                        repo_full, issue["number"],
+                        add=["in-progress", "agent-dispatched"],
+                        remove=project_cfg.get("required_labels", []),
+                    )
+                    add_issue_comment(
+                        repo_full, issue["number"],
+                        f"🤖 Dispatched to orchestrator.\n\nTask ID: `{task_id}`\nProject key: `{project_key}`",
+                    )
+                    print(f"Dispatched (label fallback) {repo_full}#{issue['number']} -> {task_path}")
+                    return
 
     print("No dispatchable issues found.")
 
