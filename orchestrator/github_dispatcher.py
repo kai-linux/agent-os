@@ -13,6 +13,7 @@ from orchestrator.gh_project import (
     edit_issue_labels,
     add_issue_comment,
 )
+from orchestrator.task_formatter import format_task
 
 
 SECTION_RE = re.compile(r"^##\s+(.+?)\n(.*?)(?=^##\s+|\Z)", re.MULTILINE | re.DOTALL)
@@ -44,10 +45,16 @@ def parse_issue_body(body: str) -> dict:
 
 
 def build_mailbox_task(cfg: dict, project_key: str, repo_cfg: dict, issue: dict) -> tuple[str, str]:
-    parsed = parse_issue_body(issue.get("body", ""))
     title = issue["title"]
+    body_text = issue.get("body", "")
     slug = slugify(title)
     task_id = f"task-{now_ts()}-{slug}"
+
+    # Try LLM formatting first, fall back to raw section parsing
+    formatter_model = cfg.get("formatter_model")
+    parsed = format_task(title, body_text, model=formatter_model)
+    if parsed is None:
+        parsed = parse_issue_body(body_text)
 
     criteria = parsed["success_criteria"] or "- Match the issue goal\n- Keep the diff minimal\n- Leave a valid .agent_result.md"
     constraints = parsed["constraints"] or "- Work only inside the repo\n- Prefer minimal diffs"
