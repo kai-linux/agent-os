@@ -555,6 +555,70 @@ def cleanup_worktree(repo: Path, worktree: Path, logfile: Path, queue_summary_lo
         log(f"Worktree cleanup warning: {e}", logfile, queue_summary_log=queue_summary_log)
 
 
+def run_tests(cfg: dict, repo: Path, worktree: Path, logfile: Path, queue_summary_log: Path) -> None:
+    """Run configured test suite in worktree. Modifies .agent_result.md in-place."""
+    repo_configs = cfg.get("repo_configs", {})
+    repo_cfg = repo_configs.get(str(repo.resolve()), repo_configs.get(repo.name, {}))
+    test_command = (repo_cfg or {}).get("test_command") or cfg.get("test_command")
+    if not test_command:
+        return  # No test command configured; skip silently
+
+    timeout_secs = int(cfg.get("test_timeout_minutes", 5)) * 60
+    log(f"Running tests: {test_command}", logfile, queue_summary_log=queue_summary_log)
+
+    try:
+        proc = subprocess.run(
+            test_command,
+            shell=True,
+            cwd=str(worktree),
+            capture_output=True,
+            text=True,
+            timeout=timeout_secs,
+        )
+        passed = proc.returncode == 0
+        status_label = "PASSED" if passed else f"FAILED (exit {proc.returncode})"
+    except subprocess.TimeoutExpired:
+        passed = False
+        status_label = f"TIMEOUT after {timeout_secs}s"
+    except Exception as exc:
+        passed = False
+        status_label = f"ERROR: {exc}"
+
+    log(f"Test result: {status_label}", logfile, queue_summary_log=queue_summary_log)
+
+    result_path = worktree / ".agent_result.md"
+    if not result_path.exists():
+        return
+
+    text = result_path.read_text(encoding="utf-8")
+    test_bullet = f"- {test_command} → {status_label}"
+
+    # Append bullet to TESTS_RUN section
+    m = re.search(r'^TESTS_RUN:\s*$', text, re.MULTILINE)
+    if m:
+        rest = text[m.end():]
+        next_hdr = re.search(r'\n\n[A-Z][A-Z_]+:', rest)
+        if next_hdr:
+            ins = m.end() + next_hdr.start()
+            text = text[:ins] + '\n' + test_bullet + text[ins:]
+        else:
+            text = text.rstrip('\n') + '\n' + test_bullet + '\n'
+    else:
+        text = text.rstrip('\n') + f'\n\nTESTS_RUN:\n{test_bullet}\n'
+
+    # Override STATUS if tests failed and agent reported complete
+    if not passed and re.search(r'^STATUS:\s*complete\s*$', text, re.MULTILINE):
+        text = re.sub(r'^STATUS:\s*complete\s*$', 'STATUS: partial', text, flags=re.MULTILINE)
+        blocker = f"- Tests failed: {test_command} → {status_label}"
+        bm = re.search(r'^BLOCKERS:\s*$', text, re.MULTILINE)
+        if bm:
+            text = text[:bm.end()] + '\n' + blocker + text[bm.end():]
+        else:
+            text = text.rstrip('\n') + f'\n\nBLOCKERS:\n{blocker}\n'
+
+    result_path.write_text(text, encoding="utf-8")
+
+
 def synthesize_exhausted_result(model_attempts: list[str]) -> dict:
     return {
         "status": "blocked",
@@ -746,6 +810,8 @@ def main():
                 final_result = runner_result
                 final_agent = current_agent
                 break
+
+            run_tests(cfg, repo, worktree, logfile, QUEUE_SUMMARY_LOG)
 
             result = parse_agent_result(worktree)
             result["agent"] = current_agent
