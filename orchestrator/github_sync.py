@@ -57,8 +57,13 @@ def sync_result(meta: dict, result: dict, commit_hash: str | None):
     add_issue_comment(repo, issue_number, comment)
 
     if status == "complete":
-        edit_issue_labels(repo, issue_number, add=["review"], remove=["in-progress", "ready", "blocked"])
-        status_value = project_cfg["review_value"]
+        edit_issue_labels(
+            repo,
+            issue_number,
+            add=["done"],
+            remove=["in-progress", "ready", "blocked", "review"],
+        )
+        status_value = project_cfg["done_value"]
     elif status in ("partial", "blocked"):
         edit_issue_labels(repo, issue_number, add=["blocked"], remove=["in-progress", "ready"])
         status_value = project_cfg["blocked_value"]
