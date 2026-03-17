@@ -6,6 +6,7 @@ from orchestrator.gh_project import (
     get_status_field_and_option,
     set_project_status,
     create_pr_for_branch,
+    gh,
 )
 
 
@@ -61,14 +62,32 @@ def sync_result(meta: dict, result: dict, commit_hash: str | None):
             repo,
             issue_number,
             add=["done"],
-            remove=["in-progress", "ready", "blocked", "review"],
+            remove=["in-progress", "ready", "blocked", "review", "agent-dispatched"],
         )
         status_value = project_cfg["done_value"]
+
+        # Close the GitHub issue
+        try:
+            gh(["issue", "close", str(issue_number), "-R", repo])
+        except Exception:
+            pass
+
     elif status in ("partial", "blocked"):
-        edit_issue_labels(repo, issue_number, add=["blocked"], remove=["in-progress", "ready"])
+        edit_issue_labels(
+            repo,
+            issue_number,
+            add=["blocked"],
+            remove=["in-progress", "ready", "agent-dispatched"],
+        )
         status_value = project_cfg["blocked_value"]
+
     else:
-        edit_issue_labels(repo, issue_number, add=["blocked"], remove=["in-progress", "ready"])
+        edit_issue_labels(
+            repo,
+            issue_number,
+            add=["blocked"],
+            remove=["in-progress", "ready", "agent-dispatched"],
+        )
         status_value = project_cfg["blocked_value"]
 
     try:
