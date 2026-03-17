@@ -183,13 +183,24 @@ def add_issue_comment(repo: str, number: int, body: str):
     gh(["issue", "comment", str(number), "-R", repo, "--body", body])
 
 
+def ensure_labels(repo: str, labels: list[str]):
+    """Create labels on the repo if they don't already exist."""
+    for label in labels:
+        gh(["label", "create", label, "-R", repo, "--force"], check=False)
+
+
 def edit_issue_labels(repo: str, number: int, add=None, remove=None):
+    if add:
+        ensure_labels(repo, add)
     cmd = ["issue", "edit", str(number), "-R", repo]
     if add:
         cmd += ["--add-label", ",".join(add)]
     if remove:
         cmd += ["--remove-label", ",".join(remove)]
-    gh(cmd)
+    try:
+        gh(cmd)
+    except Exception as e:
+        print(f"Warning: label update failed for #{number}: {e}")
 
 
 def create_pr_for_branch(repo: str, branch: str, title: str, body: str) -> Optional[str]:
