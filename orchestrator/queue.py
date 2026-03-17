@@ -1,3 +1,6 @@
+import fcntl
+import hashlib
+import os
 import re
 import shutil
 import subprocess
@@ -582,18 +585,25 @@ def main():
     LOGS = paths["LOGS"]
     QUEUE_SUMMARY_LOG = paths["QUEUE_SUMMARY_LOG"]
 
+    worker_id = os.environ.get("QUEUE_WORKER_ID", "w0")
+
     task = pick_task(INBOX)
     if not task:
-        print("No tasks in inbox.")
+        print(f"[{worker_id}] No tasks in inbox.")
         return
 
     processing = PROCESSING / task.name
-    shutil.move(str(task), str(processing))
+    try:
+        shutil.move(str(task), str(processing))
+    except FileNotFoundError:
+        print(f"[{worker_id}] Task picked by another worker. Exiting.")
+        return
 
     task_id = processing.stem
     logfile = LOGS / f"{task_id}.log"
     worktree = None
     repo = None
+    repo_lock_fh = None
 
     try:
         meta, body = parse_task(processing)
@@ -609,7 +619,7 @@ def main():
         model_attempts = list(meta.get("model_attempts", []))
         prior_results = []
 
-        log(f"Processing task: {task_id}", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
+        log(f"[{worker_id}] Processing task: {task_id}", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
         log(f"Repo: {repo}", logfile, queue_summary_log=QUEUE_SUMMARY_LOG)
         log(f"Base branch: {base_branch}", logfile, queue_summary_log=QUEUE_SUMMARY_LOG)
         log(f"Branch: {branch}", logfile, queue_summary_log=QUEUE_SUMMARY_LOG)
@@ -623,6 +633,20 @@ def main():
 
         if not repo.exists():
             raise RuntimeError(f"Repo does not exist: {repo}")
+
+        # Per-repo lock: prevent concurrent access to the same repository
+        repo_key = hashlib.md5(str(repo.resolve()).encode()).hexdigest()[:12]
+        repo_lock_path = Path(f"/tmp/agent_os_repo_{repo_key}.lock")
+        repo_lock_fh = repo_lock_path.open("w")
+        try:
+            fcntl.flock(repo_lock_fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            repo_lock_fh.close()
+            repo_lock_fh = None
+            log(f"[{worker_id}] Repo {repo.name} locked by another worker. Returning task to inbox.", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
+            shutil.move(str(processing), str(INBOX / processing.name))
+            return
+        log(f"[{worker_id}] Acquired repo lock: {repo.name}", logfile, queue_summary_log=QUEUE_SUMMARY_LOG)
 
         worktree = ensure_worktree(cfg, repo, base_branch, branch, task_id, logfile, QUEUE_SUMMARY_LOG)
 
@@ -865,6 +889,12 @@ def main():
     finally:
         if repo is not None and worktree is not None:
             cleanup_worktree(repo, worktree, logfile, QUEUE_SUMMARY_LOG)
+        if repo_lock_fh is not None:
+            try:
+                fcntl.flock(repo_lock_fh.fileno(), fcntl.LOCK_UN)
+            except Exception:
+                pass
+            repo_lock_fh.close()
 
 
 if __name__ == "__main__":
