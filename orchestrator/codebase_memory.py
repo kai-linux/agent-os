@@ -80,24 +80,49 @@ def update_codebase_memory(repo: Path, task_id: str, result: dict, meta: dict):
 
     codebase_md.write_text(updated, encoding="utf-8")
 
-    # Commit and push on main
+    # Commit and push on main, with pull-and-retry to handle concurrent workers
+    base_branch = meta.get("base_branch", "main")
     try:
-        base_branch = meta.get("base_branch", "main")
-        subprocess.run(
-            ["git", "-C", str(repo), "add", "CODEBASE.md"],
-            check=True, capture_output=True,
-        )
-        subprocess.run(
-            ["git", "-C", str(repo), "commit", "-m",
-             f"chore: update CODEBASE.md after {task_id}"],
-            check=True, capture_output=True,
-        )
-        subprocess.run(
-            ["git", "-C", str(repo), "push", "origin", base_branch],
-            check=True, capture_output=True,
-        )
-        print(f"CODEBASE.md updated and pushed for {repo.name}")
-    except subprocess.CalledProcessError as e:
-        # Non-fatal — log and continue
-        stderr = e.stderr.decode(errors="replace").strip() if e.stderr else ""
-        print(f"Warning: failed to commit CODEBASE.md for {repo.name}: {stderr}")
+        for attempt in range(3):
+            try:
+                subprocess.run(
+                    ["git", "-C", str(repo), "add", "CODEBASE.md"],
+                    check=True, capture_output=True,
+                )
+                # Nothing staged means another worker already wrote the same content
+                result = subprocess.run(
+                    ["git", "-C", str(repo), "diff", "--cached", "--quiet"],
+                    capture_output=True,
+                )
+                if result.returncode == 0:
+                    print(f"CODEBASE.md unchanged for {repo.name}, skipping commit")
+                    return
+                subprocess.run(
+                    ["git", "-C", str(repo), "commit", "-m",
+                     f"chore: update CODEBASE.md after {task_id}"],
+                    check=True, capture_output=True,
+                )
+                subprocess.run(
+                    ["git", "-C", str(repo), "push", "origin", base_branch],
+                    check=True, capture_output=True,
+                )
+                print(f"CODEBASE.md updated and pushed for {repo.name}")
+                return
+            except subprocess.CalledProcessError as e:
+                stderr = e.stderr.decode(errors="replace").strip() if e.stderr else ""
+                if "rejected" in stderr or "non-fast-forward" in stderr:
+                    # Another worker pushed first — pull, re-apply our entry, retry
+                    subprocess.run(
+                        ["git", "-C", str(repo), "pull", "--rebase", "origin", base_branch],
+                        capture_output=True,
+                    )
+                    # Re-read and re-apply after rebase
+                    content = codebase_md.read_text(encoding="utf-8")
+                    if task_id not in content:
+                        updated2 = content.replace(anchor, anchor + "\n" + entry, 1) if anchor in content else content + f"\n{anchor}\n{entry}"
+                        codebase_md.write_text(updated2, encoding="utf-8")
+                    continue
+                raise
+        print(f"Warning: gave up updating CODEBASE.md for {repo.name} after 3 attempts")
+    except Exception as e:
+        print(f"Warning: failed to commit CODEBASE.md for {repo.name}: {e}")
