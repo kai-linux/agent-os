@@ -14,6 +14,12 @@ default_base_branch: main
 default_allow_push: true
 default_max_attempts: 4
 max_parallel_workers: 1
+test_timeout_minutes: 5             # Timeout for test commands (default: 5)
+
+# Per-repo test commands (keyed by resolved repo path or repo directory name)
+repo_configs:
+  /path/to/repo1:
+    test_command: "pytest"          # e.g. "npm test", "make test", "pytest -q"
 
 agent_fallbacks:
   implementation: [codex, claude, gemini, deepseek]
