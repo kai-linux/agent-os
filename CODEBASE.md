@@ -1,0 +1,31 @@
+# Codebase Memory
+
+> Auto-maintained by agent-os. Agents read this before starting work and update it on completion.
+
+## Architecture
+
+(Fill in once the project structure stabilises. Agents will append discoveries below.)
+
+## Key Files
+
+(Agents append important file paths and their purpose here.)
+
+## Known Issues / Gotchas
+
+(Agents append anything surprising or that blocked them.)
+
+## Recent Changes
+
+### 2026-03-17 — [task-20260317-213404-task-parallel-queue-workers] (#1 kai-linux/agent-os)
+Implemented parallel queue worker execution by creating a thin `orchestrator/supervisor.py` that spawns up to `max_parallel_workers` independent queue.py processes. Per-repo file locking (`fcntl.flock`) was added to `queue.py` so that no two workers can access the same repository simultaneously. Workers are identified by a `QUEUE_WORKER_ID` environment variable that appears in logs. Single-worker mode (`max_parallel_workers=1`) is unchanged in behavior.
+
+**Files:** `- example.config.yaml`, `- orchestrator/supervisor.py`, `- orchestrator/queue.py`, `- bin/run_queue.sh`
+
+**Decisions:**
+  - - Thin supervisor (new file) over refactoring queue.py to minimize diff and risk
+  - - Per-repo lock uses /tmp lock files with fcntl (no new dependencies, same mechanism as global queue lock)
+  - - Locked-repo workers return task to inbox and exit; supervisor respawns workers, so tasks eventually run when repo is free
+  - - Global flock in run_queue.sh kept on supervisor to prevent duplicate supervisor instances
+  - - Worker IDs (w0, w1, ...) are sequential integers from supervisor lifetime counter
+
+
