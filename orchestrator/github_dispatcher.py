@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import re
 from datetime import datetime
 from pathlib import Path
@@ -6,12 +8,10 @@ import yaml
 
 from orchestrator.paths import load_config, runtime_paths
 from orchestrator.gh_project import (
-    list_ready_issues,
+    get_ready_items,
+    set_item_status,
     edit_issue_labels,
     add_issue_comment,
-    find_project_item_for_issue,
-    get_status_field_and_option,
-    set_project_status,
 )
 
 
@@ -36,46 +36,11 @@ def parse_issue_body(body: str) -> dict:
     return {
         "goal": sections.get("goal", "").strip(),
         "success_criteria": sections.get("success criteria", "").strip(),
-        "repo_key": sections.get("repo", "").strip().lower(),
         "task_type": sections.get("task type", "").strip().lower() or "implementation",
         "agent_preference": sections.get("agent preference", "").strip().lower() or "auto",
         "constraints": sections.get("constraints", "").strip(),
         "context": sections.get("context", "").strip(),
     }
-
-
-def issue_labels(issue: dict) -> set[str]:
-    return {lbl["name"].lower() for lbl in issue.get("labels", [])}
-
-
-def repo_lookup(cfg: dict, project_key: str, repo_key: str | None):
-    project_cfg = cfg["github_projects"][project_key]
-    repos = project_cfg.get("repos", [])
-
-    if repo_key:
-        for repo in repos:
-            if repo["key"].lower() == repo_key.lower():
-                return repo
-
-    if len(repos) == 1:
-        return repos[0]
-
-    return None
-
-
-def issue_matches_project(issue: dict, project_cfg: dict) -> bool:
-    labels = issue_labels(issue)
-
-    required = {x.lower() for x in project_cfg.get("required_labels", [])}
-    excluded = {x.lower() for x in project_cfg.get("excluded_labels", [])}
-
-    if required and not required.issubset(labels):
-        return False
-
-    if excluded and labels.intersection(excluded):
-        return False
-
-    return True
 
 
 def build_mailbox_task(cfg: dict, project_key: str, repo_cfg: dict, issue: dict) -> tuple[str, str]:
@@ -134,66 +99,85 @@ def build_mailbox_task(cfg: dict, project_key: str, repo_cfg: dict, issue: dict)
 def dispatch_one():
     cfg = load_config()
     paths = runtime_paths(cfg)
+    owner = cfg["github_owner"]
 
+    # Build repo -> (project_key, project_cfg, repo_cfg) mapping
+    repo_to_project: dict[str, tuple[str, dict, dict]] = {}
     for project_key, project_cfg in cfg["github_projects"].items():
         for repo_cfg in project_cfg.get("repos", []):
-            repo_full_name = repo_cfg["github_repo"]
-            issues = list_ready_issues(repo_full_name, limit=20)
+            repo_to_project[repo_cfg["github_repo"]] = (project_key, project_cfg, repo_cfg)
 
-            for issue in issues:
-                if not issue_matches_project(issue, project_cfg):
-                    continue
+    # Query each unique project_number only once
+    queried: dict[int, tuple[dict, list[dict]]] = {}
+    for project_key, project_cfg in cfg["github_projects"].items():
+        pn = project_cfg["project_number"]
+        if pn in queried:
+            continue
+        ready_value = project_cfg.get("ready_value", "Ready")
+        try:
+            info, ready = get_ready_items(pn, owner, ready_value)
+            queried[pn] = (info, ready)
+        except Exception as e:
+            print(f"Warning: failed to query project {pn}: {e}")
+            continue
 
-                parsed = parse_issue_body(issue.get("body", ""))
-                desired_repo_key = parsed["repo_key"] or repo_cfg["key"]
-                selected_repo = repo_lookup(cfg, project_key, desired_repo_key)
+    # Dispatch first matching ready item
+    for pn, (info, ready_items) in queried.items():
+        for item in ready_items:
+            repo_full = item["repo"]
+            if repo_full not in repo_to_project:
+                continue
 
-                if selected_repo is None:
-                    continue
+            pk, pcfg, rcfg = repo_to_project[repo_full]
 
-                task_id, task_md = build_mailbox_task(cfg, project_key, selected_repo, issue)
-                task_path = paths["INBOX"] / f"{task_id}.md"
-                task_path.write_text(task_md, encoding="utf-8")
+            # Skip items with excluded labels
+            excluded = {x.lower() for x in pcfg.get("excluded_labels", [])}
+            if item["labels"].intersection(excluded):
+                continue
 
-                edit_issue_labels(
-                    repo_full_name,
-                    issue["number"],
-                    add=["in-progress", "agent-dispatched"],
-                    remove=project_cfg.get("required_labels", []),
-                )
-                
-                add_issue_comment(
-                    repo_full_name,
-                    issue["number"],
-                    f"🤖 Dispatched to orchestrator.\n\nTask ID: `{task_id}`\nProject key: `{project_key}`",
-                )
+            # Build issue dict for build_mailbox_task
+            issue = {
+                "number": item["number"],
+                "title": item["title"],
+                "body": item["body"],
+                "url": item["url"],
+                "labels": [{"name": l} for l in item["labels"]],
+            }
 
+            task_id, task_md = build_mailbox_task(cfg, pk, rcfg, issue)
+            task_path = paths["INBOX"] / f"{task_id}.md"
+            task_path.write_text(task_md, encoding="utf-8")
+
+            # Update labels for visibility
+            edit_issue_labels(
+                repo_full,
+                item["number"],
+                add=["in-progress", "agent-dispatched"],
+                remove=pcfg.get("required_labels", []),
+            )
+
+            add_issue_comment(
+                repo_full,
+                item["number"],
+                f"🤖 Dispatched to orchestrator.\n\nTask ID: `{task_id}`\nProject key: `{pk}`",
+            )
+
+            # Set project Status to In Progress
+            in_progress_value = pcfg.get("in_progress_value", "In Progress")
+            option_id = info["status_options"].get(in_progress_value)
+            if info["status_field_id"] and option_id:
                 try:
-                    item = find_project_item_for_issue(
-                        project_cfg["project_number"],
-                        cfg["github_owner"],
-                        issue["url"],
+                    set_item_status(
+                        info["project_id"],
+                        item["item_id"],
+                        info["status_field_id"],
+                        option_id,
                     )
-                    if item:
-                        field_id, option_id = get_status_field_and_option(
-                            project_cfg["project_number"],
-                            cfg["github_owner"],
-                            project_cfg["status_field"],
-                            project_cfg["in_progress_value"],
-                        )
-                        set_project_status(
-                            project_cfg["project_number"],
-                            cfg["github_owner"],
-                            item["project"]["id"],
-                            item["id"],
-                            field_id,
-                            option_id,
-                        )
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"Warning: failed to set project status: {e}")
 
-                print(f"Dispatched {repo_full_name}#{issue['number']} -> {task_path}")
-                return
+            print(f"Dispatched {repo_full}#{item['number']} -> {task_path}")
+            return
 
     print("No dispatchable issues found.")
 

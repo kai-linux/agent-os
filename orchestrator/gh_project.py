@@ -15,35 +15,151 @@ def gh_json(cmd: list[str]):
     return json.loads(out) if out else None
 
 
+# ---------------------------------------------------------------------------
+# GraphQL-based project query – single call returns project ID, status field
+# with all options, and every item with its current Status value.
+# ---------------------------------------------------------------------------
+
+_PROJECT_QUERY = """
+query($owner: String!, $number: Int!) {{
+  {owner_type}(login: $owner) {{
+    projectV2(number: $number) {{
+      id
+      field(name: "Status") {{
+        ... on ProjectV2SingleSelectField {{
+          id
+          options {{ id name }}
+        }}
+      }}
+      items(first: 100) {{
+        nodes {{
+          id
+          fieldValueByName(name: "Status") {{
+            ... on ProjectV2ItemFieldSingleSelectValue {{
+              name
+            }}
+          }}
+          content {{
+            ... on Issue {{
+              number
+              title
+              body
+              url
+              state
+              labels(first: 20) {{
+                nodes {{ name }}
+              }}
+              repository {{
+                nameWithOwner
+              }}
+            }}
+          }}
+        }}
+      }}
+    }}
+  }}
+}}
+"""
+
+
+def query_project(project_number: int, owner: str) -> dict:
+    """Fetch project metadata + all items in one GraphQL call.
+
+    Returns dict with keys:
+        project_id, status_field_id, status_options (name->id),
+        items (list of dicts with item_id, status, number, title, body, url, state, labels, repo)
+    """
+    for owner_type in ["user", "organization"]:
+        query = _PROJECT_QUERY.format(owner_type=owner_type)
+        try:
+            raw = gh([
+                "api", "graphql",
+                "-f", f"query={query}",
+                "-F", f"owner={owner}",
+                "-F", f"number={project_number}",
+            ])
+            data = json.loads(raw)
+            project_data = data["data"][owner_type]["projectV2"]
+            break
+        except Exception:
+            continue
+    else:
+        raise RuntimeError(f"Could not query project {project_number} for owner {owner}")
+
+    field_info = project_data.get("field") or {}
+    status_options = {opt["name"]: opt["id"] for opt in field_info.get("options", [])}
+
+    items = []
+    for node in project_data["items"]["nodes"]:
+        content = node.get("content")
+        if not content or not content.get("number"):
+            continue  # skip drafts / PRs without number
+
+        fv = node.get("fieldValueByName")
+        status_name = fv.get("name") if fv else None
+
+        label_nodes = (content.get("labels") or {}).get("nodes", [])
+        labels = {lbl["name"].lower() for lbl in label_nodes}
+
+        items.append({
+            "item_id": node["id"],
+            "status": status_name,
+            "number": content["number"],
+            "title": content.get("title", ""),
+            "body": content.get("body", ""),
+            "url": content["url"],
+            "state": content.get("state", "OPEN"),
+            "labels": labels,
+            "repo": content.get("repository", {}).get("nameWithOwner", ""),
+        })
+
+    return {
+        "project_id": project_data["id"],
+        "status_field_id": field_info.get("id"),
+        "status_options": status_options,
+        "items": items,
+    }
+
+
+def get_ready_items(project_number: int, owner: str, ready_value: str = "Ready") -> tuple[dict, list[dict]]:
+    """Return (project_info, ready_items) where ready_items have Status=ready_value and are OPEN."""
+    info = query_project(project_number, owner)
+    ready = [
+        item for item in info["items"]
+        if item["status"] == ready_value and item["state"] == "OPEN"
+    ]
+    return info, ready
+
+
+def set_item_status(project_id: str, item_id: str, field_id: str, option_id: str):
+    """Update a project item's Status field using IDs obtained from query_project."""
+    gh([
+        "project", "item-edit",
+        "--id", item_id,
+        "--project-id", project_id,
+        "--field-id", field_id,
+        "--single-select-option-id", option_id,
+    ])
+
+
+# ---------------------------------------------------------------------------
+# Issue helpers (unchanged)
+# ---------------------------------------------------------------------------
+
 def list_ready_issues(repo: str, limit: int = 20):
-    return gh_json(
-        [
-            "issue",
-            "list",
-            "-R",
-            repo,
-            "--limit",
-            str(limit),
-            "--search",
-            "is:open label:ready",
-            "--json",
-            "number,title,body,labels,url,updatedAt",
-        ]
-    ) or []
+    return gh_json([
+        "issue", "list", "-R", repo,
+        "--limit", str(limit),
+        "--search", "is:open label:ready",
+        "--json", "number,title,body,labels,url,updatedAt",
+    ]) or []
 
 
 def get_issue(repo: str, number: int):
-    return gh_json(
-        [
-            "issue",
-            "view",
-            str(number),
-            "-R",
-            repo,
-            "--json",
-            "number,title,body,labels,url,updatedAt,comments",
-        ]
-    )
+    return gh_json([
+        "issue", "view", str(number), "-R", repo,
+        "--json", "number,title,body,labels,url,updatedAt,comments",
+    ])
 
 
 def add_issue_comment(repo: str, number: int, body: str):
@@ -61,89 +177,13 @@ def edit_issue_labels(repo: str, number: int, add=None, remove=None):
 
 def create_pr_for_branch(repo: str, branch: str, title: str, body: str) -> Optional[str]:
     try:
-        out = gh_json(
-            [
-                "pr",
-                "create",
-                "-R",
-                repo,
-                "--head",
-                branch,
-                "--title",
-                title,
-                "--body",
-                body,
-                "--json",
-                "url,number",
-            ]
-        )
+        out = gh_json([
+            "pr", "create", "-R", repo,
+            "--head", branch,
+            "--title", title,
+            "--body", body,
+            "--json", "url,number",
+        ])
         return out["url"] if out else None
     except Exception:
         return None
-
-
-def field_list(project_number: int, owner: str):
-    return gh_json(
-        [
-            "project",
-            "field-list",
-            str(project_number),
-            "--owner",
-            owner,
-            "--format",
-            "json",
-        ]
-    ) or []
-
-
-def item_list(project_number: int, owner: str, query: Optional[str] = None):
-    cmd = [
-        "project",
-        "item-list",
-        str(project_number),
-        "--owner",
-        owner,
-        "--format",
-        "json",
-    ]
-    if query:
-        cmd += ["--query", query]
-    return gh_json(cmd) or []
-
-
-def find_project_item_for_issue(project_number: int, owner: str, issue_url: str):
-    items = item_list(project_number, owner)
-    for item in items:
-        content = item.get("content") or {}
-        if content.get("url") == issue_url:
-            return item
-    return None
-
-
-def get_status_field_and_option(project_number: int, owner: str, field_name: str, option_name: str):
-    fields = field_list(project_number, owner)
-    for field in fields:
-        if field.get("name") != field_name:
-            continue
-        field_id = field.get("id")
-        for opt in field.get("options", []):
-            if opt.get("name") == option_name:
-                return field_id, opt.get("id")
-    raise RuntimeError(f"Could not resolve project field '{field_name}' option '{option_name}'")
-
-
-def set_project_status(project_number: int, owner: str, project_id: str, item_id: str, field_id: str, option_id: str):
-    gh(
-        [
-            "project",
-            "item-edit",
-            "--id",
-            item_id,
-            "--project-id",
-            project_id,
-            "--field-id",
-            field_id,
-            "--single-select-option-id",
-            option_id,
-        ]
-    )

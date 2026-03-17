@@ -1,10 +1,11 @@
+from __future__ import annotations
+
 from orchestrator.paths import load_config
 from orchestrator.gh_project import (
     add_issue_comment,
     edit_issue_labels,
-    find_project_item_for_issue,
-    get_status_field_and_option,
-    set_project_status,
+    query_project,
+    set_item_status,
     create_pr_for_branch,
     gh,
 )
@@ -26,6 +27,7 @@ def sync_result(meta: dict, result: dict, commit_hash: str | None):
         return
 
     project_cfg = cfg["github_projects"][project_key]
+    owner = cfg["github_owner"]
 
     status = result.get("status", "blocked")
     summary = result.get("summary", "No summary.")
@@ -69,8 +71,8 @@ def sync_result(meta: dict, result: dict, commit_hash: str | None):
         # Close the GitHub issue
         try:
             gh(["issue", "close", str(issue_number), "-R", repo])
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Warning: failed to close issue #{issue_number}: {e}")
 
     elif status in ("partial", "blocked"):
         edit_issue_labels(
@@ -90,26 +92,26 @@ def sync_result(meta: dict, result: dict, commit_hash: str | None):
         )
         status_value = project_cfg["blocked_value"]
 
+    # Update project board Status via GraphQL
     try:
-        item = find_project_item_for_issue(
-            project_cfg["project_number"],
-            cfg["github_owner"],
-            issue_url,
-        )
-        if item:
-            field_id, option_id = get_status_field_and_option(
-                project_cfg["project_number"],
-                cfg["github_owner"],
-                project_cfg["status_field"],
-                status_value,
-            )
-            set_project_status(
-                project_cfg["project_number"],
-                cfg["github_owner"],
-                item["project"]["id"],
-                item["id"],
-                field_id,
-                option_id,
-            )
-    except Exception:
-        pass
+        info = query_project(project_cfg["project_number"], owner)
+        option_id = info["status_options"].get(status_value)
+        if not info["status_field_id"] or not option_id:
+            print(f"Warning: status option '{status_value}' not found in project")
+            return
+
+        # Find the item matching this issue
+        for item in info["items"]:
+            if item["url"] == issue_url:
+                set_item_status(
+                    info["project_id"],
+                    item["item_id"],
+                    info["status_field_id"],
+                    option_id,
+                )
+                print(f"Project status set to '{status_value}' for #{issue_number}")
+                break
+        else:
+            print(f"Warning: issue #{issue_number} not found in project {project_cfg['project_number']}")
+    except Exception as e:
+        print(f"Warning: failed to update project status for #{issue_number}: {e}")

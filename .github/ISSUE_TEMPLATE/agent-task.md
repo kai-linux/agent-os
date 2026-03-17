@@ -2,7 +2,7 @@
 name: Agent task
 about: Work item for the AI team
 title: "[task] "
-labels: ["ready", "task:implementation", "prio:normal"]
+labels: ["task:implementation", "prio:normal"]
 assignees: []
 ---
 
@@ -13,9 +13,6 @@ Describe the objective in one short paragraph.
 - Concrete criterion
 - Concrete criterion
 - Concrete criterion
-
-## Repo
-writeaibook
 
 ## Task Type
 implementation
