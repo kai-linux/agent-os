@@ -3,6 +3,7 @@ config.*
 mailbox/*
 logs/*
 *.log
+runtime/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
