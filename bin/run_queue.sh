@@ -15,4 +15,4 @@ export GEMINI_MODEL="gemini-2.5-flash"
 cd "$ROOT"
 
 flock -n /tmp/agent_os_queue.lock \
-"$ROOT/.venv/bin/python3" -m orchestrator.queue
+"$ROOT/.venv/bin/python3" -m orchestrator.supervisor
