@@ -1,16 +1,32 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="${ORCH_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-export ORCH_ROOT="$ROOT"
+AGENT="$1"
+WORKDIR="$2"
+PROMPT="$3"
 
-export CODEX_BIN="/home/kai/.nvm/versions/node/v24.13.0/bin/codex"
-export CLAUDE_BIN="/home/kai/.nvm/versions/node/v24.13.0/bin/claude"
-export GEMINI_BIN="/home/kai/.nvm/versions/node/v24.13.0/bin/gemini"
-export CLINE_BIN="/home/kai/.nvm/versions/node/v24.13.0/bin/cline"
-export DEEPSEEK_RUNNER="$ROOT/bin/run_deepseek.sh"
+CODEX_BIN="${CODEX_BIN:-/home/kai/.nvm/versions/node/v24.13.0/bin/codex}"
+CLAUDE_BIN="${CLAUDE_BIN:-/home/kai/.nvm/versions/node/v24.13.0/bin/claude}"
+GEMINI_BIN="${GEMINI_BIN:-/home/kai/.nvm/versions/node/v24.13.0/bin/gemini}"
+DEEPSEEK_RUNNER="${DEEPSEEK_RUNNER:-/home/kai/agent-os/bin/run_deepseek.sh}"
+GEMINI_MODEL="${GEMINI_MODEL:-gemini-2.5-flash}"
 
-cd "$ROOT"
+cd "$WORKDIR"
 
-flock -n /tmp/agent_os_queue.lock \
-"$ROOT/.venv/bin/python3" -m orchestrator.queue
+if [ "$AGENT" = "codex" ]; then
+    "$CODEX_BIN" exec --full-auto --skip-git-repo-check "$(cat "$PROMPT")"
+elif [ "$AGENT" = "claude" ]; then
+    "$CLAUDE_BIN" --dangerously-skip-permissions -p "$(cat "$PROMPT")"
+elif [ "$AGENT" = "gemini" ]; then
+    "$GEMINI_BIN" -p "$(cat "$PROMPT")" -m "$GEMINI_MODEL" --output-format json
+elif [ "$AGENT" = "deepseek" ]; then
+    if [ -x "$DEEPSEEK_RUNNER" ]; then
+        "$DEEPSEEK_RUNNER" "$WORKDIR" "$PROMPT"
+    else
+        echo "DeepSeek requested but runner is missing or not executable: $DEEPSEEK_RUNNER"
+        exit 1
+    fi
+else
+    echo "Unknown agent: $AGENT"
+    exit 1
+fi
