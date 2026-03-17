@@ -139,11 +139,12 @@ def query_project(project_number: int, owner: str) -> dict:
 
 
 def get_ready_items(project_number: int, owner: str, ready_value: str = "Ready") -> tuple[dict, list[dict]]:
-    """Return (project_info, ready_items) where ready_items have Status=ready_value and are OPEN."""
+    """Return (project_info, ready_items) where items are OPEN and have Status=ready_value OR 'ready' label."""
     info = query_project(project_number, owner)
     ready = [
         item for item in info["items"]
-        if item["status"] == ready_value and item["state"] == "OPEN"
+        if item["state"] == "OPEN"
+        and (item["status"] == ready_value or "ready" in item["labels"])
     ]
     return info, ready
 
