@@ -158,10 +158,10 @@ def dispatch_one():
                 edit_issue_labels(
                     repo_full_name,
                     issue["number"],
-                    add=["in-progress"],
+                    add=["in-progress", "agent-dispatched"],
                     remove=project_cfg.get("required_labels", []),
                 )
-
+                
                 add_issue_comment(
                     repo_full_name,
                     issue["number"],
