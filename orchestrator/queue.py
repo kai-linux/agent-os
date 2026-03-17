@@ -641,14 +641,7 @@ def main():
             meta_for_prompt["model_attempts"] = model_attempts
             prompt_file = write_prompt(task_id, meta_for_prompt, body, current_agent, prior_results, ROOT)
 
-            if model_attempts:
-                send_telegram(
-                    cfg,
-                    f"🔁 Fallback\nTask: {task_id}\nRepo: {repo.name}\nBranch: {branch}\nNext model: {current_agent}\nTask type: {task_type}",
-                    logfile,
-                    QUEUE_SUMMARY_LOG,
-                )
-            else:
+            if not model_attempts:
                 send_telegram(
                     cfg,
                     f"🚀 Started\nTask: {task_id}\nRepo: {repo.name}\nBranch: {branch}\nModel: {current_agent}\nTask type: {task_type}",
