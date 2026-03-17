@@ -9,6 +9,7 @@ import yaml
 
 from orchestrator.paths import load_config, runtime_paths
 from orchestrator.github_sync import sync_result
+from orchestrator.codebase_memory import read_codebase_context, update_codebase_memory
 
 
 def now_ts():
@@ -148,9 +149,11 @@ ATTEMPTED_APPROACHES:
     return "\n".join(chunks)
 
 
-def write_prompt(task_id: str, meta: dict, body: str, current_agent: str, prior_results: list[dict], root: Path):
+def write_prompt(task_id: str, meta: dict, body: str, current_agent: str, prior_results: list[dict], root: Path, worktree: Path | None = None):
     prompt_file = root / "runtime" / "tmp" / f"{task_id}.txt"
     prompt_file.parent.mkdir(parents=True, exist_ok=True)
+
+    codebase_context = read_codebase_context(worktree) if worktree else ""
 
     prompt = f"""You are a coding worker running in a controlled automation environment.
 
@@ -164,7 +167,7 @@ Task metadata:
 
 Task instructions:
 {body}
-
+{codebase_context}
 Prior model attempts in this task lineage:
 {render_prior_attempt_history(prior_results)}
 
@@ -639,7 +642,7 @@ def main():
             meta_for_prompt = dict(meta)
             meta_for_prompt["resolved_agent"] = current_agent
             meta_for_prompt["model_attempts"] = model_attempts
-            prompt_file = write_prompt(task_id, meta_for_prompt, body, current_agent, prior_results, ROOT)
+            prompt_file = write_prompt(task_id, meta_for_prompt, body, current_agent, prior_results, ROOT, worktree=worktree)
 
             if not model_attempts:
                 send_telegram(
@@ -773,6 +776,13 @@ def main():
             sync_result(meta, final_result, commit_hash)
         except Exception as e:
             log(f"GitHub sync warning: {e}", logfile, queue_summary_log=QUEUE_SUMMARY_LOG)
+
+        # Update CODEBASE.md memory on the main repo branch after completion.
+        if final_result["status"] == "complete":
+            try:
+                update_codebase_memory(repo, task_id, final_result, meta)
+            except Exception as e:
+                log(f"CODEBASE.md update warning: {e}", logfile, queue_summary_log=QUEUE_SUMMARY_LOG)
 
         if final_result["status"] == "complete":
             log("Final queue state: done", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
