@@ -1,0 +1,147 @@
+root_dir: "/home/kai/agent-os"
+
+mailbox_dir: "/home/kai/agent-os/runtime/mailbox"
+logs_dir: "/home/kai/agent-os/runtime/logs"
+worktrees_dir: "/srv/worktrees"
+
+#bookgenerator = writeaibook
+allowed_repos:
+  - /home/kai/agent-os
+  - /home/kai/bookgenerator
+  - /home/kai/content-automation
+  - /home/kai/kdp
+  - /home/kai/browser-automation
+
+default_agent: auto
+default_task_type: implementation
+formatter_model: haiku
+max_runtime_minutes: 40
+default_base_branch: main
+default_allow_push: true
+default_max_attempts: 4
+
+agent_fallbacks:
+  implementation: [codex, claude, gemini, deepseek]
+  debugging: [claude, gemini, codex, deepseek]
+  architecture: [claude, gemini, codex, deepseek]
+  research: [claude, gemini, codex, deepseek]
+  docs: [claude, gemini, codex, deepseek]
+  browser_automation: [claude, gemini, codex, deepseek]
+
+agent_timeout_minutes:
+  codex: 40
+  claude: 45
+  gemini: 35
+  deepseek: 30
+
+github_owner: "kai-linux"
+github_projects:
+  writeaibook:
+    project_number: 1
+    title: "Grow writeaibook"
+    repos:
+      - key: "writeaibook"
+        github_repo: "kai-linux/bookgenerator"
+        local_repo: "/home/kai/bookgenerator"
+    required_labels:
+      - "ready"
+    excluded_labels:
+      - "blocked"
+      - "in-progress"
+      - "review"
+      - "done"
+      - "agent-dispatched"
+    status_field: "Status"
+    ready_value: "Ready"
+    in_progress_value: "In Progress"
+    review_value: "Review"
+    blocked_value: "Blocked"
+    done_value: "Done"
+
+  agent-os:
+    project_number: 1
+    title: "Grow writeaibook"
+    repos:
+      - key: "agent-os"
+        github_repo: "kai-linux/agent-os"
+        local_repo: "/home/kai/agent-os"
+    required_labels:
+      - "ready"
+    excluded_labels:
+      - "blocked"
+      - "in-progress"
+    status_field: "Status"
+    ready_value: "Ready"
+    in_progress_value: "In Progress"
+    review_value: "Review"
+    blocked_value: "Blocked"
+    done_value: "Done"
+
+  content-automation:
+    project_number: 1
+    title: "Grow writeaibook"
+    repos:
+      - key: "content-automation"
+        github_repo: "kai-linux/content-automation"
+        local_repo: "/home/kai/content-automation"
+    required_labels:
+      - "ready"
+    excluded_labels:
+      - "blocked"
+      - "in-progress"
+    status_field: "Status"
+    ready_value: "Ready"
+    in_progress_value: "In Progress"
+    review_value: "Review"
+    blocked_value: "Blocked"
+    done_value: "Done"
+
+  kdp:
+    project_number: 2
+    title: "kdp"
+    repos:
+      - key: "kdp"
+        github_repo: "kai-linux/kdp"
+        local_repo: "/home/kai/kdp"
+    required_labels:
+      - "ready"
+    excluded_labels:
+      - "blocked"
+      - "in-progress"
+      - "done"
+      - "agent-dispatched"
+    status_field: "Status"
+    ready_value: "Ready"
+    in_progress_value: "In progress"
+    review_value: "In review"
+    blocked_value: "Blocked"
+    done_value: "Done"
+
+  browser-automation:
+    project_number: 1
+    title: "Grow writeaibook"
+    repos:
+      - key: "browser-automation"
+        github_repo: "kai-linux/browser-automation"
+        local_repo: "/home/kai/browser-automation"
+    required_labels:
+      - "ready"
+    excluded_labels:
+      - "blocked"
+      - "in-progress"
+    status_field: "Status"
+    ready_value: "Ready"
+    in_progress_value: "In Progress"
+    review_value: "Review"
+    blocked_value: "Blocked"
+    done_value: "Done"
+
+github_repos:
+  writeaibook: "kai-linux/bookgenerator"
+  agent-os: "kai-linux/agent-os"
+  content-automation: "kai-linux/content-automation"
+  kdp: "kai-linux/kdp"
+  browser-automation: "kai-linux/browser-automation"
+
+telegram_bot_token: ***REDACTED-BOT-TOKEN***
+telegram_chat_id: '391222697'
