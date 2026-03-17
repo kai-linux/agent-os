@@ -11,14 +11,14 @@ or a well-structured spec), extract and structure it into a clean task specifica
 
 Return ONLY valid JSON (no markdown fences, no commentary) with exactly these fields:
 
-{
+{{
   "goal": "Clear one-paragraph objective describing what needs to be done",
   "success_criteria": "- Criterion 1\\n- Criterion 2\\n- Criterion 3",
   "task_type": "implementation",
   "agent_preference": "auto",
   "constraints": "- Constraint 1\\n- Prefer minimal diffs",
   "context": "Any additional context, or None"
-}
+}}
 
 Rules:
 - goal: expand terse notes into a clear, actionable objective. Keep the original intent.
