@@ -660,7 +660,15 @@ def main():
             log(f"Timeout minutes for {current_agent}: {timeout_minutes}", logfile, queue_summary_log=QUEUE_SUMMARY_LOG)
 
             try:
-                run_agent(current_agent, worktree, prompt_file, logfile, timeout_minutes=timeout_minutes, root=ROOT, queue_summary_log=QUEUE_SUMMARY_LOG)
+                run_agent(
+                    current_agent,
+                    worktree,
+                    prompt_file,
+                    logfile,
+                    timeout_minutes=timeout_minutes,
+                    root=ROOT,
+                    queue_summary_log=QUEUE_SUMMARY_LOG,
+                )
             except subprocess.TimeoutExpired:
                 timeout_result = {
                     "agent": current_agent,
@@ -684,6 +692,38 @@ def main():
                     final_agent = current_agent
                     break
                 continue
+            except Exception as e:
+                runner_result = {
+                    "agent": current_agent,
+                    "status": "blocked",
+                    "summary": f"{current_agent} failed before producing a valid result file.",
+                    "done": ["- Agent runner was invoked."],
+                    "blockers": [f"- Runner/model failure: {e}"],
+                    "next_step": "Try the next fallback model. If all models fail, inspect runner config, credentials, or quotas.",
+                    "files_changed": ["- Unknown / inspect worktree"],
+                    "tests_run": ["- None"],
+                    "decisions": ["- Treat runner failure as model-level failure and continue fallback chain if possible."],
+                    "risks": ["- Model quota/auth/CLI issues may affect multiple tasks."],
+                    "attempted_approaches": [f"- Attempted model: {current_agent}", f"- Failure: {e}"],
+                    "raw": "",
+                }
+                model_attempts.append(current_agent)
+                prior_results.append(runner_result)
+                log(f"{current_agent} runner failure: {e}", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
+
+                next_agent = get_next_agent(meta, cfg, model_attempts)
+                if next_agent is not None:
+                    send_telegram(
+                        cfg,
+                        f"🔁 Fallback\nTask: {task_id}\nRepo: {repo.name}\nBranch: {branch}\nPrevious model: {current_agent}\nNext model: {next_agent}\nReason: runner/model failure",
+                        logfile,
+                        QUEUE_SUMMARY_LOG,
+                    )
+                    continue
+
+                final_result = runner_result
+                final_agent = current_agent
+                break
 
             result = parse_agent_result(worktree)
             result["agent"] = current_agent
