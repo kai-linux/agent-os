@@ -687,11 +687,13 @@ def main():
                 model_attempts.append(current_agent)
                 prior_results.append(timeout_result)
                 log(f"{current_agent} timed out.", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
+
                 if get_next_agent(meta, cfg, model_attempts) is None:
                     final_result = timeout_result
                     final_agent = current_agent
                     break
                 continue
+
             except Exception as e:
                 runner_result = {
                     "agent": current_agent,
@@ -832,8 +834,29 @@ def main():
         log(f"ERROR: {e}", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
         log(traceback.format_exc(), logfile, queue_summary_log=QUEUE_SUMMARY_LOG)
         log("Final queue state: failed", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
+
+        failure_result = {
+            "status": "blocked",
+            "summary": f"Queue execution failed before a valid agent result was produced: {e}",
+            "done": ["- Task was dispatched and execution started."],
+            "blockers": [f"- Hard execution failure: {e}"],
+            "next_step": "Inspect the task log and agent runner configuration, then retry.",
+            "files_changed": ["- Unknown"],
+            "tests_run": ["- None"],
+            "decisions": ["- Execution aborted on runner error"],
+            "risks": ["- GitHub issue may remain in-progress without sync unless updated here"],
+            "attempted_approaches": ["- Queue attempted to invoke the configured agent runner"],
+            "raw": "",
+        }
+
+        try:
+            sync_result(meta, failure_result, None)
+        except Exception as sync_err:
+            log(f"GitHub sync warning during exception handling: {sync_err}", logfile, queue_summary_log=QUEUE_SUMMARY_LOG)
+
         if processing.exists():
             shutil.move(str(processing), str(FAILED / processing.name))
+
         send_telegram(cfg, f"❌ Error\nTask: {task_id}\nError: {e}", logfile, QUEUE_SUMMARY_LOG)
         raise
     finally:
