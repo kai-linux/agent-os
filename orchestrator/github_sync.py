@@ -12,14 +12,19 @@ from orchestrator.gh_project import (
 def sync_result(meta: dict, result: dict, commit_hash: str | None):
     cfg = load_config()
 
+    project_key = meta.get("github_project_key")
     repo = meta.get("github_repo")
     issue_number = meta.get("github_issue_number")
     issue_url = meta.get("github_issue_url")
     branch = meta.get("branch")
     task_id = meta.get("task_id")
 
+    if not project_key or project_key not in cfg["github_projects"]:
+        return
     if not repo or not issue_number or not issue_url:
         return
+
+    project_cfg = cfg["github_projects"][project_key]
 
     status = result.get("status", "blocked")
     summary = result.get("summary", "No summary.")
@@ -53,25 +58,29 @@ def sync_result(meta: dict, result: dict, commit_hash: str | None):
 
     if status == "complete":
         edit_issue_labels(repo, issue_number, add=["review"], remove=["in-progress", "ready", "blocked"])
-        status_value = cfg["github_project_review_value"]
+        status_value = project_cfg["review_value"]
     elif status in ("partial", "blocked"):
         edit_issue_labels(repo, issue_number, add=["blocked"], remove=["in-progress", "ready"])
-        status_value = cfg["github_project_blocked_value"]
+        status_value = project_cfg["blocked_value"]
     else:
         edit_issue_labels(repo, issue_number, add=["blocked"], remove=["in-progress", "ready"])
-        status_value = cfg["github_project_blocked_value"]
+        status_value = project_cfg["blocked_value"]
 
     try:
-        item = find_project_item_for_issue(cfg["github_project_number"], cfg["github_owner"], issue_url)
+        item = find_project_item_for_issue(
+            project_cfg["project_number"],
+            cfg["github_owner"],
+            issue_url,
+        )
         if item:
             field_id, option_id = get_status_field_and_option(
-                cfg["github_project_number"],
+                project_cfg["project_number"],
                 cfg["github_owner"],
-                cfg["github_project_status_field"],
+                project_cfg["status_field"],
                 status_value,
             )
             set_project_status(
-                cfg["github_project_number"],
+                project_cfg["project_number"],
                 cfg["github_owner"],
                 item["project"]["id"],
                 item["id"],

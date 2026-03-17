@@ -22,14 +22,7 @@ def load_config():
     cfg.setdefault("default_allow_push", True)
     cfg.setdefault("default_max_attempts", 4)
     cfg.setdefault("github_owner", "")
-    cfg.setdefault("github_project_number", 0)
-    cfg.setdefault("github_project_status_field", "Status")
-    cfg.setdefault("github_project_ready_value", "Ready")
-    cfg.setdefault("github_project_in_progress_value", "In Progress")
-    cfg.setdefault("github_project_review_value", "Review")
-    cfg.setdefault("github_project_blocked_value", "Blocked")
-    cfg.setdefault("github_project_done_value", "Done")
-    cfg.setdefault("github_repos", {})
+    cfg.setdefault("github_projects", {})
 
     return cfg
 
