@@ -6,7 +6,7 @@ from typing import Optional
 def gh(cmd: list[str], *, check: bool = True) -> str:
     result = subprocess.run(["gh", *cmd], capture_output=True, text=True)
     if check and result.returncode != 0:
-        raise RuntimeError(f"gh command failed: {' '.join(cmd)}\n{result.stderr}")
+        raise RuntimeError(f"gh {' '.join(cmd[:3])}... exit {result.returncode}: {result.stderr.strip()}")
     return result.stdout.strip()
 
 
@@ -25,10 +25,13 @@ query($owner: String!, $number: Int!) {{
   {owner_type}(login: $owner) {{
     projectV2(number: $number) {{
       id
-      field(name: "Status") {{
-        ... on ProjectV2SingleSelectField {{
-          id
-          options {{ id name }}
+      fields(first: 20) {{
+        nodes {{
+          ... on ProjectV2SingleSelectField {{
+            id
+            name
+            options {{ id name }}
+          }}
         }}
       }}
       items(first: 100) {{
@@ -69,6 +72,7 @@ def query_project(project_number: int, owner: str) -> dict:
         project_id, status_field_id, status_options (name->id),
         items (list of dicts with item_id, status, number, title, body, url, state, labels, repo)
     """
+    last_error = None
     for owner_type in ["user", "organization"]:
         query = _PROJECT_QUERY.format(owner_type=owner_type)
         try:
@@ -79,14 +83,27 @@ def query_project(project_number: int, owner: str) -> dict:
                 "-F", f"number={project_number}",
             ])
             data = json.loads(raw)
+            # Check for GraphQL errors
+            if "errors" in data:
+                last_error = data["errors"]
+                continue
             project_data = data["data"][owner_type]["projectV2"]
+            if project_data is None:
+                last_error = f"{owner_type} '{owner}' has no projectV2 #{project_number}"
+                continue
             break
-        except Exception:
+        except Exception as e:
+            last_error = e
             continue
     else:
-        raise RuntimeError(f"Could not query project {project_number} for owner {owner}")
+        raise RuntimeError(f"Could not query project {project_number} for owner {owner}: {last_error}")
 
-    field_info = project_data.get("field") or {}
+    # Find the "Status" field among all fields
+    field_info = {}
+    for f in (project_data.get("fields") or {}).get("nodes", []):
+        if f.get("name") == "Status":
+            field_info = f
+            break
     status_options = {opt["name"]: opt["id"] for opt in field_info.get("options", [])}
 
     items = []
