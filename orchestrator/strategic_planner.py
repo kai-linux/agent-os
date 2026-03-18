@@ -133,6 +133,40 @@ def _open_issues_summary(repo: str) -> str:
     return "\n".join(lines)
 
 
+def _backlog_issues(repo: str) -> list[dict]:
+    """Return open issues that are NOT in-progress/ready/done (i.e. backlog candidates)."""
+    raw = _gh(["issue", "list", "--repo", repo, "--state", "open",
+               "--json", "number,title,body,labels,createdAt",
+               "--limit", "50"])
+    if not raw:
+        return []
+    try:
+        issues = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    backlog = []
+    for i in issues:
+        label_names = {l.get("name", "").lower() for l in i.get("labels", [])}
+        # Skip issues already dispatched or in progress
+        if label_names & {"in-progress", "agent-dispatched", "ready", "done"}:
+            continue
+        backlog.append(i)
+    return backlog
+
+
+def _format_backlog_for_prompt(issues: list[dict]) -> str:
+    """Format backlog issues for the planner prompt."""
+    if not issues:
+        return "(no backlog issues)"
+    lines = []
+    for i in issues:
+        labels = ", ".join(l.get("name", "") for l in i.get("labels", []))
+        lbl = f" [{labels}]" if labels else ""
+        body_preview = (i.get("body") or "")[:200].replace("\n", " ")
+        lines.append(f"- #{i['number']}: {i['title']}{lbl}\n  {body_preview}")
+    return "\n".join(lines)
+
+
 def _read_strategy(repo_path: Path) -> str:
     """Read STRATEGY.md from a repo, returning content or empty string."""
     strategy_md = repo_path / "STRATEGY.md"
@@ -322,12 +356,12 @@ def _recent_metrics_summary(cfg: dict) -> str:
 # ---------------------------------------------------------------------------
 
 PLAN_PROMPT = """You are the Strategic Planner for an autonomous AI software team.
-Your job is to create next week's sprint plan: exactly {plan_size} prioritized,
-atomic, executable tasks that move the product forward.
+Your job is to select next week's sprint: exactly {plan_size} prioritized tasks.
 
-You have access to the product's long-term strategy, last sprint's outcomes,
-and the current codebase state. Use all of this to plan work that builds
-cumulatively toward the product vision — not just maintenance, but innovation.
+You can either PROMOTE existing backlog issues or CREATE new ones. Prefer
+promoting existing issues when they align with the strategy — the backlog
+groomer already identified these as valuable. Only create new issues when the
+backlog doesn't cover a strategic need.
 
 Context about this repository:
 
@@ -352,28 +386,32 @@ Open issues: {open_count} | Recently closed: {closed_count} | Blocked: {blocked_
 --- Recent task completion metrics ---
 {metrics_summary}
 
---- Currently open issues (for dedup — do NOT duplicate these) ---
+--- Backlog issues (candidates to PROMOTE — use issue number to reference) ---
+{backlog_issues}
+
+--- Currently open issues already in progress (do NOT select these) ---
 {open_issues}
 
 Rules:
 - Each task must be atomic and executable by an AI agent in a single session
 - Tasks must NOT be vague epics — they should have clear, testable success criteria
-- Do NOT duplicate existing open issues
 - Order by priority (most impactful first)
 - Build on last sprint's outcomes — continue momentum, fix regressions, advance strategy
 - Include a mix of: feature work that advances the product vision, bug fixes, self-improvement, and infrastructure
 - At least 1-2 tasks should push toward the long-term vision, not just maintain the status quo
-- Issue body must use ## Goal, ## Success Criteria, ## Constraints sections
+- For NEW issues: body must use ## Goal, ## Success Criteria, ## Constraints sections
 
 Return ONLY a JSON array (no markdown fences, no commentary) of exactly {plan_size} objects.
 Each object must have:
-  "title"      - concise GitHub issue title under 70 chars
+  "action"     - either "promote" (existing backlog issue) or "create" (new issue)
+  "issue_number" - (promote only) the GitHub issue number to promote, e.g. 8
+  "title"      - concise GitHub issue title under 70 chars (for create; for promote, the existing title)
   "goal"       - one-paragraph goal statement
   "task_type"  - one of: implementation, debugging, architecture, research, docs
   "priority"   - one of: prio:high, prio:normal, prio:low
   "rationale"  - one sentence explaining why this task matters this week, referencing the strategy
-  "body"       - structured body with ## Goal\\n...\\n## Success Criteria\\n...\\n## Constraints\\n- Prefer minimal diffs
-  "labels"     - JSON array of label strings (choose from: enhancement, bug, tech-debt, agent-os)
+  "body"       - (create only) structured body with ## Goal\\n...\\n## Success Criteria\\n...\\n## Constraints\\n- Prefer minimal diffs
+  "labels"     - JSON array of label strings (choose from: enhancement, bug, tech-debt)
 
 Return ONLY the JSON array."""
 
@@ -431,8 +469,10 @@ def _format_plan_message(plan: list[dict], repo: str) -> str:
     ]
     for i, task in enumerate(plan, 1):
         priority = task.get("priority", "prio:normal")
+        action = task.get("action", "create")
         prio_icon = {"prio:high": "🔴", "prio:normal": "🟡", "prio:low": "🟢"}.get(priority, "⚪")
-        lines.append(f"{i}. {prio_icon} [{task.get('task_type', '?')}] {task.get('title', '?')}")
+        source = f"#{task['issue_number']}" if action == "promote" else "NEW"
+        lines.append(f"{i}. {prio_icon} [{source}] [{task.get('task_type', '?')}] {task.get('title', '?')}")
         lines.append(f"   {task.get('rationale', '')}")
         lines.append("")
     lines.append("Reply YES to approve and create issues.")
@@ -646,10 +686,15 @@ def plan_repo(cfg: dict, github_slug: str, repo_path: Path) -> tuple[list[dict] 
     # 7. Recent task metrics
     metrics_summary = _recent_metrics_summary(cfg)
 
-    # 8. Open issues for dedup
+    # 8. Backlog issues (candidates for promotion)
+    backlog = _backlog_issues(github_slug)
+    backlog_text = _format_backlog_for_prompt(backlog)
+    print(f"  Backlog candidates: {len(backlog)}")
+
+    # 9. Open issues already in progress (for exclusion)
     open_issues = _open_issues_summary(github_slug)
 
-    # 9. Build prompt with all context
+    # 10. Build prompt with all context
     prompt = PLAN_PROMPT.format(
         plan_size=PLAN_SIZE,
         strategy_context=strategy_context,
@@ -661,6 +706,7 @@ def plan_repo(cfg: dict, github_slug: str, repo_path: Path) -> tuple[list[dict] 
         closed_count=counts["closed"],
         blocked_count=counts["blocked"],
         metrics_summary=metrics_summary,
+        backlog_issues=backlog_text,
         open_issues=open_issues,
     )
 
@@ -730,40 +776,72 @@ def _set_issues_ready(cfg: dict, github_slug: str, issue_urls: list[str]):
         return  # Only process the first matching project
 
 
+def _promote_issue(repo: str, issue_number: int, priority: str, labels: list[str]) -> str | None:
+    """Add priority/ready labels to an existing backlog issue. Returns its URL."""
+    try:
+        # Add priority label and any missing labels
+        all_labels = [l for l in labels if l] + [priority]
+        ensure_labels(repo, all_labels + ["ready"])
+        edit_issue_labels(repo, issue_number, add=all_labels)
+        url = f"https://github.com/{repo}/issues/{issue_number}"
+        print(f"  Promoted: #{issue_number} → {priority}")
+        return url
+    except Exception as e:
+        print(f"  Failed to promote #{issue_number}: {e}")
+        return None
+
+
 def create_plan_issues(
     cfg: dict, github_slug: str, plan: list[dict],
 ) -> tuple[list[str], list[str]]:
-    """Create GitHub issues from an approved plan, then set them to Ready on the project board."""
-    created_urls: list[str] = []
+    """Execute an approved plan: promote existing issues or create new ones, then set all to Ready."""
+    ready_urls: list[str] = []
     skipped: list[str] = []
 
     for task in plan:
+        action = (task.get("action") or "create").lower()
         title = (task.get("title") or "").strip()
-        body = (task.get("body") or "").strip()
+        priority = task.get("priority", "prio:normal")
         labels = [str(l) for l in task.get("labels", []) if l]
+        if priority not in labels:
+            labels.append(priority)
 
-        if not title:
-            continue
+        if action == "promote":
+            issue_number = task.get("issue_number")
+            if not issue_number:
+                print(f"  Skip (promote without issue_number): {title!r}")
+                skipped.append(title)
+                continue
+            url = _promote_issue(github_slug, int(issue_number), priority, labels)
+            if url:
+                ready_urls.append(url)
+            else:
+                skipped.append(title)
+        else:
+            # Create new issue
+            body = (task.get("body") or "").strip()
+            if not title:
+                continue
 
-        if _open_issue_exists(github_slug, title):
-            print(f"  Skip (duplicate): {title!r}")
-            skipped.append(title)
-            continue
+            if _open_issue_exists(github_slug, title):
+                print(f"  Skip (duplicate): {title!r}")
+                skipped.append(title)
+                continue
 
-        try:
-            url = _create_issue(github_slug, title, body, labels)
-            print(f"  Created: {url}")
-            created_urls.append(url)
-        except Exception as e:
-            print(f"  Failed to create {title!r}: {e}")
-            skipped.append(title)
+            try:
+                url = _create_issue(github_slug, title, body, labels)
+                print(f"  Created: {url}")
+                ready_urls.append(url)
+            except Exception as e:
+                print(f"  Failed to create {title!r}: {e}")
+                skipped.append(title)
 
-    # Move all created issues to Ready — triggers dispatch on next cycle
-    if created_urls:
-        print(f"\n  Setting {len(created_urls)} issue(s) to Ready on project board...")
-        _set_issues_ready(cfg, github_slug, created_urls)
+    # Move all issues (promoted + created) to Ready — triggers dispatch on next cycle
+    if ready_urls:
+        print(f"\n  Setting {len(ready_urls)} issue(s) to Ready on project board...")
+        _set_issues_ready(cfg, github_slug, ready_urls)
 
-    return created_urls, skipped
+    return ready_urls, skipped
 
 
 def run():
