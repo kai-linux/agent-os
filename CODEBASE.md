@@ -27,6 +27,17 @@ Implemented `orchestrator/log_analyzer.py` and `bin/run_log_analyzer.sh`. The an
   - - Deduplication uses gh issue list --search + exact title match to prevent duplicate improvement tasks
   - - Issue body uses standard ## Goal / ## Success Criteria / ## Constraints sections for dispatcher compatibility
   - - Added to system crontab (persistent) rather than session-only CronCreate
+Added `orchestrator/log_analyzer.py` — a weekly analyzer that reads the last 7 days of `runtime/metrics/agent_stats.jsonl` and `runtime/logs/queue-summary.log`, sends both to Claude Haiku with a deterministic prompt to identify the top 3 failure patterns / bottlenecks, deduplicates against open GitHub issues, creates one issue per problem (body follows `## Goal / ## Success Criteria / ## Constraints` template), and posts a summary to Telegram. `bin/run_log_analyzer.sh` is the entry point; a system cron fires every Monday at 07:00.
+
+**Files:** `- orchestrator/log_analyzer.py`, `- bin/run_log_analyzer.sh`
+
+**Decisions:**
+  - - Reuses `load_recent_metrics()` from `agent_scorer.py` to avoid duplicating the JSONL parsing logic
+  - - Prompt is deterministic (asks for exact JSON schema, no open-ended options) to reduce noise in repeated runs
+  - - Deduplication uses `gh issue list --search <title>` and exact-title match; avoids creating duplicate improvement tasks
+  - - Issue body uses the standard `## Goal / ## Success Criteria / ## Constraints` sections so the dispatcher can route them normally
+  - - Cron added to system crontab (`0 7 * * 1`) rather than relying on session-only CronCreate
+
 
 
 ### 2026-03-18 — [task-20260318-065704-task-agent-performance-scorer-and-metrics-log] (#9 kai-linux/agent-os)
