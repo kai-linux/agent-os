@@ -180,7 +180,7 @@ def test_parse_agent_result_manual_steps():
             - None
 
             MANUAL_STEPS:
-            - Add cron: 0 7 * * 1 /home/kai/agent-os/bin/run_thing.sh
+            - Add cron: 0 7 * * 1 /path/to/agent-os/bin/run_thing.sh
         """))
         result = parse_agent_result(tmp)
         assert "Add cron" in result["manual_steps"]

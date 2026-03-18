@@ -4,7 +4,7 @@ set -euo pipefail
 WORKDIR="$1"
 PROMPT_FILE="$2"
 
-CLINE_BIN="${CLINE_BIN:-/home/kai/.nvm/versions/node/v24.13.0/bin/cline}"
+CLINE_BIN="${CLINE_BIN:-cline}"
 CLINE_TIMEOUT_SECONDS="${CLINE_TIMEOUT_SECONDS:-1800}"
 
 # Provider fallback order: openrouter -> nanogpt -> chutes

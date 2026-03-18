@@ -1,13 +1,13 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Weekly backlog groomer — reviews open issues, recent completions, CODEBASE.md
 # Known Issues, and risk flags to create targeted improvement tasks.
 #
 # Suggested crontab entry (every Saturday at 20:00):
-#   0 20 * * 6 /home/kai/agent-os/bin/run_backlog_groomer.sh >> /home/kai/agent-os/runtime/logs/backlog_groomer.log 2>&1
-set -e
+#   0 20 * * 6 /path/to/agent-os/bin/run_backlog_groomer.sh >> /path/to/agent-os/runtime/logs/backlog_groomer.log 2>&1
+set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+ROOT="${ORCH_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+export ORCH_ROOT="$ROOT"
 
-cd "$REPO_ROOT"
-exec python -m orchestrator.backlog_groomer
+cd "$ROOT"
+"$ROOT/.venv/bin/python3" -m orchestrator.backlog_groomer
