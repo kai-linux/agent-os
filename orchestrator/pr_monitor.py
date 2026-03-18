@@ -35,6 +35,71 @@ def _save_state(paths: dict, state: dict):
     state_file.write_text(json.dumps(state, indent=2))
 
 
+def _rebase_pr_onto_main(repo: str, pr: dict) -> bool:
+    """Rebase a conflicting agent PR branch onto main and force-push. Returns True on success."""
+    branch = pr.get("headRefName", "")
+    base = pr.get("baseRefName", "main")
+    if not branch:
+        return False
+    try:
+        worktree_path = Path("/tmp") / f"rebase-{branch.replace('/', '-')}"
+        # Use a temporary worktree so we don't disturb the caller's working directory
+        repo_path = None
+        from orchestrator.paths import load_config
+        cfg = load_config()
+        for pk, pcfg in cfg.get("github_projects", {}).items():
+            for rcfg in pcfg.get("repos", []):
+                if rcfg["github_repo"] == repo:
+                    repo_path = Path(rcfg["local_repo"])
+                    break
+        if not repo_path:
+            return False
+
+        # Fetch latest
+        subprocess.run(["git", "-C", str(repo_path), "fetch", "origin"], check=True, capture_output=True)
+
+        # Create temp worktree on the PR branch
+        if worktree_path.exists():
+            subprocess.run(["git", "-C", str(repo_path), "worktree", "remove", "--force", str(worktree_path)], capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(repo_path), "worktree", "add", str(worktree_path), f"origin/{branch}"],
+            check=True, capture_output=True,
+        )
+
+        try:
+            # Rebase onto origin/main, auto-resolving known conflict files
+            env = {"GIT_EDITOR": "true", "HOME": str(Path.home()), "PATH": subprocess.os.environ.get("PATH", "")}
+            result = subprocess.run(
+                ["git", "-C", str(worktree_path), "rebase", f"origin/{base}"],
+                capture_output=True, text=True, env={**subprocess.os.environ, "GIT_EDITOR": "true"},
+            )
+            if result.returncode != 0:
+                # Auto-resolve: drop .agent_result.md (deleted on main), keep union for CODEBASE.md
+                subprocess.run(["git", "-C", str(worktree_path), "rm", "-f", ".agent_result.md"], capture_output=True)
+                subprocess.run(["git", "-C", str(worktree_path), "checkout", "--theirs", "CODEBASE.md"], capture_output=True)
+                subprocess.run(["git", "-C", str(worktree_path), "add", "-A"], check=True, capture_output=True)
+                subprocess.run(
+                    ["git", "-C", str(worktree_path), "rebase", "--continue"],
+                    check=True, capture_output=True,
+                    env={**subprocess.os.environ, "GIT_EDITOR": "true"},
+                )
+
+            # Force-push rebased branch
+            subprocess.run(
+                ["git", "-C", str(worktree_path), "push", "origin", f"HEAD:{branch}", "--force-with-lease"],
+                check=True, capture_output=True,
+            )
+            return True
+        finally:
+            subprocess.run(
+                ["git", "-C", str(repo_path), "worktree", "remove", "--force", str(worktree_path)],
+                capture_output=True,
+            )
+    except Exception as e:
+        print(f"  Rebase error for {branch}: {e}")
+        return False
+
+
 def _list_agent_prs(repo: str) -> list[dict]:
     """List open PRs with title starting with 'Agent:'."""
     try:
@@ -226,7 +291,11 @@ def monitor_prs():
 
             mergeable = (pr.get("mergeable") or "").upper()
             if mergeable == "CONFLICTING":
-                print(f"  PR #{pr_number}: has merge conflicts, skipping")
+                print(f"  PR #{pr_number}: has merge conflicts, attempting auto-rebase...")
+                if _rebase_pr_onto_main(repo, pr):
+                    print(f"  PR #{pr_number}: rebased successfully, will merge next poll")
+                else:
+                    print(f"  PR #{pr_number}: rebase failed, skipping")
                 continue
 
             new_attempts = attempts + 1
