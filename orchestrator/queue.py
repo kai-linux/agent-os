@@ -1081,32 +1081,63 @@ def main():
     except Exception as e:
         log(f"ERROR: {e}", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
         log(traceback.format_exc(), logfile, queue_summary_log=QUEUE_SUMMARY_LOG)
-        log("Final queue state: failed", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
 
-        failure_result = {
-            "status": "blocked",
-            "summary": f"Queue execution failed before a valid agent result was produced: {e}",
-            "done": ["- Task was dispatched and execution started."],
-            "blockers": [f"- Hard execution failure: {e}"],
-            "next_step": "Inspect the task log and agent runner configuration, then retry.",
-            "files_changed": ["- Unknown"],
-            "tests_run": ["- None"],
-            "decisions": ["- Execution aborted on runner error"],
-            "risks": ["- GitHub issue may remain in-progress without sync unless updated here"],
-            "attempted_approaches": ["- Queue attempted to invoke the configured agent runner"],
-            "raw": "",
-        }
+        # Infrastructure failures (git lock, network, worktree setup) should auto-retry
+        # by returning the task to inbox — not moving it to the graveyard.
+        infra_attempt = int(meta.get("infra_retry", 0)) + 1
+        max_infra_retries = 3
 
-        try:
-            sync_result(meta, failure_result, None)
-        except Exception as sync_err:
-            log(f"GitHub sync warning during exception handling: {sync_err}", logfile, queue_summary_log=QUEUE_SUMMARY_LOG)
+        if infra_attempt <= max_infra_retries and processing.exists():
+            # Patch the task file with updated retry counter before returning to inbox
+            try:
+                task_content = processing.read_text(encoding="utf-8")
+                if "infra_retry:" in task_content:
+                    task_content = re.sub(r"infra_retry:\s*\d+", f"infra_retry: {infra_attempt}", task_content)
+                else:
+                    # Insert after the first --- line (frontmatter)
+                    task_content = task_content.replace("\n---\n", f"\ninfra_retry: {infra_attempt}\n---\n", 1)
+                processing.write_text(task_content, encoding="utf-8")
+            except Exception as patch_err:
+                log(f"Warning: could not patch infra_retry counter: {patch_err}", logfile, queue_summary_log=QUEUE_SUMMARY_LOG)
 
-        if processing.exists():
-            shutil.move(str(processing), str(FAILED / processing.name))
+            shutil.move(str(processing), str(INBOX / processing.name))
+            log(
+                f"Infrastructure failure (attempt {infra_attempt}/{max_infra_retries}). "
+                f"Task returned to inbox for automatic retry.",
+                logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG,
+            )
+            send_telegram(
+                cfg,
+                f"🔄 Infra retry ({infra_attempt}/{max_infra_retries})\nTask: {task_id}\nError: {e}\nReturned to inbox — will retry next cycle.",
+                logfile, QUEUE_SUMMARY_LOG,
+            )
+        else:
+            # Exhausted infra retries — escalate to failed
+            log("Final queue state: failed (infra retries exhausted)", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
 
-        send_telegram(cfg, f"❌ Error\nTask: {task_id}\nError: {e}", logfile, QUEUE_SUMMARY_LOG)
-        raise
+            failure_result = {
+                "status": "blocked",
+                "summary": f"Queue execution failed after {max_infra_retries} infrastructure retries: {e}",
+                "done": ["- Task was dispatched and execution started."],
+                "blockers": [f"- Hard execution failure: {e}"],
+                "next_step": "Inspect the task log and agent runner configuration, then retry.",
+                "files_changed": ["- Unknown"],
+                "tests_run": ["- None"],
+                "decisions": ["- Execution aborted on runner error"],
+                "risks": ["- GitHub issue may remain in-progress without sync unless updated here"],
+                "attempted_approaches": [f"- Queue attempted {max_infra_retries} infrastructure retries"],
+                "raw": "",
+            }
+
+            try:
+                sync_result(meta, failure_result, None)
+            except Exception as sync_err:
+                log(f"GitHub sync warning during exception handling: {sync_err}", logfile, queue_summary_log=QUEUE_SUMMARY_LOG)
+
+            if processing.exists():
+                shutil.move(str(processing), str(FAILED / processing.name))
+
+            send_telegram(cfg, f"❌ Failed (infra)\nTask: {task_id}\nError: {e}\nRetries exhausted.", logfile, QUEUE_SUMMARY_LOG)
     finally:
         if repo is not None and worktree is not None:
             cleanup_worktree(repo, worktree, logfile, QUEUE_SUMMARY_LOG)
