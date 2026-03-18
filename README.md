@@ -1,615 +1,316 @@
 # Agent OS
 
-GitHub-native autonomous engineering loop for AI coding agents.
+**A fully autonomous AI startup team — engineers, planners, reviewers, and analysts — running 24/7 without human intervention.**
 
-This system turns GitHub Issues + GitHub Project into the control plane, and uses a mailbox queue plus isolated git worktrees to let Codex, Claude, Gemini, and DeepSeek execute tasks recursively with fallbacks, escalation, and Telegram alerts.
+Agent OS turns GitHub Projects into a living operations layer for AI coding agents. Drop a task into the backlog, set it to Ready, and walk away. The system dispatches it to the best available agent, executes it in isolation, opens a PR, runs CI, merges on green, and — if anything breaks — debugs, retries, escalates, and files new improvement tasks automatically.
 
----
-
-## What this does
-
-- Uses **GitHub Issues** as task objects
-- Uses a **GitHub Project** as the kanban board / source of truth
-- Dispatches `ready` issues into a local mailbox queue
-- Runs AI coding agents in isolated **git worktrees**
-- Supports **multi-model routing and fallback**
-- Writes structured `.agent_result.md` handoff files
-- Creates recursive follow-up tasks when needed
-- Escalates gracefully instead of looping forever
-- Sends status updates to Telegram
-- Comments results back to GitHub issues and updates project status
+The team improves itself. Every Monday it analyzes its own failure logs and creates tickets to fix its weaknesses. Every Saturday it grooms the backlog. Agents score each other. The system is the product.
 
 ---
 
-## High-level architecture
+## The Vision
 
-```text
-GitHub Issue
-   ↓
-GitHub Project (Status = Ready)
-   ↓
-github_dispatcher.py
-   ↓
-runtime/mailbox/inbox/*.md
-   ↓
-queue.py
-   ↓
-git worktree
-   ↓
-AI agent (Codex / Claude / Gemini / DeepSeek)
-   ↓
-.agent_result.md
-   ↓
-GitHub comment + project status sync + optional PR
-   ↓
-Done / Blocked / Escalated / Follow-up
+Most AI coding tools answer questions. Agent OS runs a company.
+
+The mental model is a startup engineering team, fully staffed by AI:
+
+| Role | Component | Cadence |
+|---|---|---|
+| **Engineers** | Codex, Claude, Gemini, DeepSeek | Continuous (every minute) |
+| **Dispatcher / PM** | `github_dispatcher.py` | Every minute |
+| **Tech Lead** | `queue.py` — routing, fallback, retry | Per task |
+| **Reviewer** | `pr_monitor.py` — CI gate, auto-merge | Every 5 minutes |
+| **Analyst** | `log_analyzer.py` — failure pattern detection | Every Monday 07:00 |
+| **Performance Lead** | `agent_scorer.py` — model success rates | Every Monday 07:00 |
+| **Backlog Groomer** | `backlog_groomer.py` — stale issues, new tasks | Every Saturday 20:00 |
+| **Memory** | `CODEBASE.md` per repo | After every task |
+
+The backlog is GitHub. The sprint board is GitHub Projects. The standup is Telegram. Nobody needs to be there.
+
+---
+
+## How It Works
+
+```
+You write (or the system generates) a GitHub Issue
+              ↓
+    Set Status → Ready on the kanban board
+              ↓
+    github_dispatcher.py picks it up (every minute)
+    - LLM-formats poorly-written notes into structured tasks
+    - Routes by repo, task type, priority
+    - Creates mailbox task, comments on issue, moves to In Progress
+              ↓
+    queue.py executes it
+    - Spins up an isolated git worktree
+    - Selects best agent (task-type-aware, priority-weighted)
+    - Runs agent with full repo context + CODEBASE.md memory
+    - Parses .agent_result.md handoff contract
+    - Pushes branch, opens PR
+              ↓
+    pr_monitor.py watches CI (every 5 minutes)
+    - All checks green → squash-merge, delete branch
+    - Conflicts → auto-rebase, retry
+    - CI failure → comment, label blocked, escalate after 3 attempts
+              ↓
+    Complete: issue closed, project → Done, Telegram alert
+    Blocked:  follow-up task created, project → Blocked, Telegram alert
+    Manual:   MANUAL_STEPS section posted to issue + Telegram
 ```
 
-Core concepts
-1. GitHub is the control plane
+### Recursive self-improvement loop
 
-GitHub replaces OpenClaw as the main orchestration layer.
+Every week the system reads its own logs and creates tasks to fix what broke:
 
-Use:
-
-Issues for tasks
-
-Project for board state
-
-PRs for review boundary
-
-Issue comments for memory / progress logs
-
-Telegram is only for:
-
-alerts
-
-summaries
-
-manual intervention
-
-2. The mailbox is the execution queue
-
-The dispatcher converts GitHub issues into markdown task files.
-
-Those tasks are written into:
-
-runtime/mailbox/inbox/
-
-The queue picks them up, executes them, and moves them into:
-
-done/
-
-blocked/
-
-failed/
-
-escalated/
-
-3. Every task runs in an isolated git worktree
-
-Each task is executed in its own temporary worktree:
-
-/srv/worktrees/<repo>/<task-id>
-
-This prevents branch collisions and keeps the base repo clean.
-
-4. Agents must write .agent_result.md
-
-Every agent run must produce a structured result file in the repo root:
-
-.agent_result.md
-
-This is the handoff contract that powers recursion, fallbacks, and escalation.
 ```
-Repo structure
+agent_stats.jsonl + queue-summary.log
+              ↓
+    log_analyzer.py (Monday 07:00)
+    - Identifies top 3 failure patterns via Claude Haiku
+    - Deduplicates against open issues
+    - Files GitHub issues with structured task specs
+              ↓
+    Those issues enter the backlog → get dispatched → agents fix them
+              ↓
+    agent_scorer.py (Monday 07:00)
+    - Computes per-model success rates (last 7 days)
+    - Files issues for any model below 60% success
+              ↓
+    backlog_groomer.py (Saturday 20:00)
+    - Surfaces stale issues, Known Issues without tickets, risk flags
+    - Generates 3-5 new targeted improvement tasks via Claude Haiku
+    - Semantic dedup (difflib, 0.75 threshold) prevents duplicates
+```
+
+The system improves itself on a weekly cadence without any human input.
+
+---
+
+## Architecture
+
+```
 agent-os/
-├── README.md
-├── requirements.txt
-├── config.yaml.example
-├── .github/
-│   └── ISSUE_TEMPLATE/
-│       └── agent-task.md
+├── orchestrator/
+│   ├── github_dispatcher.py   # GitHub → mailbox, LLM task formatting
+│   ├── queue.py               # Execution engine, routing, retry, escalation
+│   ├── github_sync.py         # Write results back to GitHub
+│   ├── pr_monitor.py          # CI polling, auto-merge, auto-rebase
+│   ├── gh_project.py          # GitHub CLI / GraphQL wrapper
+│   ├── codebase_memory.py     # Per-repo CODEBASE.md read/write
+│   ├── task_formatter.py      # LLM issue formatting (Haiku)
+│   ├── log_analyzer.py        # Weekly failure analysis → new issues
+│   ├── agent_scorer.py        # Weekly model performance scoring
+│   ├── backlog_groomer.py     # Weekly backlog hygiene + task generation
+│   ├── supervisor.py          # Parallel worker management
+│   └── paths.py               # Config loading, path resolution
 ├── bin/
-│   ├── run_dispatcher.sh
-│   ├── run_queue.sh
-│   ├── agent_runner.sh
-│   └── run_deepseek.sh
-└── orchestrator/
-    ├── __init__.py
-    ├── paths.py
-    ├── gh_project.py
-    ├── github_dispatcher.py
-    ├── github_sync.py
-    └── queue.py
+│   ├── run_dispatcher.sh      # Cron entry: dispatcher
+│   ├── run_queue.sh           # Cron entry: execution queue
+│   ├── run_pr_monitor.sh      # Cron entry: PR auto-merge
+│   ├── run_log_analyzer.sh    # Cron entry: weekly log analysis
+│   ├── run_agent_scorer.sh    # Cron entry: model performance
+│   ├── run_backlog_groomer.sh # Cron entry: backlog grooming
+│   ├── agent_runner.sh        # Routes to correct agent binary
+│   └── run_deepseek.sh        # DeepSeek with provider fallback chain
+├── tests/                     # Pytest suite (runs in CI on every push)
+├── .github/
+│   ├── workflows/ci.yml       # GitHub Actions: lint + pytest
+│   └── ISSUE_TEMPLATE/
+│       └── agent-task.md      # Structured task template
+├── example.config.yaml
+└── CODEBASE.md                # Auto-maintained repo memory
 ```
-Components
-orchestrator/github_dispatcher.py
 
-Scans GitHub repos for ready issues, converts one into a queue task, writes it into the mailbox, comments on the issue, and moves the project item to In Progress.
+### Key design decisions
 
-orchestrator/queue.py
+**GitHub is the control plane.** Issues are tasks. The Project board is the sprint. PRs are the review boundary. Issue comments are the audit log. Nothing lives outside GitHub.
 
-Main execution engine.
+**Mailbox queue, not a message broker.** Tasks are markdown files on disk. Simple, inspectable, recoverable. No Redis, no RabbitMQ.
 
-Responsibilities:
+**Isolated git worktrees.** Every task runs in `/srv/worktrees/<repo>/<task-id>`. Branch collisions are impossible. The base repo is never touched.
 
-read mailbox task
+**`.agent_result.md` is the agent contract.** Every agent must write this file. It powers recursion, fallbacks, escalation, and memory — without any agent needing to know about the others.
 
-create worktree
+**CODEBASE.md is shared memory.** After every completed task, a summary is committed to `CODEBASE.md` on main. The next agent reads it before starting. Context accumulates over time.
 
-resolve agent / fallback chain
+---
 
-run the agent
+## Agent Routing
 
-parse .agent_result.md
+Agents are selected by task type and tried in fallback order:
 
-commit / push branch
-
-sync result back to GitHub
-
-create recursive follow-up task if needed
-
-escalate if retries are exhausted
-
-orchestrator/github_sync.py
-
-Pushes execution results back into GitHub:
-
-adds issue comments
-
-updates labels
-
-moves project item status
-
-optionally creates a PR
-
-orchestrator/gh_project.py
-
-Thin wrapper around gh CLI for:
-
-issue listing
-
-issue comments
-
-labels
-
-project item lookup
-
-project field updates
-
-PR creation
-
-orchestrator/paths.py
-
-Loads config and resolves all runtime paths relative to the repo.
-
-Issue-driven workflow
-1. Create an issue
-
-Use the provided issue template.
-
-The issue should contain:
-
-Goal
-
-Success Criteria
-
-Repo
-
-Task Type
-
-Agent Preference
-
-Constraints
-
-Context
-
-2. Mark it ready
-
-Add the ready label and move the project status to Ready.
-
-3. Dispatcher picks it up
-
-The dispatcher writes a normalized task into:
-
-runtime/mailbox/inbox/
-4. Queue executes it
-
-The queue:
-
-creates a branch
-
-creates a worktree
-
-picks the best model
-
-runs the task
-
-commits and pushes changes
-
-5. Result is synced
-
-Depending on the outcome:
-
-complete → comment on issue, optionally create PR, move to Review
-
-partial / blocked → comment progress, move to Blocked, create follow-up task
-
-escalated → write escalation note, comment it, move to Blocked / Escalated
-
-Supported agents
-
-Codex
-
-Claude
-
-Gemini
-
-DeepSeek via Cline/OpenRouter wrapper
-
-Routing is task-type aware and supports fallback chains.
-
-Example config:
-```
+```yaml
 agent_fallbacks:
-  implementation: [codex, claude, gemini, deepseek]
-  debugging: [claude, gemini, codex, deepseek]
-  architecture: [claude, gemini, codex, deepseek]
-  research: [claude, gemini, codex, deepseek]
-  docs: [claude, gemini, codex, deepseek]
-  browser_automation: [claude, gemini, codex, deepseek]
-  ```
-Task types
+  implementation:    [codex, claude, gemini, deepseek]
+  debugging:         [claude, gemini, codex, deepseek]
+  architecture:      [claude, gemini, codex, deepseek]
+  research:          [claude, gemini, codex, deepseek]
+  docs:              [claude, gemini, codex, deepseek]
+  browser_automation:[claude, gemini, codex, deepseek]
+```
 
-Supported task types:
+DeepSeek itself has a provider fallback chain: `openrouter → nanogpt → chutes`.
 
-implementation
+If an agent returns `blocked`, the next agent in the chain gets the full context of what was tried. If all agents are exhausted, the task is escalated.
 
-debugging
+---
 
-architecture
+## The `.agent_result.md` Contract
 
-research
+Every agent must produce this file in the repo root before exiting:
 
-docs
-
-browser_automation
-
-These affect routing and fallback order.
-
-.agent_result.md contract
-
-Every agent must write:
-
-STATUS: complete|partial|blocked
+```
+STATUS: complete | partial | blocked
 
 SUMMARY:
-One short paragraph.
+One paragraph.
 
 DONE:
-- bullet
-- bullet
+- what was accomplished
 
 BLOCKERS:
-- bullet
-- bullet
+- what prevented completion
 
 NEXT_STEP:
-One short paragraph. If complete, write: None
+What the follow-up agent should do. Write "None" if complete.
 
 FILES_CHANGED:
-- path
-- path
+- path/to/file.py
 
 TESTS_RUN:
-- command + result
-- command + result
+- pytest -q → 22 passed
 
 DECISIONS:
-- bullet
-- bullet
+- why approach X was chosen over Y
 
 RISKS:
-- bullet
-- bullet
+- anything that might break downstream
 
 ATTEMPTED_APPROACHES:
-- bullet
-- bullet
+- what was tried and why it didn't work
 
-This enables:
+MANUAL_STEPS:
+- cron entries, config changes, or secrets that need human action
+- Write "None" if nothing required
+```
 
-recursive continuation
+`MANUAL_STEPS` are posted to the GitHub issue and sent as a separate Telegram alert so nothing requiring human action gets silently buried.
 
-anti-repeat behavior
+---
 
-escalation notes
+## Project Board Flow
 
-better handoffs across models
+```
+Backlog → Ready → In Progress → Review → Done
+                                       ↘ Blocked
+```
 
-Recursion and follow-ups
+Trigger dispatch: set Status to **Ready** on the kanban board (or add label `ready` — either works).
 
-If a task returns:
+The system handles every transition from there.
 
-STATUS: partial
+---
 
-STATUS: blocked
+## Cron Schedule
 
-the queue can generate a new follow-up mailbox task automatically.
+```cron
+# Core loop
+* * * * *  run_dispatcher.sh     # Dispatch ready issues
+* * * * *  run_queue.sh          # Execute queued tasks
+*/5 * * * * run_pr_monitor.sh    # CI check + auto-merge
 
-Follow-up tasks preserve:
+# Weekly self-improvement
+0 7 * * 1  run_log_analyzer.sh   # Analyze failures, file issues
+0 7 * * 1  run_agent_scorer.sh   # Score model performance
+0 20 * * 6 run_backlog_groomer.sh # Groom backlog, generate tasks
+```
 
-original task
+---
 
-prior summary
+## Setup
 
-blockers
+### 1. Prerequisites
 
-files changed
+```bash
+# System
+sudo apt install -y git curl util-linux python3-venv
 
-tests run
+# CLI tools (must be authenticated)
+gh auth login
+gh auth refresh -s project   # Required for GraphQL project access
+# Install: codex, claude, gemini (+ cline for DeepSeek)
+```
 
-risks
+### 2. Install
 
-attempted approaches
-
-model attempts already tried
-
-This allows the system to continue work without losing context.
-
-Anti-loop protection
-
-Each task has:
-
-attempt: 1
-max_attempts: 4
-model_attempts: []
-
-Protection exists at two levels:
-
-Task-level attempts
-
-Prevents endless recursive follow-up loops.
-
-Model-level attempts
-
-Prevents trying the same fallback chain forever.
-
-GitHub Project status flow
-
-Recommended statuses:
-
-Backlog
-
-Ready
-
-In Progress
-
-Review
-
-Blocked
-
-Done
-
-Recommended labels:
-
-ready
-
-in-progress
-
-review
-
-blocked
-
-task:implementation
-
-task:debugging
-
-task:architecture
-
-task:docs
-
-task:browser
-
-prio:high
-
-prio:normal
-
-prio:low
-
-
-Installation
-1. Clone the repo
-git clone <your-agent-os-repo>
+```bash
+git clone https://github.com/yourname/agent-os
 cd agent-os
-2. Create virtualenv
-python3 -m venv .venv
-source .venv/bin/activate
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-3. Copy config
-cp config.yaml.example config.yaml
+cp example.config.yaml config.yaml
+# Edit config.yaml — set github_owner, project numbers, repo paths, Telegram
+```
 
-Edit config.yaml.
+### 3. GitHub Project
 
-4. Install system dependencies
+Create a GitHub Project with a **Status** single-select field:
+`Backlog · Ready · In Progress · Review · Blocked · Done`
 
-Ubuntu example:
+Set `project_number` in `config.yaml` to match (find it in the project URL: `/projects/N`).
 
-sudo apt update
-sudo apt install -y git curl util-linux cron python3-venv
-5. Install / authenticate CLIs
+### 4. Cron
 
-Required:
+```cron
+PATH=/home/kai/.nvm/versions/node/v24.13.0/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-gh
+* * * * *  /home/kai/agent-os/bin/run_dispatcher.sh >> /home/kai/agent-os/runtime/logs/dispatcher.log 2>&1
+* * * * *  /home/kai/agent-os/bin/run_queue.sh >> /home/kai/agent-os/runtime/logs/cron.log 2>&1
+*/5 * * * * /home/kai/agent-os/bin/run_pr_monitor.sh >> /home/kai/agent-os/runtime/logs/pr_monitor.log 2>&1
+0 7 * * 1  /home/kai/agent-os/bin/run_log_analyzer.sh >> /home/kai/agent-os/runtime/logs/log_analyzer.log 2>&1
+0 7 * * 1  /home/kai/agent-os/bin/run_agent_scorer.sh >> /home/kai/agent-os/runtime/logs/agent_scorer.log 2>&1
+0 20 * * 6 /home/kai/agent-os/bin/run_backlog_groomer.sh >> /home/kai/agent-os/runtime/logs/backlog_groomer.log 2>&1
+```
 
-codex
+### 5. Multi-repo setup
 
-claude
+Each GitHub Project maps to one or more repos. All orchestrated from agent-os. Agents for different repos run in parallel without interfering — per-repo locking ensures clean worktree management.
 
-gemini
+---
 
-cline (if using DeepSeek fallback)
+## Safety
 
-Also make sure:
+- **Allowlist**: queue refuses tasks outside configured `allowed_repos` paths
+- **Isolated worktrees**: every task runs on its own branch, no shared state
+- **Retry ceilings**: `max_attempts` (default 4) + per-model attempt tracking
+- **Escalation**: when automation runs out of options, it writes a structured note and stops — it does not thrash
+- **CI gate**: PRs are not merged until all checks pass
+- **Force-push guard**: rebases use `--force-with-lease`
 
-gh auth status
-gh auth refresh -s project
-6. Ensure allowed repos exist
+---
 
-GitHub setup
-1. Create a project
+## Observability
 
-Create a GitHub Project and add a single-select field named:
+| Signal | Where |
+|---|---|
+| Task start/complete/blocked | Telegram |
+| Manual steps required | Telegram + GitHub issue comment |
+| CI failure | GitHub issue comment + label |
+| Agent performance degradation | GitHub issue (weekly) |
+| Failure pattern analysis | GitHub issues (weekly) |
+| Task audit trail | GitHub issue comments |
+| Execution logs | `runtime/logs/` |
+| Metrics | `runtime/metrics/agent_stats.jsonl` |
+| Repo memory | `CODEBASE.md` (per repo, auto-updated) |
 
-Status
+---
 
-With values:
+## What It Is Not (Yet)
 
-Ready
+- A browser-ops platform (planned)
+- A multi-tenant SaaS
+- A general-purpose agent framework
 
-In Progress
+It is a focused, production-running autonomous engineering loop. The architecture is intentionally minimal — GitHub + cron + git worktrees + LLM APIs. No orchestration middleware, no vector databases, no proprietary runtimes.
 
-Review
-
-Blocked
-
-Done
-
-2. Enable built-in project workflows
-
-Recommended:
-
-auto-add items from repos
-
-mark closed/merged work as Done
-
-3. Add the issue template
-
-Place the provided template under:
-
-.github/ISSUE_TEMPLATE/agent-task.md
-Runtime scripts
-bin/run_dispatcher.sh
-
-Runs the GitHub issue → mailbox dispatcher.
-
-bin/run_queue.sh
-
-Runs the main execution queue.
-
-bin/agent_runner.sh
-
-Routes execution to Codex / Claude / Gemini / DeepSeek wrapper.
-
-bin/run_deepseek.sh
-
-Wrapper for DeepSeek via Cline/OpenRouter.
-
-Cron
-
-Example cron setup:
-
-* * * * * PATH=/home/kai/.nvm/versions/node/v24.13.0/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /home/kai/agent-os/bin/run_dispatcher.sh >> /home/kai/agent-os/runtime/logs/dispatcher.log 2>&1
-* * * * * PATH=/home/kai/.nvm/versions/node/v24.13.0/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /home/kai/agent-os/bin/run_queue.sh >> /home/kai/agent-os/runtime/logs/cron.log 2>&1
-Telegram alerts
-
-Telegram is optional but recommended for:
-
-start notifications
-
-fallback notifications
-
-blocked notifications
-
-completion
-
-escalation
-
-fatal errors
-
-It is not used for dispatch.
-
-Safety model
-Allowed repos
-
-The queue refuses to execute tasks outside configured repo paths.
-
-Isolated worktrees
-
-Each task runs in its own branch/worktree.
-
-Retry ceilings
-
-Both recursive attempts and model fallbacks are bounded.
-
-Escalation notes
-
-When automation runs out of productive options, it writes a structured escalation note instead of thrashing.
-
-Current status
-
-This system is good for:
-
-recursive coding workflows
-
-GitHub-native task execution
-
-model routing / fallback
-
-issue-driven automation
-
-bounded software work
-
-task memory via issue comments + result files
-
-It is not yet:
-
-a parallel swarm scheduler
-
-a browser-ops platform
-
-a full growth/content/trading operating system
-
-But it is the right core for building those.
-
-Planned upgrades
-
-parallel worker slots
-
-per-repo locks
-
-reviewer loop
-
-planner loop
-
-GitHub issue auto-creation from summaries / metrics
-
-browser automation lane
-
-KPI / executive summary loop
-
-automatic PR merge policies
-
-Philosophy
-
-This system treats AI agents as stateless workers and adds the missing pieces that make them operational:
-
-task state
-
-routing
-
-recursion
-
-anti-repeat memory
-
-escalation
-
-observability
-
-GitHub-native coordination
-
-The result is not a chatbot.
-
-It is an engineering operating loop.
+The system is its own best customer. Every improvement gets filed as an issue, executed by an agent, and merged automatically.
