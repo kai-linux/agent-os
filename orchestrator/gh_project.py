@@ -186,6 +186,13 @@ def add_issue_comment(repo: str, number: int, body: str):
     gh(["issue", "comment", str(number), "-R", repo, "--body", body])
 
 
+def create_issue(repo: str, title: str, body: str, labels: list[str] | None = None) -> str:
+    cmd = ["issue", "create", "--repo", repo, "--title", title, "--body", body]
+    for label in labels or []:
+        cmd += ["--label", label]
+    return gh(cmd)
+
+
 def ensure_labels(repo: str, labels: list[str]):
     """Create labels on the repo if they don't already exist."""
     for label in labels:

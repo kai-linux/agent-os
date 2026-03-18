@@ -14,9 +14,13 @@ from orchestrator.gh_project import (
     edit_issue_labels,
     add_issue_comment,
     list_ready_issues,
+    create_issue,
     gh,
+    query_project,
+    ensure_labels,
 )
 from orchestrator.task_formatter import format_task
+from orchestrator.task_decomposer import decompose_task, format_sub_issue_body
 from orchestrator.trust import is_trusted
 
 
@@ -137,6 +141,9 @@ def build_mailbox_task(cfg: dict, project_key: str, repo_cfg: dict, issue: dict)
 
 
 _PRIO_ORDER = {"prio:high": 0, "prio:normal": 1, "prio:low": 2}
+_WORKFLOW_LABELS = {
+    "ready", "in-progress", "agent-dispatched", "blocked", "review", "done", "epic",
+}
 
 
 def _item_priority(item: dict) -> int:
@@ -147,6 +154,7 @@ def _item_priority(item: dict) -> int:
     return _PRIO_ORDER["prio:normal"]
 
 
+<<<<<<< HEAD
 def _fetch_issue_dependency(repo_full: str, number: int) -> dict | None:
     raw = gh([
         "issue", "view", str(number), "-R", repo_full,
@@ -274,6 +282,126 @@ def _requeue_unblocked_items(queried, repo_to_project, issue_lookup):
 
 
 def _dispatch_item(cfg, paths, owner, repo_to_project, info, ready_items, issue_lookup) -> bool:
+=======
+def _extract_issue_number(issue_url: str) -> int | None:
+    match = re.search(r"/issues/(\d+)$", issue_url or "")
+    return int(match.group(1)) if match else None
+
+
+def _copy_issue_labels(issue: dict) -> list[str]:
+    labels = []
+    for label in issue.get("labels", []):
+        name = label["name"].lower()
+        if name not in _WORKFLOW_LABELS:
+            labels.append(name)
+    return labels
+
+
+def _set_issue_project_status(cfg: dict, project_cfg: dict, issue_url: str, status_value: str):
+    owner = cfg.get("github_owner", "")
+    if not owner:
+        return
+    info = query_project(project_cfg["project_number"], owner)
+    option_id = info["status_options"].get(status_value)
+    if not info["status_field_id"] or not option_id:
+        return
+    for project_item in info["items"]:
+        if project_item["url"] == issue_url:
+            set_item_status(
+                info["project_id"],
+                project_item["item_id"],
+                info["status_field_id"],
+                option_id,
+            )
+            break
+
+
+def _maybe_decompose_issue(
+    cfg: dict,
+    project_key: str,
+    project_cfg: dict,
+    repo_cfg: dict,
+    issue: dict,
+) -> dict:
+    del project_key
+    plan = decompose_task(
+        issue["title"],
+        issue.get("body", ""),
+        model=cfg.get("decomposer_model"),
+    )
+    if not plan or plan["classification"] != "epic":
+        return issue
+
+    repo_full = repo_cfg["github_repo"]
+    parent_number = issue["number"]
+    inherited_labels = _copy_issue_labels(issue)
+    ensure_labels(repo_full, inherited_labels + ["epic"])
+
+    created: list[dict] = []
+    for idx, sub_issue in enumerate(plan["sub_issues"], start=1):
+        title = f"{idx}. {sub_issue['title']}"
+        body = format_sub_issue_body(parent_number, sub_issue)
+        issue_url = create_issue(repo_full, title, body, inherited_labels).strip()
+        number = _extract_issue_number(issue_url)
+        if not number:
+            raise RuntimeError(f"Could not parse issue number from {issue_url!r}")
+        created.append({
+            "number": number,
+            "title": title,
+            "body": body,
+            "url": issue_url,
+            "labels": [{"name": label} for label in inherited_labels],
+        })
+
+    backlog_value = project_cfg.get("backlog_value", "Backlog")
+    ready_value = project_cfg.get("ready_value", "Ready")
+    try:
+        _set_issue_project_status(cfg, project_cfg, issue["url"], backlog_value)
+        _set_issue_project_status(cfg, project_cfg, created[0]["url"], ready_value)
+        for child in created[1:]:
+            _set_issue_project_status(cfg, project_cfg, child["url"], backlog_value)
+    except Exception as e:
+        print(f"Warning: failed to update decomposed issue statuses: {e}")
+
+    try:
+        edit_issue_labels(
+            repo_full,
+            parent_number,
+            add=["epic"],
+            remove=project_cfg.get("required_labels", []),
+        )
+    except Exception as e:
+        print(f"Warning: failed to relabel epic parent #{parent_number}: {e}")
+
+    child_refs = "\n".join(f"- #{child['number']} {child['title']}" for child in created)
+    add_issue_comment(
+        repo_full,
+        parent_number,
+        "🤖 Task decomposed before dispatch.\n\n"
+        f"Reason: {plan.get('reason') or 'Multiple independent deliverables detected.'}\n\n"
+        f"Sub-issues:\n{child_refs}\n\n"
+        f"Dispatching first sub-issue now: #{created[0]['number']}",
+    )
+
+    dispatched_issue = created[0].copy()
+    try:
+        info = query_project(project_cfg["project_number"], cfg["github_owner"])
+        for project_item in info["items"]:
+            if project_item["url"] == created[0]["url"]:
+                dispatched_issue["item_id"] = project_item["item_id"]
+                break
+    except Exception as e:
+        print(f"Warning: failed to refresh project item for #{created[0]['number']}: {e}")
+
+    print(
+        f"Decomposed {repo_full}#{parent_number} into {len(created)} sub-issues; "
+        f"dispatching #{created[0]['number']}"
+    )
+    return dispatched_issue
+
+
+def _dispatch_item(cfg, paths, owner, repo_to_project, info, ready_items) -> bool:
+>>>>>>> 658e1bc (agent task-20260318-224806-task-task-decomposer-agent)
     """Try to dispatch one ready item (highest priority first). Returns True if dispatched."""
     ready_items = sorted(ready_items, key=_item_priority)
     for item in ready_items:
@@ -316,33 +444,60 @@ def _dispatch_item(cfg, paths, owner, repo_to_project, info, ready_items, issue_
             "url": item["url"],
             "labels": [{"name": l} for l in item["labels"]],
         }
+        dispatch_issue = issue
+        dispatch_item = item
+        try:
+            dispatch_issue = _maybe_decompose_issue(cfg, pk, pcfg, rcfg, issue)
+            if dispatch_issue is not issue:
+                dispatch_item = {
+                    "number": dispatch_issue["number"],
+                    "item_id": dispatch_issue.get("item_id"),
+                }
+        except Exception as e:
+            print(f"Warning: decomposition failed for #{item['number']}: {e}")
+            dispatch_issue = issue
+            dispatch_item = item
 
-        task_id, task_md = build_mailbox_task(cfg, pk, rcfg, issue)
+        task_id, task_md = build_mailbox_task(cfg, pk, rcfg, dispatch_issue)
         task_path = paths["INBOX"] / f"{task_id}.md"
         task_path.write_text(task_md, encoding="utf-8")
 
         # Update labels for visibility
         edit_issue_labels(
             repo_full,
-            item["number"],
+            dispatch_item["number"],
             add=["in-progress", "agent-dispatched"],
             remove=pcfg.get("required_labels", []),
         )
 
         add_issue_comment(
             repo_full,
-            item["number"],
+            dispatch_item["number"],
             f"🤖 Dispatched to orchestrator.\n\nTask ID: `{task_id}`\nProject key: `{pk}`",
         )
 
         # Set project Status to In Progress
         in_progress_value = pcfg.get("in_progress_value", "In Progress")
+<<<<<<< HEAD
         try:
             _set_project_status(info, item["item_id"], in_progress_value)
         except Exception as e:
             print(f"Warning: failed to set project status: {e}")
+=======
+        option_id = info["status_options"].get(in_progress_value)
+        if info["status_field_id"] and option_id and dispatch_item.get("item_id"):
+            try:
+                set_item_status(
+                    info["project_id"],
+                    dispatch_item["item_id"],
+                    info["status_field_id"],
+                    option_id,
+                )
+            except Exception as e:
+                print(f"Warning: failed to set project status: {e}")
+>>>>>>> 658e1bc (agent task-20260318-224806-task-task-decomposer-agent)
 
-        print(f"Dispatched {repo_full}#{item['number']} -> {task_path}")
+        print(f"Dispatched {repo_full}#{dispatch_item['number']} -> {task_path}")
         return True
     return False
 
@@ -450,6 +605,7 @@ def dispatch_one():
                     excluded = {x.lower() for x in project_cfg.get("excluded_labels", [])}
                     if labels.intersection(excluded):
                         continue
+<<<<<<< HEAD
                     issue_with_label_set = {**issue, "labels": labels}
                     resolution = _resolve_issue_dependencies(repo_full, issue_with_label_set, {}, {})
                     if resolution["status"] == "blocked":
@@ -463,18 +619,27 @@ def dispatch_one():
                         print(f"Warning: dependency check skipped dispatch for {repo_full}#{issue['number']}: {resolution}")
                         continue
                     task_id, task_md = build_mailbox_task(cfg, project_key, repo_cfg, issue)
+=======
+                    dispatch_issue = issue
+                    try:
+                        dispatch_issue = _maybe_decompose_issue(cfg, project_key, project_cfg, repo_cfg, issue)
+                    except Exception as e:
+                        print(f"Warning: decomposition failed for #{issue['number']}: {e}")
+                        dispatch_issue = issue
+                    task_id, task_md = build_mailbox_task(cfg, project_key, repo_cfg, dispatch_issue)
+>>>>>>> 658e1bc (agent task-20260318-224806-task-task-decomposer-agent)
                     task_path = paths["INBOX"] / f"{task_id}.md"
                     task_path.write_text(task_md, encoding="utf-8")
                     edit_issue_labels(
-                        repo_full, issue["number"],
+                        repo_full, dispatch_issue["number"],
                         add=["in-progress", "agent-dispatched"],
                         remove=project_cfg.get("required_labels", []),
                     )
                     add_issue_comment(
-                        repo_full, issue["number"],
+                        repo_full, dispatch_issue["number"],
                         f"🤖 Dispatched to orchestrator.\n\nTask ID: `{task_id}`\nProject key: `{project_key}`",
                     )
-                    print(f"Dispatched (label fallback) {repo_full}#{issue['number']} -> {task_path}")
+                    print(f"Dispatched (label fallback) {repo_full}#{dispatch_issue['number']} -> {task_path}")
                     return
 
     print("No dispatchable issues found.")
