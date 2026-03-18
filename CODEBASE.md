@@ -16,6 +16,19 @@
 
 ## Recent Changes
 
+### 2026-03-18 — [task-20260318-065704-task-agent-performance-scorer-and-metrics-log] (#9 kai-linux/agent-os)
+Added structured metrics logging to queue.py and a new weekly agent performance scorer. After each task completes, `record_metrics()` atomically appends a JSONL record (timestamp, task_id, repo, agent, status, attempt_count, duration_seconds, task_type) to `runtime/metrics/agent_stats.jsonl`, with automatic rotation at 10 MB. A new `orchestrator/agent_scorer.py` module reads the last 7 days of metrics, computes per-agent success rates, and creates a GitHub issue with the title "Agent X degraded (Y% success rate)" for any agent below 60%. `bin/run_agent_scorer.sh` is the cron entry point.
+
+**Files:** `- orchestrator/queue.py`, `- orchestrator/agent_scorer.py`, `- bin/run_agent_scorer.sh`
+
+**Decisions:**
+  - - Atomic append implemented as read-existing + write-temp + os.replace() per task spec ("write to temporary file then rename"); handles single-writer safety
+  - - record_metrics() is wrapped in try/except in main() so metrics failure never crashes the queue
+  - - Rotation renames to .jsonl.1 (overwriting previous rotation); simple single-rotation keeps implementation minimal
+  - - agent_scorer.py uses `gh issue create` via subprocess (same pattern as rest of codebase) rather than a new HTTP client
+  - - github_repo config key falls back to scanning github_projects entries for a "repo" field if top-level github_repo is not set
+
+
 ### 2026-03-18 — [task-20260318-064404-task-priority-aware-queue-dispatch] (#5 kai-linux/agent-os)
 Implemented priority-aware queue dispatch by adding a `priority_score()` helper to `queue.py` that computes score = priority_weight + age_bonus (1 pt/hr), replacing the FIFO `pick_task` with a `max()` selector. The dispatcher writes `priority` into task frontmatter from issue labels (defaulting to `prio:normal`), and the queue logs the priority label, weight, and score when a task is picked up.
 
