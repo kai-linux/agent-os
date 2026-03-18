@@ -2,7 +2,8 @@
 
 Reviews each repository's open issues, recent task completions, CODEBASE.md
 Known Issues section, and risk flags from completed tasks to identify gaps
-and technical debt.  Creates 3-5 targeted, scoped improvement tasks per repo.
+and technical debt.  Creates 3-5 targeted, scoped improvement tasks per repo,
+assigns priorities, and sets them to Ready for immediate dispatch.
 
 Runs weekly on Saturday at 20:00.
 """
@@ -18,6 +19,7 @@ from pathlib import Path
 
 from orchestrator.paths import load_config, runtime_paths
 from orchestrator.agent_scorer import load_recent_metrics
+from orchestrator.gh_project import query_project, set_item_status, edit_issue_labels, ensure_labels
 
 WINDOW_DAYS = 30
 STALE_DAYS = 30
@@ -209,11 +211,17 @@ Rules:
 - Do NOT create tasks that duplicate existing open issues
 - Issue body must use ## Goal, ## Success Criteria, ## Constraints sections
 
+Rules:
+- Order by priority (most impactful first)
+- Assign priority based on risk and impact — security/data-loss risks are high,
+  tech-debt cleanup is normal, nice-to-haves are low
+
 Return ONLY a JSON array (no markdown fences, no commentary) of exactly {num_issues} objects.
 Each object must have:
-  "title"  - concise GitHub issue title under 70 chars
-  "body"   - structured body with ## Goal\\n...\\n## Success Criteria\\n...\\n## Constraints\\n- Prefer minimal diffs
-  "labels" - JSON array of label strings (choose from: enhancement, bug, tech-debt, agent-os)
+  "title"    - concise GitHub issue title under 70 chars
+  "body"     - structured body with ## Goal\\n...\\n## Success Criteria\\n...\\n## Constraints\\n- Prefer minimal diffs
+  "priority" - one of: prio:high, prio:normal, prio:low
+  "labels"   - JSON array of label strings (choose from: enhancement, bug, tech-debt)
 
 --- Stale issues (open >30 days, no activity) ---
 {stale_issues}
@@ -257,6 +265,13 @@ def _parse_issues(text: str) -> list[dict]:
 
 def _create_issue(repo: str, title: str, body: str, labels: list[str]) -> str:
     """Create a GitHub issue and return its URL."""
+    # Ensure priority and ready labels exist
+    prio_labels = [l for l in labels if l.startswith("prio:")]
+    custom_labels = prio_labels + ["ready"]
+    try:
+        ensure_labels(repo, custom_labels)
+    except Exception:
+        pass
     cmd = ["gh", "issue", "create", "--repo", repo, "--title", title, "--body", body]
     for label in labels:
         cmd += ["--label", label]
@@ -264,6 +279,48 @@ def _create_issue(repo: str, title: str, body: str, labels: list[str]) -> str:
     if result.returncode != 0:
         raise RuntimeError(f"gh issue create failed: {result.stderr.strip()}")
     return result.stdout.strip()
+
+
+def _set_issues_ready(cfg: dict, github_slug: str, issue_urls: list[str]):
+    """Move created groomer issues to Status=Ready on the project board."""
+    owner = cfg.get("github_owner", "")
+    if not owner:
+        return
+
+    for project_cfg in cfg.get("github_projects", {}).values():
+        if not isinstance(project_cfg, dict):
+            continue
+        repo_match = any(
+            rc.get("github_repo") == github_slug
+            for rc in project_cfg.get("repos", [])
+        )
+        if not repo_match:
+            continue
+
+        ready_value = project_cfg.get("ready_value", "Ready")
+        try:
+            info = query_project(project_cfg["project_number"], owner)
+            ready_option = info["status_options"].get(ready_value)
+            if not info["status_field_id"] or not ready_option:
+                print(f"  Warning: status option '{ready_value}' not found in project")
+                return
+
+            for item in info["items"]:
+                if item["url"] in issue_urls:
+                    set_item_status(
+                        info["project_id"],
+                        item["item_id"],
+                        info["status_field_id"],
+                        ready_option,
+                    )
+                    print(f"  Set #{item['number']} → Ready on project board")
+                    try:
+                        edit_issue_labels(github_slug, item["number"], add=["ready"])
+                    except Exception:
+                        pass
+        except Exception as e:
+            print(f"  Warning: failed to set project status: {e}")
+        return
 
 
 def _send_telegram(cfg: dict, text: str):
@@ -426,6 +483,11 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
         title = (issue.get("title") or "").strip()
         body = (issue.get("body") or "").strip()
         labels = [str(l) for l in issue.get("labels", []) if l]
+        priority = issue.get("priority", "prio:normal")
+
+        # Add priority label
+        if priority not in labels:
+            labels.append(priority)
 
         if not title:
             continue
@@ -450,6 +512,11 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
         except Exception as e:
             print(f"  Failed to create {title!r}: {e}")
             skipped.append(title)
+
+    # Set all created issues to Ready → triggers dispatch on next cycle
+    if created_urls:
+        print(f"\n  Setting {len(created_urls)} issue(s) to Ready on project board...")
+        _set_issues_ready(cfg, github_slug, created_urls)
 
     return {"created": len(created_urls), "skipped": len(skipped), "urls": created_urls}
 

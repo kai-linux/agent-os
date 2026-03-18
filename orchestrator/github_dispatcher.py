@@ -113,8 +113,20 @@ def build_mailbox_task(cfg: dict, project_key: str, repo_cfg: dict, issue: dict)
     return task_id, body
 
 
+_PRIO_ORDER = {"prio:high": 0, "prio:normal": 1, "prio:low": 2}
+
+
+def _item_priority(item: dict) -> int:
+    """Return sort key — lower number = higher priority."""
+    for lbl in item.get("labels", set()):
+        if lbl in _PRIO_ORDER:
+            return _PRIO_ORDER[lbl]
+    return _PRIO_ORDER["prio:normal"]
+
+
 def _dispatch_item(cfg, paths, owner, repo_to_project, info, ready_items) -> bool:
-    """Try to dispatch one ready item. Returns True if dispatched."""
+    """Try to dispatch one ready item (highest priority first). Returns True if dispatched."""
+    ready_items = sorted(ready_items, key=_item_priority)
     for item in ready_items:
         repo_full = item["repo"]
         if repo_full not in repo_to_project:
