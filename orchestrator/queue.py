@@ -276,13 +276,41 @@ def has_changes(worktree: Path):
     return bool(result.stdout.strip())
 
 
+def has_unpushed_commits(worktree: Path, branch: str) -> bool:
+    """Return True if local branch has commits not yet on origin."""
+    # Check whether remote branch exists at all
+    remote_check = subprocess.run(
+        ["git", "ls-remote", "--heads", "origin", branch],
+        cwd=worktree, capture_output=True, text=True,
+    )
+    if not remote_check.stdout.strip():
+        # Remote branch doesn't exist — any local commit counts as unpushed
+        has_any = subprocess.run(
+            ["git", "log", "--oneline", "-1"],
+            cwd=worktree, capture_output=True, text=True,
+        )
+        return bool(has_any.stdout.strip())
+    # Remote exists — check for commits ahead of origin
+    ahead = subprocess.run(
+        ["git", "log", f"origin/{branch}..HEAD", "--oneline"],
+        cwd=worktree, capture_output=True, text=True,
+    )
+    return bool(ahead.stdout.strip())
+
+
 def commit_and_push(worktree: Path, branch: str, task_id: str, allow_push: bool, logfile: Path, queue_summary_log: Path):
-    if not has_changes(worktree):
+    uncommitted = has_changes(worktree)
+    unpushed = has_unpushed_commits(worktree, branch)
+
+    if not uncommitted and not unpushed:
         log("No file changes detected. Skipping commit/push.", logfile, queue_summary_log=queue_summary_log)
         return False
 
-    run(["git", "add", "-A"], cwd=worktree, logfile=logfile, queue_summary_log=queue_summary_log)
-    run(["git", "commit", "-m", f"agent {task_id}"], cwd=worktree, logfile=logfile, queue_summary_log=queue_summary_log)
+    if uncommitted:
+        run(["git", "add", "-A"], cwd=worktree, logfile=logfile, queue_summary_log=queue_summary_log)
+        run(["git", "commit", "-m", f"agent {task_id}"], cwd=worktree, logfile=logfile, queue_summary_log=queue_summary_log)
+    else:
+        log("Agent already committed changes; pushing unpushed commits.", logfile, queue_summary_log=queue_summary_log)
 
     if allow_push:
         run(["git", "push", "-u", "origin", branch], cwd=worktree, logfile=logfile, queue_summary_log=queue_summary_log)
