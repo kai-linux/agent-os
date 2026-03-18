@@ -16,6 +16,20 @@
 
 ## Recent Changes
 
+### 2026-03-18 — [task-20260318-082904-task-weekly-log-analyzer-auto-creates-improvement-] (#10 kai-linux/agent-os)
+Added `orchestrator/log_analyzer.py` — a weekly analyzer that reads the last 7 days of `runtime/metrics/agent_stats.jsonl` and `runtime/logs/queue-summary.log`, sends both to Claude Haiku with a deterministic prompt to identify the top 3 failure patterns / bottlenecks, deduplicates against open GitHub issues, creates one issue per problem (body follows `## Goal / ## Success Criteria / ## Constraints` template), and posts a summary to Telegram. `bin/run_log_analyzer.sh` is the entry point; a system cron fires every Monday at 07:00.
+
+**Files:** `- orchestrator/log_analyzer.py`, `- bin/run_log_analyzer.sh`
+
+**Decisions:**
+  - - Reuses `load_recent_metrics()` from `agent_scorer.py` to avoid duplicating the JSONL parsing logic
+  - - Prompt is deterministic (asks for exact JSON schema, no open-ended options) to reduce noise in repeated runs
+  - - Deduplication uses `gh issue list --search <title>` and exact-title match; avoids creating duplicate improvement tasks
+  - - Issue body uses the standard `## Goal / ## Success Criteria / ## Constraints` sections so the dispatcher can route them normally
+  - - Cron added to system crontab (`0 7 * * 1`) rather than relying on session-only CronCreate
+
+
+
 ### 2026-03-18 — [task-20260318-065704-task-agent-performance-scorer-and-metrics-log] (#9 kai-linux/agent-os)
 Added structured metrics logging to queue.py and a new weekly agent performance scorer. After each task completes, `record_metrics()` atomically appends a JSONL record (timestamp, task_id, repo, agent, status, attempt_count, duration_seconds, task_type) to `runtime/metrics/agent_stats.jsonl`, with automatic rotation at 10 MB. A new `orchestrator/agent_scorer.py` module reads the last 7 days of metrics, computes per-agent success rates, and creates a GitHub issue with the title "Agent X degraded (Y% success rate)" for any agent below 60%. `bin/run_agent_scorer.sh` is the cron entry point.
 
