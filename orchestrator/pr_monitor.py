@@ -19,6 +19,36 @@ from orchestrator.gh_project import (
 MAX_MERGE_ATTEMPTS = 3
 STATE_FILE_NAME = "pr_monitor_state.json"
 
+_FORK_PR_CLOSE_MSG = (
+    "Closed automatically — this repository does not accept pull requests "
+    "from forks. The CI/CD pipeline only processes internal agent branches.\n\n"
+    "If you have a contribution, please open an issue instead (note: issues "
+    "from external authors are also auto-closed by our automation)."
+)
+
+
+def _close_fork_prs(repos: set[str]):
+    """Close open PRs from forks across all configured repos."""
+    for repo in repos:
+        try:
+            prs = gh_json([
+                "pr", "list", "-R", repo, "--state", "open",
+                "--json", "number,headRefName,isCrossRepository",
+            ]) or []
+        except Exception:
+            continue
+        for pr in prs:
+            if not pr.get("isCrossRepository", False):
+                continue
+            try:
+                gh([
+                    "pr", "close", str(pr["number"]), "-R", repo,
+                    "--comment", _FORK_PR_CLOSE_MSG,
+                ], check=False)
+                print(f"Closed fork PR {repo}#{pr['number']} (branch: {pr.get('headRefName', '?')})")
+            except Exception as e:
+                print(f"Warning: failed to close fork PR {repo}#{pr['number']}: {e}")
+
 
 def _load_state(paths: dict) -> dict:
     state_file = Path(paths["LOGS"]) / STATE_FILE_NAME
@@ -261,6 +291,9 @@ def monitor_prs():
     if not repos:
         print("No repos configured in github_projects. Nothing to monitor.")
         return
+
+    # Housekeeping: close PRs from forks
+    _close_fork_prs(repos)
 
     for repo in sorted(repos):
         prs = _list_agent_prs(repo)
