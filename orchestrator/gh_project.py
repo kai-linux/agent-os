@@ -215,4 +215,13 @@ def create_pr_for_branch(repo: str, branch: str, title: str, body: str) -> Optio
         ])
         return out["url"] if out else None
     except Exception:
-        return None
+        # PR may already exist (agent created it) — look it up
+        try:
+            out = gh_json([
+                "pr", "view", "--repo", repo,
+                "--head", branch,
+                "--json", "url",
+            ])
+            return out["url"] if out else None
+        except Exception:
+            return None
