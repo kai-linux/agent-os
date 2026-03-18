@@ -236,6 +236,9 @@ ATTEMPTED_APPROACHES:
 - bullet
 - bullet
 
+MANUAL_STEPS:
+- None
+
 Rules:
 - Prefer the smallest viable diff.
 - Do not modify unrelated files.
@@ -246,6 +249,12 @@ Rules:
 - Always write .agent_result.md even if no code changes were made
 - In ATTEMPTED_APPROACHES, describe what you tried this run so future runs do not repeat the same failed path
 - Read the prior model attempts above and avoid repeating clearly failed approaches unless you have a specific new reason
+- In MANUAL_STEPS, list every action the human operator must take to activate this feature.
+  This includes: crontab entries, config.yaml changes, environment variables, server commands, package installs.
+  Format cron entries as ready-to-paste crontab lines with a comment.
+  Format config.yaml additions as indented YAML snippets.
+  Write exactly "- None" if no manual action is required.
+  This section is CRITICAL — the operator depends on it to know what to do after deployment.
 """
     prompt_file.write_text(prompt, encoding="utf-8")
     return prompt_file
@@ -315,15 +324,17 @@ def parse_agent_result(worktree: Path):
     text = result_file.read_text(encoding="utf-8")
 
     status_match = re.search(r"^STATUS:\s*(.+)$", text, flags=re.MULTILINE)
-    summary = split_section(text, "SUMMARY", ["DONE", "BLOCKERS", "NEXT_STEP", "FILES_CHANGED", "TESTS_RUN", "DECISIONS", "RISKS", "ATTEMPTED_APPROACHES"])
-    done = split_section(text, "DONE", ["BLOCKERS", "NEXT_STEP", "FILES_CHANGED", "TESTS_RUN", "DECISIONS", "RISKS", "ATTEMPTED_APPROACHES"])
-    blockers = split_section(text, "BLOCKERS", ["NEXT_STEP", "FILES_CHANGED", "TESTS_RUN", "DECISIONS", "RISKS", "ATTEMPTED_APPROACHES"])
-    next_step = split_section(text, "NEXT_STEP", ["FILES_CHANGED", "TESTS_RUN", "DECISIONS", "RISKS", "ATTEMPTED_APPROACHES"])
-    files_changed = split_section(text, "FILES_CHANGED", ["TESTS_RUN", "DECISIONS", "RISKS", "ATTEMPTED_APPROACHES"])
-    tests_run = split_section(text, "TESTS_RUN", ["DECISIONS", "RISKS", "ATTEMPTED_APPROACHES"])
-    decisions = split_section(text, "DECISIONS", ["RISKS", "ATTEMPTED_APPROACHES"])
-    risks = split_section(text, "RISKS", ["ATTEMPTED_APPROACHES"])
-    attempted_approaches = split_section(text, "ATTEMPTED_APPROACHES", [])
+    all_sections = ["DONE", "BLOCKERS", "NEXT_STEP", "FILES_CHANGED", "TESTS_RUN", "DECISIONS", "RISKS", "ATTEMPTED_APPROACHES", "MANUAL_STEPS"]
+    summary = split_section(text, "SUMMARY", all_sections)
+    done = split_section(text, "DONE", all_sections[1:])
+    blockers = split_section(text, "BLOCKERS", all_sections[2:])
+    next_step = split_section(text, "NEXT_STEP", all_sections[3:])
+    files_changed = split_section(text, "FILES_CHANGED", all_sections[4:])
+    tests_run = split_section(text, "TESTS_RUN", all_sections[5:])
+    decisions = split_section(text, "DECISIONS", all_sections[6:])
+    risks = split_section(text, "RISKS", all_sections[7:])
+    attempted_approaches = split_section(text, "ATTEMPTED_APPROACHES", all_sections[8:])
+    manual_steps = split_section(text, "MANUAL_STEPS", [])
 
     status = status_match.group(1).strip().lower() if status_match else "blocked"
     if status not in {"complete", "partial", "blocked"}:
@@ -340,6 +351,7 @@ def parse_agent_result(worktree: Path):
         "decisions": parse_bullets(decisions),
         "risks": parse_bullets(risks),
         "attempted_approaches": parse_bullets(attempted_approaches),
+        "manual_steps": manual_steps.strip() if manual_steps else "",
         "raw": text,
     }
 
@@ -965,6 +977,14 @@ def main():
                 logfile,
                 QUEUE_SUMMARY_LOG,
             )
+            manual_steps = final_result.get("manual_steps", "").strip()
+            if manual_steps and manual_steps.lower() not in ("- none", "none", ""):
+                send_telegram(
+                    cfg,
+                    f"🔧 Manual action required\nTask: {task_id}\nRepo: {repo.name}\n\n{manual_steps}",
+                    logfile,
+                    QUEUE_SUMMARY_LOG,
+                )
         elif final_result["status"] in ("partial", "blocked"):
             followup = create_followup_task(
                 meta,

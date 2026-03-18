@@ -32,6 +32,8 @@ def sync_result(meta: dict, result: dict, commit_hash: str | None):
     status = result.get("status", "blocked")
     summary = result.get("summary", "No summary.")
     next_step = result.get("next_step", "None")
+    manual_steps = result.get("manual_steps", "").strip()
+    has_manual = bool(manual_steps and manual_steps.lower() not in ("- none", "none", ""))
 
     comment = f"""## Orchestrator update
 
@@ -46,6 +48,9 @@ def sync_result(meta: dict, result: dict, commit_hash: str | None):
 ### Next step
 {next_step}
 """
+    if has_manual:
+        comment += f"\n### 🔧 Manual steps required\n```\n{manual_steps}\n```\n"
+
     pr_url = None
     if status == "complete":
         pr_url = create_pr_for_branch(
