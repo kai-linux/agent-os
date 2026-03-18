@@ -83,9 +83,29 @@ def send_telegram(cfg: dict, text: str, logfile: Path | None = None, queue_summa
         log(f"Telegram send exception: {e}", logfile, queue_summary_log=queue_summary_log)
 
 
-def pick_task(inbox: Path):
-    tasks = sorted(inbox.glob("*.md"))
-    return tasks[0] if tasks else None
+def priority_score(task: Path, cfg: dict) -> float:
+    """Compute priority score = priority_weight + age_bonus (1 pt/hr)."""
+    weights = cfg.get("priority_weights", {"prio:high": 30, "prio:normal": 10, "prio:low": 0})
+    default_weight = weights.get("prio:normal", 10)
+    try:
+        text = task.read_text(encoding="utf-8")
+        m = re.match(r"^---\s*\n(.*?)\n---\s*\n", text, flags=re.DOTALL)
+        meta = yaml.safe_load(m.group(1)) if m else {}
+        label = str(meta.get("priority", "prio:normal")).lower()
+    except Exception:
+        label = "prio:normal"
+    weight = weights.get(label, default_weight)
+    age_hours = (datetime.now().timestamp() - task.stat().st_mtime) / 3600
+    return weight + age_hours
+
+
+def pick_task(inbox: Path, cfg: dict | None = None):
+    tasks = list(inbox.glob("*.md"))
+    if not tasks:
+        return None
+    if cfg is None:
+        return sorted(tasks)[0]
+    return max(tasks, key=lambda t: priority_score(t, cfg))
 
 
 def parse_task(path: Path):
@@ -651,7 +671,7 @@ def main():
 
     worker_id = os.environ.get("QUEUE_WORKER_ID", "w0")
 
-    task = pick_task(INBOX)
+    task = pick_task(INBOX, cfg)
     if not task:
         print(f"[{worker_id}] No tasks in inbox.")
         return
@@ -683,7 +703,12 @@ def main():
         model_attempts = list(meta.get("model_attempts", []))
         prior_results = []
 
+        _priority_label = meta.get("priority", "prio:normal")
+        _weights = cfg.get("priority_weights", {"prio:high": 30, "prio:normal": 10, "prio:low": 0})
+        _weight = _weights.get(_priority_label, _weights.get("prio:normal", 10))
+        _score = priority_score(processing, cfg)
         log(f"[{worker_id}] Processing task: {task_id}", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
+        log(f"Priority: {_priority_label} (weight={_weight}, score={_score:.2f})", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
         log(f"Repo: {repo}", logfile, queue_summary_log=QUEUE_SUMMARY_LOG)
         log(f"Base branch: {base_branch}", logfile, queue_summary_log=QUEUE_SUMMARY_LOG)
         log(f"Branch: {branch}", logfile, queue_summary_log=QUEUE_SUMMARY_LOG)
