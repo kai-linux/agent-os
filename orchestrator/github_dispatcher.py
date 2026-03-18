@@ -61,6 +61,14 @@ def build_mailbox_task(cfg: dict, project_key: str, repo_cfg: dict, issue: dict)
     constraints = parsed["constraints"] or "- Work only inside the repo\n- Prefer minimal diffs"
     context = parsed["context"] or "None"
 
+    # Determine priority from issue labels (prio:high / prio:normal / prio:low)
+    label_names = {lbl["name"].lower() for lbl in issue.get("labels", [])}
+    priority = "prio:normal"  # default
+    for lbl in ("prio:high", "prio:normal", "prio:low"):
+        if lbl in label_names:
+            priority = lbl
+            break
+
     frontmatter = {
         "task_id": task_id,
         "repo": repo_cfg["local_repo"],
@@ -73,6 +81,7 @@ def build_mailbox_task(cfg: dict, project_key: str, repo_cfg: dict, issue: dict)
         "max_attempts": cfg["default_max_attempts"],
         "max_runtime_minutes": cfg["max_runtime_minutes"],
         "model_attempts": [],
+        "priority": priority,
         "github_project_key": project_key,
         "github_repo": repo_cfg["github_repo"],
         "github_issue_number": issue["number"],
