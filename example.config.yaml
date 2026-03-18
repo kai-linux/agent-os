@@ -9,6 +9,7 @@ allowed_repos:
 
 default_agent: auto
 default_task_type: implementation
+decomposer_model: haiku            # Fast issue classifier used before dispatch
 max_runtime_minutes: 40
 default_base_branch: main
 default_allow_push: true

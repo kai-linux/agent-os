@@ -16,6 +16,17 @@
 
 ## Recent Changes
 
+### 2026-03-18 — [task-20260318-224806-task-task-decomposer-agent] (#2 kai-linux/agent-os)
+Added dispatch-time epic decomposition via `orchestrator/task_decomposer.py` and a narrow hook in `orchestrator/github_dispatcher.py`. Before writing a mailbox task, the dispatcher now asks Claude Haiku for a structured JSON classification; atomic issues continue unchanged, while epic issues are split into 2-5 ordered sub-issues on the same repo. Each child body starts with `Part of #N`, the parent is moved back to Backlog with an `epic` label, the first child is dispatched immediately, and remaining children are left in Backlog. Any decomposition failure falls back to dispatching the original issue unchanged.
+
+**Files:** `- orchestrator/task_decomposer.py`, `- orchestrator/github_dispatcher.py`, `- orchestrator/gh_project.py`, `- tests/test_task_decomposer.py`
+
+**Decisions:**
+  - - Reused the existing `task_formatter.py` pattern: deterministic prompt, JSON-only response, fence stripping, and safe fallback on parse or CLI failure
+  - - Kept decomposition inside the dispatcher rather than a separate queue stage so no new cron/job wiring was needed
+  - - Parent issues are preserved as umbrella epics; child issues inherit non-workflow labels while workflow labels stay controlled by dispatch/project status
+  - - Project status updates are best-effort and non-blocking; if they fail, issue creation still succeeds and the original dispatch path is preserved
+
 ### 2026-03-18 — [task-20260318-093604-task-auto-backlog-groomer] (#12 kai-linux/agent-os)
 Implemented `orchestrator/backlog_groomer.py` and `bin/run_backlog_groomer.sh`. The groomer reads each repo's open issues (via `gh issue list`), last 30 days of `agent_stats.jsonl` completions, CODEBASE.md Known Issues section, and risk flags from `.agent_result.md` files in worktrees. It identifies stale issues (>30 days no activity), Known Issues without linked GitHub issues, and risk flags from recent completions. All data is sent to Claude Haiku with a deterministic prompt to generate 3-5 targeted improvement tasks. Semantic dedup via `difflib.SequenceMatcher` (0.75 threshold) prevents duplicate issues. A system cron fires every Saturday at 20:00.
 
@@ -114,5 +125,4 @@ Implemented parallel queue worker execution by creating a thin `orchestrator/sup
   - - Locked-repo workers return task to inbox and exit; supervisor respawns workers, so tasks eventually run when repo is free
   - - Global flock in run_queue.sh kept on supervisor to prevent duplicate supervisor instances
   - - Worker IDs (w0, w1, ...) are sequential integers from supervisor lifetime counter
-
 

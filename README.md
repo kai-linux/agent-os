@@ -17,7 +17,7 @@ Every startup needs roles. Agent OS fills them all:
 | Role | Who | What they do | When |
 |---|---|---|---|
 | **Engineers** | Codex, Claude, Gemini, DeepSeek | Write code, fix bugs, implement features | Continuously |
-| **Project Manager** | `github_dispatcher.py` | Triages the backlog, assigns work, reformats sloppy tickets | Every minute |
+| **Project Manager** | `github_dispatcher.py` | Triages the backlog, decomposes epics, reforms sloppy tickets | Every minute |
 | **Tech Lead** | `queue.py` | Picks the right engineer for the job, manages retries and handoffs | Per task |
 | **Code Reviewer** | `pr_monitor.py` | Watches CI, approves merges, resolves conflicts | Every 5 min |
 | **Analyst** | `log_analyzer.py` | Reviews last week's failures, files bugs against the system itself | Monday 07:00 |
@@ -42,7 +42,7 @@ Nobody needs to be there.
             Status → Ready                                    │
                     │                                         │
             ┌───────▼────────┐                                │
-            │   Dispatcher   │  LLM-formats task              │
+            │   Dispatcher   │  Decomposes epics, formats task │
             │   (every min)  │  Routes by repo + type         │
             └───────┬────────┘                                │
                     │                                         │
@@ -170,7 +170,7 @@ Issues can specify a preferred agent. The dispatcher can auto-detect task type. 
 ```
 agent-os/
 ├── orchestrator/
-│   ├── github_dispatcher.py     # Backlog → mailbox, LLM task formatting
+│   ├── github_dispatcher.py     # Backlog → mailbox, epic decomposition, task formatting
 │   ├── queue.py                 # Execution engine, routing, retry, escalation
 │   ├── supervisor.py            # Parallel worker management, per-repo locks
 │   ├── github_sync.py           # Results → GitHub (comments, labels, status)
@@ -295,4 +295,3 @@ Level 3 (what's needed for true innovation): An agent that can:
   - Query external data (analytics, user feedback, market data)
   - Form and test hypotheses ("conversion is low → maybe we need social proof → create a testimonials section")
   - Propose things the human never thought of
-
