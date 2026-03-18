@@ -16,6 +16,19 @@
 
 ## Recent Changes
 
+### 2026-03-18 — [task-20260318-093604-task-auto-backlog-groomer] (#12 kai-linux/agent-os)
+Implemented `orchestrator/backlog_groomer.py` and `bin/run_backlog_groomer.sh`. The groomer reads each repo's open issues (via `gh issue list`), last 30 days of `agent_stats.jsonl` completions, CODEBASE.md Known Issues section, and risk flags from `.agent_result.md` files in worktrees. It identifies stale issues (>30 days no activity), Known Issues without linked GitHub issues, and risk flags from recent completions. All data is sent to Claude Haiku with a deterministic prompt to generate 3-5 targeted improvement tasks. Semantic dedup via `difflib.SequenceMatcher` (0.75 threshold) prevents duplicate issues. A system cron fires every Saturday at 20:00.
+
+**Files:** `- orchestrator/backlog_groomer.py`, `- bin/run_backlog_groomer.sh`
+
+**Decisions:**
+  - - Reused load_recent_metrics() from agent_scorer.py with 30-day window for completions
+  - - Semantic dedup uses difflib.SequenceMatcher (0.75 threshold) rather than exact title match, preventing near-duplicate issues
+  - - Deterministic Haiku prompt requests exact JSON schema with ## Goal / ## Success Criteria / ## Constraints body format for dispatcher compatibility
+  - - Risk flags scanned from .agent_result.md files in worktrees directory (filtered by 30-day mtime)
+  - - CODEBASE.md Known Issues parsed via regex between ## Known Issues heading and next ## heading
+
+
 ### 2026-03-18 — [task-20260318-082904-task-weekly-log-analyzer-auto-creates-improvement-] (#10 kai-linux/agent-os)
 Implemented `orchestrator/log_analyzer.py` and `bin/run_log_analyzer.sh`. The analyzer reads the last 7 days of `runtime/metrics/agent_stats.jsonl` and `runtime/logs/queue-summary.log`, calls Claude Haiku with a deterministic structured prompt to identify the top 3 failure patterns/bottlenecks, deduplicates against existing open GitHub issues by exact title match, creates one issue per problem using the standard `## Goal / ## Success Criteria / ## Constraints` body format, and posts a summary to Telegram. A system cron fires every Monday at 07:00.
 
