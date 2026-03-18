@@ -140,6 +140,29 @@ def parse_bullets(section_text: str):
     return lines or ["- None"]
 
 
+def _git_fetch_with_retry(repo: Path, logfile: Path, queue_summary_log: Path, max_retries: int = 3):
+    """Fetch origin with retries to handle git lock contention from concurrent cron pulls."""
+    import time
+    for attempt in range(1, max_retries + 1):
+        try:
+            run(["git", "-C", repo, "fetch", "origin"], logfile=logfile, queue_summary_log=queue_summary_log)
+            return
+        except RuntimeError:
+            if attempt == max_retries:
+                raise
+            wait = attempt * 5  # 5s, 10s, 15s
+            log(f"git fetch failed (attempt {attempt}/{max_retries}), retrying in {wait}s...", logfile, queue_summary_log=queue_summary_log)
+            time.sleep(wait)
+            # Remove stale lock file if it exists (only after waiting)
+            lock_file = repo / ".git" / "index.lock"
+            if lock_file.exists():
+                try:
+                    lock_file.unlink()
+                    log("Removed stale .git/index.lock", logfile, queue_summary_log=queue_summary_log)
+                except OSError:
+                    pass
+
+
 def ensure_worktree(cfg: dict, repo: Path, base_branch: str, branch: str, task_id: str, logfile: Path, queue_summary_log: Path):
     worktree = Path(cfg["worktrees_dir"]) / repo.name / task_id
     worktree.parent.mkdir(parents=True, exist_ok=True)
@@ -147,7 +170,7 @@ def ensure_worktree(cfg: dict, repo: Path, base_branch: str, branch: str, task_i
     if worktree.exists():
         shutil.rmtree(worktree, ignore_errors=True)
 
-    run(["git", "-C", repo, "fetch", "origin"], logfile=logfile, queue_summary_log=queue_summary_log)
+    _git_fetch_with_retry(repo, logfile, queue_summary_log)
     run(
         ["git", "-C", repo, "worktree", "add", "-B", branch, worktree, f"origin/{base_branch}"],
         logfile=logfile,
