@@ -1,0 +1,3 @@
+# Never conflict on these auto-generated files
+.agent_result.md merge=ours
+CODEBASE.md merge=union
