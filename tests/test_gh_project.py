@@ -1,4 +1,4 @@
-"""Unit tests for pure helpers in orchestrator/gh_project.py"""
+"""Unit tests for pure helpers in orchestrator/pr_monitor.py"""
 import sys
 from pathlib import Path
 
@@ -16,28 +16,28 @@ def test_checks_all_passed_empty():
 
 
 def test_checks_all_passed_success():
-    checks = [{"state": "completed", "conclusion": "success"}]
+    checks = [{"state": "SUCCESS", "bucket": "pass"}]
     assert _checks_all_passed(checks) is True
 
 
 def test_checks_all_passed_pending():
     checks = [
-        {"state": "completed", "conclusion": "success"},
-        {"state": "in_progress", "conclusion": ""},
+        {"state": "SUCCESS", "bucket": "pass"},
+        {"state": "PENDING", "bucket": ""},
     ]
     assert _checks_all_passed(checks) is False
 
 
 def test_checks_all_passed_skipped_neutral():
     checks = [
-        {"state": "completed", "conclusion": "skipped"},
-        {"state": "completed", "conclusion": "neutral"},
+        {"state": "SKIPPED", "bucket": "pass"},
+        {"state": "NEUTRAL", "bucket": "pass"},
     ]
     assert _checks_all_passed(checks) is True
 
 
 def test_checks_all_passed_failure():
-    checks = [{"state": "completed", "conclusion": "failure"}]
+    checks = [{"state": "FAILURE", "bucket": "fail"}]
     assert _checks_all_passed(checks) is False
 
 
@@ -47,19 +47,19 @@ def test_checks_all_passed_failure():
 
 def test_checks_any_failed_none():
     assert _checks_any_failed([]) is False
-    assert _checks_any_failed([{"state": "completed", "conclusion": "success"}]) is False
+    assert _checks_any_failed([{"state": "SUCCESS", "bucket": "pass"}]) is False
 
 
 def test_checks_any_failed_one_failure():
     checks = [
-        {"state": "completed", "conclusion": "success"},
-        {"state": "completed", "conclusion": "failure"},
+        {"state": "SUCCESS", "bucket": "pass"},
+        {"state": "FAILURE", "bucket": "fail"},
     ]
     assert _checks_any_failed(checks) is True
 
 
-def test_checks_any_failed_timed_out():
-    assert _checks_any_failed([{"state": "completed", "conclusion": "timed_out"}]) is True
+def test_checks_any_failed_bucket_fail():
+    assert _checks_any_failed([{"state": "ERROR", "bucket": "fail"}]) is True
 
 
 # ---------------------------------------------------------------------------

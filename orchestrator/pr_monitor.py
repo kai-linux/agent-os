@@ -118,7 +118,7 @@ def _get_pr_checks(repo: str, pr_number: int) -> list[dict]:
     """Return CI check results for a PR."""
     try:
         result = subprocess.run(
-            ["gh", "pr", "checks", str(pr_number), "-R", repo, "--json", "name,state,conclusion"],
+            ["gh", "pr", "checks", str(pr_number), "-R", repo, "--json", "name,state,bucket"],
             capture_output=True, text=True,
         )
         # gh pr checks may return non-zero when checks are failing but still output valid JSON
@@ -130,24 +130,29 @@ def _get_pr_checks(repo: str, pr_number: int) -> list[dict]:
 
 
 def _checks_all_passed(checks: list[dict]) -> bool:
-    """Return True only when every check has a terminal passing conclusion."""
+    """Return True only when every check has a terminal passing state."""
     if not checks:
         return False  # no checks means uncertain — don't auto-merge
     for c in checks:
-        state = (c.get("state") or "").lower()
-        conclusion = (c.get("conclusion") or "").lower()
-        if state in ("pending", "queued", "in_progress"):
+        state = (c.get("state") or "").upper()
+        bucket = (c.get("bucket") or "").lower()
+        if state in ("PENDING", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED"):
             return False
-        if conclusion not in ("success", "skipped", "neutral", ""):
+        if bucket == "fail":
+            return False
+        if state not in ("SUCCESS", "NEUTRAL", "SKIPPED"):
             return False
     return True
 
 
 def _checks_any_failed(checks: list[dict]) -> bool:
-    """Return True when at least one check has a terminal failing conclusion."""
+    """Return True when at least one check has a terminal failing state."""
     for c in checks:
-        conclusion = (c.get("conclusion") or "").lower()
-        if conclusion in ("failure", "error", "timed_out", "action_required", "cancelled"):
+        state = (c.get("state") or "").upper()
+        bucket = (c.get("bucket") or "").lower()
+        if bucket == "fail":
+            return True
+        if state in ("FAILURE", "ERROR", "TIMED_OUT", "ACTION_REQUIRED", "CANCELLED"):
             return True
     return False
 
