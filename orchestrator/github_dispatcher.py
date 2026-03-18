@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime
 from pathlib import Path
@@ -13,6 +14,7 @@ from orchestrator.gh_project import (
     edit_issue_labels,
     add_issue_comment,
     list_ready_issues,
+    gh,
 )
 from orchestrator.task_formatter import format_task
 from orchestrator.trust import is_trusted
@@ -191,10 +193,61 @@ def _dispatch_item(cfg, paths, owner, repo_to_project, info, ready_items) -> boo
     return False
 
 
+_CLOSE_MSG = (
+    "Closed automatically — this repository uses automated issue processing "
+    "and only accepts issues from authorized authors.\n\n"
+    "If you found a bug or have a feature request, please open a discussion "
+    "or fork the repo instead. Thank you!"
+)
+
+
+def _close_untrusted_issues(cfg: dict):
+    """Close open issues created by untrusted authors across all configured repos."""
+    seen_repos: set[str] = set()
+    for project_cfg in cfg.get("github_projects", {}).values():
+        if not isinstance(project_cfg, dict):
+            continue
+        for repo_cfg in project_cfg.get("repos", []):
+            repo = repo_cfg.get("github_repo", "")
+            if not repo or repo in seen_repos:
+                continue
+            seen_repos.add(repo)
+
+            try:
+                raw = gh([
+                    "issue", "list", "-R", repo, "--state", "open",
+                    "--json", "number,author", "--limit", "50",
+                ], check=False)
+                if not raw:
+                    continue
+                issues = json.loads(raw)
+            except Exception:
+                continue
+
+            for issue in issues:
+                author = (issue.get("author") or {}).get("login", "")
+                if is_trusted(author, cfg):
+                    continue
+                number = issue.get("number")
+                if not number:
+                    continue
+                try:
+                    gh([
+                        "issue", "close", str(number), "-R", repo,
+                        "--comment", _CLOSE_MSG,
+                    ], check=False)
+                    print(f"Closed untrusted issue {repo}#{number} (author: {author})")
+                except Exception as e:
+                    print(f"Warning: failed to close {repo}#{number}: {e}")
+
+
 def dispatch_one():
     cfg = load_config()
     paths = runtime_paths(cfg)
     owner = cfg["github_owner"]
+
+    # Housekeeping: close issues from untrusted authors
+    _close_untrusted_issues(cfg)
 
     # Build repo -> (project_key, project_cfg, repo_cfg) mapping
     repo_to_project: dict[str, tuple[str, dict, dict]] = {}
