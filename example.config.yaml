@@ -16,6 +16,11 @@ default_max_attempts: 4
 max_parallel_workers: 1
 test_timeout_minutes: 5             # Timeout for test commands (default: 5)
 
+priority_weights:                   # Score added per priority label (default: prio:normal=10)
+  prio:high: 30
+  prio:normal: 10
+  prio:low: 0
+
 # Per-repo test commands (keyed by resolved repo path or repo directory name)
 repo_configs:
   /path/to/repo1:
