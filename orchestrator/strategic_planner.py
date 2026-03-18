@@ -5,8 +5,13 @@ from each repository, generates a prioritized 5-task sprint plan using Claude
 Sonnet, posts it to Telegram for human approval, and conditionally creates
 GitHub issues upon confirmation.
 
+On approval, created issues are automatically set to Status=Ready on the
+project board, triggering immediate dispatch to agents. One tap on Telegram
+starts an entire sprint.
+
 Runs weekly on Sundays at 20:00.  Approval gate is mandatory — no issues are
-created without explicit human confirmation via Telegram reply.
+created without explicit human confirmation via Telegram reply. If no response
+within 24 hours, the plan is skipped and a fresh one is generated next week.
 """
 from __future__ import annotations
 
@@ -21,6 +26,7 @@ from pathlib import Path
 
 from orchestrator.paths import load_config, runtime_paths
 from orchestrator.agent_scorer import load_recent_metrics
+from orchestrator.gh_project import query_project, set_item_status, edit_issue_labels, ensure_labels
 
 PLAN_SIZE = 5
 ANALYSIS_MODEL = "sonnet"
@@ -486,10 +492,55 @@ def plan_repo(cfg: dict, github_slug: str, repo_path: Path) -> list[dict] | None
     return plan[:PLAN_SIZE]
 
 
+def _set_issues_ready(cfg: dict, github_slug: str, issue_urls: list[str]):
+    """Move created sprint issues to Status=Ready on the project board."""
+    owner = cfg.get("github_owner", "")
+    if not owner:
+        return
+
+    for project_cfg in cfg.get("github_projects", {}).values():
+        if not isinstance(project_cfg, dict):
+            continue
+        # Check if this project covers the repo
+        repo_match = any(
+            rc.get("github_repo") == github_slug
+            for rc in project_cfg.get("repos", [])
+        )
+        if not repo_match:
+            continue
+
+        ready_value = project_cfg.get("ready_value", "Ready")
+        try:
+            info = query_project(project_cfg["project_number"], owner)
+            ready_option = info["status_options"].get(ready_value)
+            if not info["status_field_id"] or not ready_option:
+                print(f"  Warning: status option '{ready_value}' not found in project")
+                return
+
+            for item in info["items"]:
+                if item["url"] in issue_urls:
+                    set_item_status(
+                        info["project_id"],
+                        item["item_id"],
+                        info["status_field_id"],
+                        ready_option,
+                    )
+                    print(f"  Set #{item['number']} → Ready on project board")
+                    # Also add the ready label for visibility
+                    try:
+                        ensure_labels(github_slug, ["ready"])
+                        edit_issue_labels(github_slug, item["number"], add=["ready"])
+                    except Exception:
+                        pass
+        except Exception as e:
+            print(f"  Warning: failed to set project status: {e}")
+        return  # Only process the first matching project
+
+
 def create_plan_issues(
     cfg: dict, github_slug: str, plan: list[dict],
 ) -> tuple[list[str], list[str]]:
-    """Create GitHub issues from an approved plan. Returns (created_urls, skipped)."""
+    """Create GitHub issues from an approved plan, then set them to Ready on the project board."""
     created_urls: list[str] = []
     skipped: list[str] = []
 
@@ -513,6 +564,11 @@ def create_plan_issues(
         except Exception as e:
             print(f"  Failed to create {title!r}: {e}")
             skipped.append(title)
+
+    # Move all created issues to Ready — triggers dispatch on next cycle
+    if created_urls:
+        print(f"\n  Setting {len(created_urls)} issue(s) to Ready on project board...")
+        _set_issues_ready(cfg, github_slug, created_urls)
 
     return created_urls, skipped
 
@@ -559,7 +615,8 @@ def run():
 
         summary = (
             f"✅ Sprint plan approved for {github_slug}\n"
-            f"Issues created: {len(created_urls)} | Skipped (duplicate): {len(skipped)}"
+            f"Issues created: {len(created_urls)} | Skipped (duplicate): {len(skipped)}\n"
+            f"Status: Ready → dispatch will begin within 1 minute"
         )
         for url in created_urls:
             summary += f"\n  {url}"
