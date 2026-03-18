@@ -16,6 +16,18 @@
 
 ## Recent Changes
 
+### 2026-03-18 — [task-20260318-064404-task-priority-aware-queue-dispatch] (#5 kai-linux/agent-os)
+Implemented priority-aware queue dispatch by adding a `priority_score()` helper to `queue.py` that computes score = priority_weight + age_bonus (1 pt/hr), replacing the FIFO `pick_task` with a `max()` selector. The dispatcher writes `priority` into task frontmatter from issue labels (defaulting to `prio:normal`), and the queue logs the priority label, weight, and score when a task is picked up.
+
+**Files:** `- orchestrator/queue.py`, `- orchestrator/github_dispatcher.py`, `- example.config.yaml`
+
+**Decisions:**
+  - - Used file mtime as task age proxy (set at dispatch time, stable across queue restarts)
+  - - Added cfg=None fallback in pick_task so any call without cfg still works (backward compat)
+  - - Priority logged at also_summary=True so it appears in queue summary log, not just per-task log
+  - - Weights dict defaults hardcoded in priority_score itself to avoid KeyError if priority_weights missing from config
+
+
 ### 2026-03-17 — [task-20260317-221804-task-pr-auto-merge-on-green-ci] (#3 kai-linux/agent-os)
 Implemented `orchestrator/pr_monitor.py` — a new module that lists open PRs with "Agent:" title prefix across all configured repos, checks CI status via `gh pr checks`, auto-merges on green using `gh pr merge --squash`, and posts a structured failure comment + adds "blocked" label + sets project Status=Blocked on CI failure. Merge attempts are tracked in a JSON state file (`runtime/logs/pr_monitor_state.json`); each PR is retried at most 3 times before being escalated. Also added `bin/run_pr_monitor.sh` as the entry-point for a cron job running every 5 minutes.
 
