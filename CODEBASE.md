@@ -16,6 +16,16 @@
 
 ## Recent Changes
 
+### 2026-03-18 — [task-20260318-224806-task-task-decomposer-agent] (#2 kai-linux/agent-os)
+Added a fast Claude Haiku decomposition step to the dispatcher so atomic issues still dispatch unchanged while epic issues are split into ordered sub-issues, linked back to the parent, and the first child is dispatched immediately.
+
+**Files:** `- orchestrator/task_decomposer.py`, `- orchestrator/github_dispatcher.py`, `- orchestrator/gh_project.py`, `- tests/test_task_decomposer.py`, `- example.config.yaml`, `- README.md`, `- CODEBASE.md`, `- .agent_result.md`
+
+**Decisions:**
+  - - Reused the existing structured-JSON Claude pattern from `task_formatter.py` so decomposition stays deterministic and cheap with Haiku
+  - - Kept decomposition inside the dispatcher path instead of adding another job or queue stage, which preserved the existing atomic-task flow and simplified fallback behavior
+
+
 ### 2026-03-18 — [task-20260318-093604-task-auto-backlog-groomer] (#12 kai-linux/agent-os)
 Implemented `orchestrator/backlog_groomer.py` and `bin/run_backlog_groomer.sh`. The groomer reads each repo's open issues (via `gh issue list`), last 30 days of `agent_stats.jsonl` completions, CODEBASE.md Known Issues section, and risk flags from `.agent_result.md` files in worktrees. It identifies stale issues (>30 days no activity), Known Issues without linked GitHub issues, and risk flags from recent completions. All data is sent to Claude Haiku with a deterministic prompt to generate 3-5 targeted improvement tasks. Semantic dedup via `difflib.SequenceMatcher` (0.75 threshold) prevents duplicate issues. A system cron fires every Saturday at 20:00.
 
