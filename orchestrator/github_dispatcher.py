@@ -15,6 +15,7 @@ from orchestrator.gh_project import (
     list_ready_issues,
 )
 from orchestrator.task_formatter import format_task
+from orchestrator.trust import is_trusted
 
 
 SECTION_RE = re.compile(r"^##\s+(.+?)\n(.*?)(?=^##\s+|\Z)", re.MULTILINE | re.DOTALL)
@@ -132,6 +133,11 @@ def _dispatch_item(cfg, paths, owner, repo_to_project, info, ready_items) -> boo
         if repo_full not in repo_to_project:
             continue
 
+        # Skip issues from untrusted authors (prompt injection defense)
+        if not is_trusted(item.get("author"), cfg):
+            print(f"Skipped #{item['number']} — untrusted author: {item.get('author', '?')!r}")
+            continue
+
         pk, pcfg, rcfg = repo_to_project[repo_full]
 
         # Skip items with excluded labels
@@ -226,6 +232,10 @@ def dispatch_one():
                 repo_full = repo_cfg["github_repo"]
                 issues = list_ready_issues(repo_full, limit=20)
                 for issue in issues:
+                    author = (issue.get("author") or {}).get("login", "")
+                    if not is_trusted(author, cfg):
+                        print(f"Skipped #{issue['number']} — untrusted author: {author!r}")
+                        continue
                     labels = {lbl["name"].lower() for lbl in issue.get("labels", [])}
                     excluded = {x.lower() for x in project_cfg.get("excluded_labels", [])}
                     if labels.intersection(excluded):

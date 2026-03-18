@@ -21,6 +21,7 @@ from pathlib import Path
 from orchestrator.paths import load_config, runtime_paths
 from orchestrator.agent_scorer import load_recent_metrics
 from orchestrator.gh_project import ensure_labels
+from orchestrator.trust import is_trusted
 
 WINDOW_DAYS = 30
 STALE_DAYS = 30
@@ -40,19 +41,23 @@ def _gh(cmd: list[str], *, check: bool = False) -> str:
     return result.stdout.strip()
 
 
-def _list_open_issues(repo: str) -> list[dict]:
-    """Return open issues for a repo via gh CLI."""
+def _list_open_issues(repo: str, cfg: dict) -> list[dict]:
+    """Return open issues from trusted authors for a repo via gh CLI."""
     raw = _gh([
         "issue", "list", "--repo", repo, "--state", "open",
-        "--json", "number,title,createdAt,updatedAt,labels",
+        "--json", "number,title,createdAt,updatedAt,labels,author",
         "--limit", "100",
     ])
     if not raw:
         return []
     try:
-        return json.loads(raw)
+        issues = json.loads(raw)
     except json.JSONDecodeError:
         return []
+    return [
+        i for i in issues
+        if is_trusted((i.get("author") or {}).get("login", ""), cfg)
+    ]
 
 
 def _stale_issues(issues: list[dict], stale_days: int = STALE_DAYS) -> list[dict]:
@@ -362,8 +367,8 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
     """Groom a single repo. Returns summary dict."""
     print(f"\n--- Grooming {github_slug} ---")
 
-    # 1. Gather open issues
-    open_issues = _list_open_issues(github_slug)
+    # 1. Gather open issues (trusted authors only — prompt injection defense)
+    open_issues = _list_open_issues(github_slug, cfg)
     open_titles = [i.get("title", "") for i in open_issues]
     stale = _stale_issues(open_issues)
     print(f"  Open issues: {len(open_issues)}, stale (>{STALE_DAYS}d): {len(stale)}")
