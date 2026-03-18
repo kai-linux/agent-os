@@ -1,9 +1,11 @@
 import fcntl
 import hashlib
+import json
 import os
 import re
 import shutil
 import subprocess
+import tempfile
 import traceback
 from datetime import datetime
 from pathlib import Path
@@ -639,6 +641,55 @@ def run_tests(cfg: dict, repo: Path, worktree: Path, logfile: Path, queue_summar
     result_path.write_text(text, encoding="utf-8")
 
 
+def record_metrics(
+    cfg: dict,
+    meta: dict,
+    final_result: dict,
+    final_agent: str | None,
+    model_attempts: list[str],
+    start_time: datetime,
+    logfile: Path | None,
+    queue_summary_log: Path | None,
+) -> None:
+    """Atomically append task metrics to runtime/metrics/agent_stats.jsonl."""
+    metrics_dir = Path(cfg.get("root_dir", ".")).expanduser() / "runtime" / "metrics"
+    metrics_dir.mkdir(parents=True, exist_ok=True)
+    metrics_file = metrics_dir / "agent_stats.jsonl"
+
+    duration = (datetime.now() - start_time).total_seconds()
+    record = {
+        "timestamp": datetime.now().isoformat(),
+        "task_id": meta.get("task_id", "unknown"),
+        "repo": str(meta.get("repo", "unknown")),
+        "agent": final_agent or "unknown",
+        "status": final_result.get("status", "unknown"),
+        "attempt_count": len(model_attempts),
+        "duration_seconds": round(duration, 1),
+        "task_type": meta.get("task_type", "unknown"),
+    }
+    line = json.dumps(record) + "\n"
+
+    # Rotate at 10 MB to prevent unbounded growth
+    if metrics_file.exists() and metrics_file.stat().st_size > 10 * 1024 * 1024:
+        metrics_file.rename(metrics_file.with_suffix(".jsonl.1"))
+
+    # Atomic append: read existing + new line → temp file → rename
+    existing = metrics_file.read_text(encoding="utf-8") if metrics_file.exists() else ""
+    fd, tmp_path = tempfile.mkstemp(dir=metrics_dir, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(existing + line)
+        os.replace(tmp_path, metrics_file)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+        raise
+
+    log(f"Metrics recorded for {record['task_id']}: status={record['status']}, agent={record['agent']}", logfile, queue_summary_log=queue_summary_log)
+
+
 def synthesize_exhausted_result(model_attempts: list[str]) -> dict:
     return {
         "status": "blocked",
@@ -690,6 +741,7 @@ def main():
     repo_lock_fh = None
 
     try:
+        start_time = datetime.now()
         meta, body = parse_task(processing)
 
         task_id = meta["task_id"]
@@ -885,6 +937,11 @@ def main():
 
         if final_result is None:
             final_result = synthesize_exhausted_result(model_attempts)
+
+        try:
+            record_metrics(cfg, meta, final_result, final_agent, model_attempts, start_time, logfile, QUEUE_SUMMARY_LOG)
+        except Exception as e:
+            log(f"Metrics recording warning: {e}", logfile, queue_summary_log=QUEUE_SUMMARY_LOG)
 
         # Sync back to GitHub if this task originated from an issue.
         try:
