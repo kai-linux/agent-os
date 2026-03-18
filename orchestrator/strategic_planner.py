@@ -28,6 +28,7 @@ from pathlib import Path
 from orchestrator.paths import load_config, runtime_paths
 from orchestrator.agent_scorer import load_recent_metrics
 from orchestrator.gh_project import query_project, set_item_status, edit_issue_labels, ensure_labels
+from orchestrator.trust import is_trusted
 
 PLAN_SIZE = 5
 ANALYSIS_MODEL = "sonnet"
@@ -113,10 +114,10 @@ def _issue_counts(repo: str) -> dict[str, int]:
     return counts
 
 
-def _open_issues_summary(repo: str) -> str:
-    """Return formatted list of open issues for dedup context."""
+def _open_issues_summary(repo: str, cfg: dict) -> str:
+    """Return formatted list of open issues from trusted authors for dedup context."""
     raw = _gh(["issue", "list", "--repo", repo, "--state", "open",
-               "--json", "number,title,labels", "--limit", "50"])
+               "--json", "number,title,labels,author", "--limit", "50"])
     if not raw:
         return "(no open issues)"
     try:
@@ -127,16 +128,19 @@ def _open_issues_summary(repo: str) -> str:
         return "(no open issues)"
     lines = []
     for i in issues[:50]:
+        author = (i.get("author") or {}).get("login", "")
+        if not is_trusted(author, cfg):
+            continue
         labels = ", ".join(l.get("name", "") for l in i.get("labels", []))
         lbl = f" [{labels}]" if labels else ""
         lines.append(f"- #{i.get('number')}: {i.get('title')}{lbl}")
-    return "\n".join(lines)
+    return "\n".join(lines) if lines else "(no open issues)"
 
 
-def _backlog_issues(repo: str) -> list[dict]:
-    """Return open issues that are NOT in-progress/ready/done (i.e. backlog candidates)."""
+def _backlog_issues(repo: str, cfg: dict) -> list[dict]:
+    """Return open issues from trusted authors that are NOT in-progress/ready/done."""
     raw = _gh(["issue", "list", "--repo", repo, "--state", "open",
-               "--json", "number,title,body,labels,createdAt",
+               "--json", "number,title,body,labels,createdAt,author",
                "--limit", "50"])
     if not raw:
         return []
@@ -146,6 +150,10 @@ def _backlog_issues(repo: str) -> list[dict]:
         return []
     backlog = []
     for i in issues:
+        # Only ingest issues from trusted authors (prompt injection defense)
+        author = (i.get("author") or {}).get("login", "")
+        if not is_trusted(author, cfg):
+            continue
         label_names = {l.get("name", "").lower() for l in i.get("labels", [])}
         # Skip issues already dispatched or in progress
         if label_names & {"in-progress", "agent-dispatched", "ready", "done"}:
@@ -686,13 +694,13 @@ def plan_repo(cfg: dict, github_slug: str, repo_path: Path) -> tuple[list[dict] 
     # 7. Recent task metrics
     metrics_summary = _recent_metrics_summary(cfg)
 
-    # 8. Backlog issues (candidates for promotion)
-    backlog = _backlog_issues(github_slug)
+    # 8. Backlog issues (candidates for promotion — trusted authors only)
+    backlog = _backlog_issues(github_slug, cfg)
     backlog_text = _format_backlog_for_prompt(backlog)
     print(f"  Backlog candidates: {len(backlog)}")
 
-    # 9. Open issues already in progress (for exclusion)
-    open_issues = _open_issues_summary(github_slug)
+    # 9. Open issues already in progress (for exclusion — trusted authors only)
+    open_issues = _open_issues_summary(github_slug, cfg)
 
     # 10. Build prompt with all context
     prompt = PLAN_PROMPT.format(

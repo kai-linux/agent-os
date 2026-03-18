@@ -49,6 +49,7 @@ query($owner: String!, $number: Int!) {{
               body
               url
               state
+              author {{ login }}
               labels(first: 20) {{
                 nodes {{ name }}
               }}
@@ -126,6 +127,7 @@ def query_project(project_number: int, owner: str) -> dict:
             "body": content.get("body", ""),
             "url": content["url"],
             "state": content.get("state", "OPEN"),
+            "author": (content.get("author") or {}).get("login", ""),
             "labels": labels,
             "repo": content.get("repository", {}).get("nameWithOwner", ""),
         })
@@ -169,7 +171,7 @@ def list_ready_issues(repo: str, limit: int = 20):
         "issue", "list", "-R", repo,
         "--limit", str(limit),
         "--search", "is:open label:ready",
-        "--json", "number,title,body,labels,url,updatedAt",
+        "--json", "number,title,body,labels,url,updatedAt,author",
     ]) or []
 
 
