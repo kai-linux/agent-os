@@ -101,17 +101,17 @@ def _rebase_pr_onto_main(repo: str, pr: dict) -> bool:
 
 
 def _list_agent_prs(repo: str) -> list[dict]:
-    """List open PRs with title starting with 'Agent:'."""
+    """List open PRs whose branch starts with 'agent/' (all orchestrator-created PRs)."""
     try:
         prs = gh_json([
             "pr", "list", "-R", repo,
             "--state", "open",
-            "--json", "number,title,headRefName,isDraft,mergeable,url,body",
+            "--json", "number,title,headRefName,baseRefName,isDraft,mergeable,mergeStateStatus,url,body",
         ]) or []
     except Exception as e:
         print(f"Warning: failed to list PRs for {repo}: {e}")
         return []
-    return [pr for pr in prs if pr.get("title", "").startswith("Agent:")]
+    return [pr for pr in prs if pr.get("headRefName", "").startswith("agent/")]
 
 
 def _get_pr_checks(repo: str, pr_number: int) -> list[dict]:
