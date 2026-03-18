@@ -1,12 +1,13 @@
-"""Weekly strategic planner.
+"""Weekly strategic planner (Level 2).
 
-Reads product context (README Goal section, last 30 git commits, issue metrics)
-from each repository, generates a prioritized 5-task sprint plan using Claude
-Sonnet, posts it to Telegram for human approval, and conditionally creates
-GitHub issues upon confirmation.
+Reads product context (README, CODEBASE.md, STRATEGY.md, last sprint
+retrospective, recent PRs and closed issues) from each repository, generates a
+prioritized 5-task sprint plan using Claude Sonnet, posts it to Telegram for
+human approval, and conditionally creates GitHub issues upon confirmation.
 
 On approval, created issues are automatically set to Status=Ready on the
-project board, triggering immediate dispatch to agents. One tap on Telegram
+project board, triggering immediate dispatch to agents. STRATEGY.md is updated
+with the new sprint plan and retrospective findings. One tap on Telegram
 starts an entire sprint.
 
 Runs weekly on Sundays at 20:00.  Approval gate is mandatory — no issues are
@@ -20,7 +21,7 @@ import os
 import re
 import subprocess
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 from pathlib import Path
 
@@ -132,6 +133,164 @@ def _open_issues_summary(repo: str) -> str:
     return "\n".join(lines)
 
 
+def _read_strategy(repo_path: Path) -> str:
+    """Read STRATEGY.md from a repo, returning content or empty string."""
+    strategy_md = repo_path / "STRATEGY.md"
+    if not strategy_md.exists():
+        return ""
+    return strategy_md.read_text(encoding="utf-8", errors="replace").strip()
+
+
+def _read_codebase_md(repo_path: Path) -> str:
+    """Read CODEBASE.md for context injection, truncated to 3000 chars."""
+    codebase_md = repo_path / "CODEBASE.md"
+    if not codebase_md.exists():
+        return "(no CODEBASE.md)"
+    content = codebase_md.read_text(encoding="utf-8", errors="replace").strip()
+    return content[:3000] if content else "(empty CODEBASE.md)"
+
+
+def _recently_closed_issues(repo: str, days: int = 7) -> str:
+    """Return recently closed issues with close reasons for retrospective."""
+    since = (datetime.now(tz=timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+    raw = _gh([
+        "issue", "list", "--repo", repo, "--state", "closed",
+        "--json", "number,title,closedAt,stateReason,labels",
+        "--limit", "30",
+    ])
+    if not raw:
+        return "(no recently closed issues)"
+    try:
+        issues = json.loads(raw)
+    except json.JSONDecodeError:
+        return "(failed to parse)"
+    # Filter to last N days
+    recent = []
+    for i in issues:
+        closed_at = i.get("closedAt", "")
+        if closed_at >= since:
+            labels = ", ".join(l.get("name", "") for l in i.get("labels", []))
+            reason = i.get("stateReason", "completed")
+            lbl = f" [{labels}]" if labels else ""
+            recent.append(f"- #{i['number']}: {i['title']}{lbl} — {reason}")
+    return "\n".join(recent) if recent else "(no issues closed in the last week)"
+
+
+def _recent_merged_prs(repo: str, days: int = 7) -> str:
+    """Return recently merged PRs for retrospective context."""
+    raw = _gh([
+        "pr", "list", "--repo", repo, "--state", "merged",
+        "--json", "number,title,mergedAt,headRefName",
+        "--limit", "30",
+    ])
+    if not raw:
+        return "(no recently merged PRs)"
+    try:
+        prs = json.loads(raw)
+    except json.JSONDecodeError:
+        return "(failed to parse)"
+    since = (datetime.now(tz=timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+    recent = []
+    for pr in prs:
+        merged_at = pr.get("mergedAt", "")
+        if merged_at >= since:
+            recent.append(f"- PR #{pr['number']}: {pr['title']} (branch: {pr.get('headRefName', '?')})")
+    return "\n".join(recent) if recent else "(no PRs merged in the last week)"
+
+
+_STRATEGY_TEMPLATE = """\
+# Strategy — {repo_name}
+
+> Auto-maintained by agent-os strategic planner. Updated each sprint cycle.
+
+## Product Vision
+
+(Extracted from README on first run — agents refine this over time.)
+
+## Current Focus Areas
+
+(Updated each sprint with the key themes being pursued.)
+
+## Sprint History
+
+"""
+
+
+def _update_strategy(
+    repo_path: Path,
+    repo_name: str,
+    sprint_summary: str,
+    retrospective: str,
+):
+    """Update STRATEGY.md with sprint plan and retrospective findings."""
+    strategy_md = repo_path / "STRATEGY.md"
+    now = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
+
+    if not strategy_md.exists():
+        # Bootstrap with template + README goal
+        readme_goal = _read_readme_goal(repo_path)
+        template = _STRATEGY_TEMPLATE.format(repo_name=repo_name)
+        template = template.replace(
+            "(Extracted from README on first run — agents refine this over time.)",
+            readme_goal[:1500] if readme_goal else "(see README.md)",
+        )
+        strategy_md.write_text(template, encoding="utf-8")
+
+    content = strategy_md.read_text(encoding="utf-8")
+
+    entry = f"\n### Sprint {now}\n\n"
+    if retrospective:
+        entry += f"**Retrospective:**\n{retrospective}\n\n"
+    entry += f"**Plan:**\n{sprint_summary}\n"
+
+    anchor = "## Sprint History"
+    if anchor in content:
+        updated = content.replace(anchor, anchor + "\n" + entry, 1)
+    else:
+        updated = content + f"\n{anchor}\n{entry}"
+
+    strategy_md.write_text(updated, encoding="utf-8")
+
+    # Commit and push
+    try:
+        subprocess.run(
+            ["git", "-C", str(repo_path), "add", "STRATEGY.md"],
+            check=True, capture_output=True,
+        )
+        diff = subprocess.run(
+            ["git", "-C", str(repo_path), "diff", "--cached", "--quiet"],
+            capture_output=True,
+        )
+        if diff.returncode == 0:
+            return  # No changes
+        subprocess.run(
+            ["git", "-C", str(repo_path), "commit", "-m",
+             f"chore: update STRATEGY.md — sprint {now}"],
+            check=True, capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo_path), "push", "origin", "main"],
+            check=True, capture_output=True,
+        )
+        print(f"  STRATEGY.md updated and pushed for {repo_name}")
+    except Exception as e:
+        print(f"  Warning: failed to push STRATEGY.md for {repo_name}: {e}")
+
+
+def _build_retrospective(repo: str) -> str:
+    """Build a retrospective summary of the last sprint's outcomes."""
+    closed = _recently_closed_issues(repo, days=7)
+    merged = _recent_merged_prs(repo, days=7)
+    parts = []
+    if closed and not closed.startswith("(no"):
+        parts.append(f"Issues completed:\n{closed}")
+    if merged and not merged.startswith("(no"):
+        parts.append(f"PRs merged:\n{merged}")
+    if not parts:
+        return "(no activity in the last week)"
+    return "\n\n".join(parts)
+
+
 def _recent_metrics_summary(cfg: dict) -> str:
     """Compact summary of recent task completions."""
     root = Path(cfg.get("root_dir", ".")).expanduser()
@@ -166,10 +325,23 @@ PLAN_PROMPT = """You are the Strategic Planner for an autonomous AI software tea
 Your job is to create next week's sprint plan: exactly {plan_size} prioritized,
 atomic, executable tasks that move the product forward.
 
+You have access to the product's long-term strategy, last sprint's outcomes,
+and the current codebase state. Use all of this to plan work that builds
+cumulatively toward the product vision — not just maintenance, but innovation.
+
 Context about this repository:
 
---- Product Goal ---
+--- Product Vision & Strategy ---
+{strategy_context}
+
+--- Product Goal (from README) ---
 {readme_goal}
+
+--- Codebase Context (CODEBASE.md) ---
+{codebase_context}
+
+--- Last Sprint Retrospective ---
+{retrospective}
 
 --- Last 30 git commits ---
 {git_log}
@@ -188,7 +360,9 @@ Rules:
 - Tasks must NOT be vague epics — they should have clear, testable success criteria
 - Do NOT duplicate existing open issues
 - Order by priority (most impactful first)
-- Include a mix of: feature work, bug fixes, improvements, and infrastructure
+- Build on last sprint's outcomes — continue momentum, fix regressions, advance strategy
+- Include a mix of: feature work that advances the product vision, bug fixes, self-improvement, and infrastructure
+- At least 1-2 tasks should push toward the long-term vision, not just maintain the status quo
 - Issue body must use ## Goal, ## Success Criteria, ## Constraints sections
 
 Return ONLY a JSON array (no markdown fences, no commentary) of exactly {plan_size} objects.
@@ -197,7 +371,7 @@ Each object must have:
   "goal"       - one-paragraph goal statement
   "task_type"  - one of: implementation, debugging, architecture, research, docs
   "priority"   - one of: prio:high, prio:normal, prio:low
-  "rationale"  - one sentence explaining why this task matters this week
+  "rationale"  - one sentence explaining why this task matters this week, referencing the strategy
   "body"       - structured body with ## Goal\\n...\\n## Success Criteria\\n...\\n## Constraints\\n- Prefer minimal diffs
   "labels"     - JSON array of label strings (choose from: enhancement, bug, tech-debt, agent-os)
 
@@ -437,32 +611,51 @@ def _resolve_repos(cfg: dict) -> list[tuple[str, Path]]:
 # Main
 # ---------------------------------------------------------------------------
 
-def plan_repo(cfg: dict, github_slug: str, repo_path: Path) -> list[dict] | None:
-    """Generate a sprint plan for one repo. Returns the plan or None on failure."""
+def plan_repo(cfg: dict, github_slug: str, repo_path: Path) -> tuple[list[dict] | None, str]:
+    """Generate a sprint plan for one repo. Returns (plan, retrospective) or (None, "")."""
     print(f"\n--- Planning {github_slug} ---")
 
     # 1. Read product context
     readme_goal = _read_readme_goal(repo_path)
     print(f"  README goal: {len(readme_goal)} chars")
 
-    # 2. Last 30 git commits
+    # 2. Read STRATEGY.md (cumulative strategy memory)
+    strategy_context = _read_strategy(repo_path)
+    if strategy_context:
+        print(f"  STRATEGY.md: {len(strategy_context)} chars")
+    else:
+        print("  STRATEGY.md: not yet created (will bootstrap after approval)")
+        strategy_context = "(No strategy document yet — this is the first sprint. Focus on establishing foundations.)"
+
+    # 3. Read CODEBASE.md
+    codebase_context = _read_codebase_md(repo_path)
+    print(f"  CODEBASE.md: {len(codebase_context)} chars")
+
+    # 4. Sprint retrospective — what shipped last week
+    retrospective = _build_retrospective(github_slug)
+    print(f"  Retrospective: {len(retrospective)} chars")
+
+    # 5. Last 30 git commits
     git_log = _git_log(repo_path, n=30)
     print(f"  Git log: {git_log.count(chr(10)) + 1} commits")
 
-    # 3. Issue metrics
+    # 6. Issue metrics
     counts = _issue_counts(github_slug)
     print(f"  Issues — open: {counts['open']}, closed: {counts['closed']}, blocked: {counts['blocked']}")
 
-    # 4. Recent task metrics
+    # 7. Recent task metrics
     metrics_summary = _recent_metrics_summary(cfg)
 
-    # 5. Open issues for dedup
+    # 8. Open issues for dedup
     open_issues = _open_issues_summary(github_slug)
 
-    # 6. Build prompt
+    # 9. Build prompt with all context
     prompt = PLAN_PROMPT.format(
         plan_size=PLAN_SIZE,
+        strategy_context=strategy_context,
         readme_goal=readme_goal,
+        codebase_context=codebase_context,
+        retrospective=retrospective,
         git_log=git_log,
         open_count=counts["open"],
         closed_count=counts["closed"],
@@ -471,25 +664,25 @@ def plan_repo(cfg: dict, github_slug: str, repo_path: Path) -> list[dict] | None
         open_issues=open_issues,
     )
 
-    # 7. Call Sonnet
+    # 10. Call Sonnet
     try:
         raw = _call_sonnet(prompt)
     except Exception as e:
         print(f"  Plan generation failed: {e}")
-        return None
+        return None, ""
 
     try:
         plan = _parse_plan(raw)
     except Exception as e:
         print(f"  Failed to parse plan: {e}\n  Raw: {raw[:300]}")
-        return None
+        return None, ""
 
     if not isinstance(plan, list):
         print(f"  Unexpected response format:\n  {raw[:300]}")
-        return None
+        return None, ""
 
     print(f"  Generated {len(plan)} tasks")
-    return plan[:PLAN_SIZE]
+    return plan[:PLAN_SIZE], retrospective
 
 
 def _set_issues_ready(cfg: dict, github_slug: str, issue_urls: list[str]):
@@ -584,8 +777,8 @@ def run():
     print(f"Strategic planner starting for {len(repos)} repo(s).")
 
     for github_slug, repo_path in repos:
-        # Phase 1: Generate plan
-        plan = plan_repo(cfg, github_slug, repo_path)
+        # Phase 1: Generate plan with retrospective
+        plan, retrospective = plan_repo(cfg, github_slug, repo_path)
         if not plan:
             print(f"  No plan generated for {github_slug}; skipping.")
             continue
@@ -612,6 +805,13 @@ def run():
         # Phase 4: Create issues (only on approval)
         print(f"\n  Creating issues for approved plan ({github_slug})...")
         created_urls, skipped = create_plan_issues(cfg, github_slug, plan)
+
+        # Phase 5: Update STRATEGY.md with sprint plan and retrospective
+        sprint_summary = "\n".join(
+            f"- [{t.get('priority', '?')}] {t.get('title', '?')}: {t.get('rationale', '')}"
+            for t in plan
+        )
+        _update_strategy(repo_path, github_slug, sprint_summary, retrospective)
 
         summary = (
             f"✅ Sprint plan approved for {github_slug}\n"
