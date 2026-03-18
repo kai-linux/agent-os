@@ -16,6 +16,19 @@
 
 ## Recent Changes
 
+### 2026-03-18 — [task-20260318-082904-task-weekly-log-analyzer-auto-creates-improvement-] (#10 kai-linux/agent-os)
+Implemented `orchestrator/log_analyzer.py` and `bin/run_log_analyzer.sh`. The analyzer reads the last 7 days of `runtime/metrics/agent_stats.jsonl` and `runtime/logs/queue-summary.log`, calls Claude Haiku with a deterministic structured prompt to identify the top 3 failure patterns/bottlenecks, deduplicates against existing open GitHub issues by exact title match, creates one issue per problem using the standard `## Goal / ## Success Criteria / ## Constraints` body format, and posts a summary to Telegram. A system cron fires every Monday at 07:00.
+
+**Files:** `- orchestrator/log_analyzer.py`, `- bin/run_log_analyzer.sh`, `- CODEBASE.md`
+
+**Decisions:**
+  - - Reused load_recent_metrics() from agent_scorer.py to avoid duplicating JSONL parsing
+  - - Prompt is fully deterministic (requests exact JSON schema, no open-ended fields) to avoid noisy/random issue titles across runs
+  - - Deduplication uses gh issue list --search + exact title match to prevent duplicate improvement tasks
+  - - Issue body uses standard ## Goal / ## Success Criteria / ## Constraints sections for dispatcher compatibility
+  - - Added to system crontab (persistent) rather than session-only CronCreate
+
+
 ### 2026-03-18 — [task-20260318-065704-task-agent-performance-scorer-and-metrics-log] (#9 kai-linux/agent-os)
 Added structured metrics logging to queue.py and a new weekly agent performance scorer. After each task completes, `record_metrics()` atomically appends a JSONL record (timestamp, task_id, repo, agent, status, attempt_count, duration_seconds, task_type) to `runtime/metrics/agent_stats.jsonl`, with automatic rotation at 10 MB. A new `orchestrator/agent_scorer.py` module reads the last 7 days of metrics, computes per-agent success rates, and creates a GitHub issue with the title "Agent X degraded (Y% success rate)" for any agent below 60%. `bin/run_agent_scorer.sh` is the cron entry point.
 
