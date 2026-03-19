@@ -121,6 +121,18 @@ def _read_readme_goal(repo_path: Path) -> str:
     return content[:500].strip()
 
 
+def _read_planning_principles(repo_path: Path) -> str:
+    """Read PLANNING_PRINCIPLES.md when present, else fall back to defaults."""
+    principles = repo_path / "PLANNING_PRINCIPLES.md"
+    if principles.exists():
+        return principles.read_text(encoding="utf-8", errors="replace").strip()
+    return (
+        "Prefer backlog items that increase autonomy, evidence-driven planning, "
+        "control-plane quality, or unblock other important work. Avoid stale, "
+        "externally blocked, or vague issues."
+    )
+
+
 def _git_log(repo_path: Path, n: int = 30) -> str:
     """Return last N git commit summaries."""
     result = subprocess.run(
@@ -249,6 +261,8 @@ def _has_active_sprint_work(repo: str, cfg: dict) -> tuple[bool, str]:
             if not is_trusted(author, cfg):
                 continue
             label_names = {l.get("name", "").lower() for l in issue.get("labels", [])}
+            if "blocked" in label_names:
+                continue
             if label_names & {"ready", "in-progress", "agent-dispatched"}:
                 return True, f"active issue #{issue.get('number')}"
     if _has_open_agent_pr(repo):
@@ -1073,6 +1087,9 @@ Context about this repository:
 --- Product Goal (from README) ---
 {readme_goal}
 
+--- Stable Planning Principles (PLANNING_PRINCIPLES.md) ---
+{planning_principles}
+
 --- Codebase Context (CODEBASE.md) ---
 {codebase_context}
 
@@ -1105,7 +1122,9 @@ Rules:
 - Tasks must NOT be vague epics — they should have clear, testable success criteria
 - Order by priority (most impactful first)
 - Build on last sprint's outcomes — continue momentum, fix regressions, advance strategy
+- Treat the planning principles as the stable north-star rubric when strategy and backlog quality are ambiguous
 - When fresh research is present, use it to inform prioritization and rationale. Prefer work that is supported by repo-local strategy plus bounded external evidence.
+- Prefer unblockers, autonomy gains, planning-quality gains, and evidence-driven improvements over local churn
 - Include a mix of: feature work that advances the product vision, bug fixes, self-improvement, and infrastructure
 - At least 1-2 tasks should push toward the long-term vision, not just maintain the status quo
 - If sibling repos are listed above, consider cross-repo dependencies: sequence work so prerequisite changes (e.g. API changes in repo A that repo B depends on) are completed first. If a task depends on work in another repo, note the dependency in the goal (e.g. "Depends on owner/repo-a completing X")
@@ -1202,6 +1221,7 @@ def _build_plan_prompt(
     plan_size: int,
     strategy_context: str,
     readme_goal: str,
+    planning_principles: str,
     codebase_context: str,
     research_context: str,
     retrospective: str,
@@ -1216,6 +1236,7 @@ def _build_plan_prompt(
         plan_size=plan_size,
         strategy_context=strategy_context,
         readme_goal=readme_goal,
+        planning_principles=planning_principles,
         codebase_context=codebase_context,
         research_context=research_context,
         retrospective=retrospective,
@@ -1459,46 +1480,51 @@ def plan_repo(
         print("  STRATEGY.md: not yet created (will bootstrap after approval)")
         strategy_context = "(No strategy document yet — this is the first sprint. Focus on establishing foundations.)"
 
-    # 3. Read CODEBASE.md
+    # 3. Read stable planning rubric
+    planning_principles = _read_planning_principles(repo_path)
+    print(f"  PLANNING_PRINCIPLES.md: {len(planning_principles)} chars")
+
+    # 4. Read CODEBASE.md
     codebase_context = _read_codebase_md(repo_path)
     print(f"  CODEBASE.md: {len(codebase_context)} chars")
 
-    # 4. Pre-planning research
+    # 5. Pre-planning research
     research_context = _planning_research_context(cfg, github_slug, repo_path)
     print(f"  Research context: {len(research_context)} chars")
 
-    # 5. Sprint retrospective — what shipped last sprint
+    # 6. Sprint retrospective — what shipped last sprint
     retrospective = _build_retrospective(github_slug, days=sprint_cadence_days)
     print(f"  Retrospective: {len(retrospective)} chars")
 
-    # 6. Last 30 git commits
+    # 7. Last 30 git commits
     git_log = _git_log(repo_path, n=30)
     print(f"  Git log: {git_log.count(chr(10)) + 1} commits")
 
-    # 7. Issue metrics
+    # 8. Issue metrics
     counts = _issue_counts(github_slug)
     print(f"  Issues — open: {counts['open']}, closed: {counts['closed']}, blocked: {counts['blocked']}")
 
-    # 8. Recent task metrics
+    # 9. Recent task metrics
     metrics_summary = _recent_metrics_summary(cfg)
 
-    # 9. Backlog issues (candidates for promotion — trusted authors only)
+    # 10. Backlog issues (candidates for promotion — trusted authors only)
     backlog = _backlog_issues(github_slug, cfg)
     backlog_text = _format_backlog_for_prompt(backlog)
     print(f"  Backlog candidates: {len(backlog)}")
 
-    # 10. Open issues already in progress (for exclusion — trusted authors only)
+    # 11. Open issues already in progress (for exclusion — trusted authors only)
     open_issues = _open_issues_summary(github_slug, cfg)
 
-    # 11. Cross-repo context
+    # 12. Cross-repo context
     if cross_repo_context:
         print(f"  Cross-repo context: {len(cross_repo_context)} chars from sibling repos")
 
-    # 12. Build prompt with all context
+    # 13. Build prompt with all context
     prompt = _build_plan_prompt(
         plan_size=plan_size,
         strategy_context=strategy_context,
         readme_goal=readme_goal,
+        planning_principles=planning_principles,
         codebase_context=codebase_context,
         research_context=research_context,
         retrospective=retrospective,
@@ -1510,7 +1536,7 @@ def plan_repo(
         cross_repo_context=cross_repo_context,
     )
 
-    # 13. Call Sonnet
+    # 14. Call Sonnet
     try:
         raw = _call_sonnet(prompt, cfg)
     except Exception as e:

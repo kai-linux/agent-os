@@ -35,6 +35,7 @@ from orchestrator.strategic_planner import (
     _load_strategy_map,
     _order_repos_by_dependencies,
     _planning_research_context,
+    _read_planning_principles,
     _repo_planner_config,
     _repo_research_config,
     _resolve_repos,
@@ -443,6 +444,7 @@ def test_build_plan_prompt_includes_research_context():
         plan_size=3,
         strategy_context="strategy",
         readme_goal="goal",
+        planning_principles="north-star rubric",
         codebase_context="codebase",
         research_context="# Planning Research\n\nEvidence",
         retrospective="retro",
@@ -455,6 +457,26 @@ def test_build_plan_prompt_includes_research_context():
     )
     assert "--- Pre-Planning Research (PLANNING_RESEARCH.md) ---" in prompt
     assert "Evidence" in prompt
+
+
+def test_build_plan_prompt_includes_planning_principles():
+    prompt = _build_plan_prompt(
+        plan_size=3,
+        strategy_context="strategy",
+        readme_goal="goal",
+        planning_principles="Prefer autonomy and evidence.",
+        codebase_context="codebase",
+        research_context="research",
+        retrospective="retro",
+        git_log="abc123 commit",
+        counts={"open": 1, "closed": 2, "blocked": 0},
+        metrics_summary="metrics",
+        backlog_text="- #1: Task",
+        open_issues="(none)",
+        cross_repo_context="(single repo)",
+    )
+    assert "--- Stable Planning Principles (PLANNING_PRINCIPLES.md) ---" in prompt
+    assert "Prefer autonomy and evidence." in prompt
 
 
 # ---------------------------------------------------------------------------
@@ -592,6 +614,23 @@ def test_has_active_sprint_work_detects_ready_issue(monkeypatch):
     assert reason == "active issue #39"
 
 
+def test_has_active_sprint_work_ignores_blocked_issue_with_stale_active_labels(monkeypatch):
+    raw_issues = [
+        {
+            "number": 40,
+            "labels": [{"name": "blocked"}, {"name": "in-progress"}, {"name": "agent-dispatched"}],
+            "author": {"login": "kai-linux"},
+        }
+    ]
+    monkeypatch.setattr(
+        "orchestrator.strategic_planner._gh",
+        lambda *args, **kwargs: json.dumps(raw_issues) if args[0][0] == "issue" else "[]",
+    )
+    active, reason = _has_active_sprint_work("owner/repo", {"trusted_authors": ["kai-linux"]})
+    assert active is False
+    assert reason == "no active sprint work"
+
+
 def test_maybe_refresh_backlog_for_early_cycle_runs_groomer_when_due(monkeypatch, tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -613,6 +652,14 @@ def test_maybe_refresh_backlog_for_early_cycle_runs_groomer_when_due(monkeypatch
     assert reason == "early-complete with groomer refresh (created)"
     assert calls == [("owner/repo", repo)]
     assert recorded == [("backlog_groomer", "owner/repo")]
+
+
+def test_read_planning_principles_falls_back_to_default(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    text = _read_planning_principles(repo)
+    assert "autonomy" in text.lower()
+    assert "evidence" in text.lower()
 
 
 def test_set_issues_ready_adds_new_issue_to_project(monkeypatch):
