@@ -875,6 +875,9 @@ def _send_telegram(cfg: dict, text: str, reply_markup: dict | None = None) -> in
 
 def _format_plan_message(plan: list[dict], repo: str, cadence_days: float) -> str:
     """Format the sprint plan for Telegram display."""
+    create_count = sum(1 for task in plan if (task.get("action") or "create").lower() == "create")
+    promote_count = sum(1 for task in plan if (task.get("action") or "create").lower() == "promote")
+
     lines = [
         f"📋 Sprint Plan — {repo}",
         f"Cadence: {_format_cadence(cadence_days)}",
@@ -889,7 +892,14 @@ def _format_plan_message(plan: list[dict], repo: str, cadence_days: float) -> st
         lines.append(f"{i}. {prio_icon} [{source}] [{task.get('task_type', '?')}] {task.get('title', '?')}")
         lines.append(f"   {task.get('rationale', '')}")
         lines.append("")
-    lines.append("Tap Approve to create issues.")
+
+    if create_count and promote_count:
+        lines.append("Tap Approve to apply this plan: create new issues and move selected backlog issues to Ready.")
+    elif create_count:
+        lines.append("Tap Approve to apply this plan: create issues and move them to Ready.")
+    else:
+        lines.append("Tap Approve to apply this plan: move selected backlog issues to Ready.")
+
     lines.append("Tap Skip to leave the plan unapplied.")
     lines.append(f"Auto-skip in {APPROVAL_TIMEOUT_HOURS}h if no action.")
     return "\n".join(lines)
