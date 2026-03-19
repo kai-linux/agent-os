@@ -36,6 +36,7 @@ from orchestrator.gh_project import query_project, set_item_status, edit_issue_l
 from orchestrator.queue import planner_reply_markup, save_telegram_action, load_telegram_action, telegram_action_expired
 from orchestrator.scheduler_state import is_due, record_run, job_lock
 from orchestrator.backlog_groomer import groom_repo, _repo_groomer_cadence_days
+from orchestrator.repo_context import read_north_star
 from orchestrator.trust import is_trusted
 
 DEFAULT_PLAN_SIZE = 5
@@ -1087,6 +1088,9 @@ Context about this repository:
 --- Product Goal (from README) ---
 {readme_goal}
 
+--- North Star (NORTH_STAR.md) ---
+{north_star}
+
 --- Stable Planning Principles (PLANNING_PRINCIPLES.md) ---
 {planning_principles}
 
@@ -1221,6 +1225,7 @@ def _build_plan_prompt(
     plan_size: int,
     strategy_context: str,
     readme_goal: str,
+    north_star: str,
     planning_principles: str,
     codebase_context: str,
     research_context: str,
@@ -1236,6 +1241,7 @@ def _build_plan_prompt(
         plan_size=plan_size,
         strategy_context=strategy_context,
         readme_goal=readme_goal,
+        north_star=north_star,
         planning_principles=planning_principles,
         codebase_context=codebase_context,
         research_context=research_context,
@@ -1481,49 +1487,54 @@ def plan_repo(
         strategy_context = "(No strategy document yet — this is the first sprint. Focus on establishing foundations.)"
 
     # 3. Read stable planning rubric
+    north_star = read_north_star(repo_path)
+    print(f"  NORTH_STAR.md: {len(north_star)} chars")
+
+    # 4. Read stable planning rubric
     planning_principles = _read_planning_principles(repo_path)
     print(f"  PLANNING_PRINCIPLES.md: {len(planning_principles)} chars")
 
-    # 4. Read CODEBASE.md
+    # 5. Read CODEBASE.md
     codebase_context = _read_codebase_md(repo_path)
     print(f"  CODEBASE.md: {len(codebase_context)} chars")
 
-    # 5. Pre-planning research
+    # 6. Pre-planning research
     research_context = _planning_research_context(cfg, github_slug, repo_path)
     print(f"  Research context: {len(research_context)} chars")
 
-    # 6. Sprint retrospective — what shipped last sprint
+    # 7. Sprint retrospective — what shipped last sprint
     retrospective = _build_retrospective(github_slug, days=sprint_cadence_days)
     print(f"  Retrospective: {len(retrospective)} chars")
 
-    # 7. Last 30 git commits
+    # 8. Last 30 git commits
     git_log = _git_log(repo_path, n=30)
     print(f"  Git log: {git_log.count(chr(10)) + 1} commits")
 
-    # 8. Issue metrics
+    # 9. Issue metrics
     counts = _issue_counts(github_slug)
     print(f"  Issues — open: {counts['open']}, closed: {counts['closed']}, blocked: {counts['blocked']}")
 
-    # 9. Recent task metrics
+    # 10. Recent task metrics
     metrics_summary = _recent_metrics_summary(cfg)
 
-    # 10. Backlog issues (candidates for promotion — trusted authors only)
+    # 11. Backlog issues (candidates for promotion — trusted authors only)
     backlog = _backlog_issues(github_slug, cfg)
     backlog_text = _format_backlog_for_prompt(backlog)
     print(f"  Backlog candidates: {len(backlog)}")
 
-    # 11. Open issues already in progress (for exclusion — trusted authors only)
+    # 12. Open issues already in progress (for exclusion — trusted authors only)
     open_issues = _open_issues_summary(github_slug, cfg)
 
-    # 12. Cross-repo context
+    # 13. Cross-repo context
     if cross_repo_context:
         print(f"  Cross-repo context: {len(cross_repo_context)} chars from sibling repos")
 
-    # 13. Build prompt with all context
+    # 14. Build prompt with all context
     prompt = _build_plan_prompt(
         plan_size=plan_size,
         strategy_context=strategy_context,
         readme_goal=readme_goal,
+        north_star=north_star,
         planning_principles=planning_principles,
         codebase_context=codebase_context,
         research_context=research_context,
@@ -1536,7 +1547,7 @@ def plan_repo(
         cross_repo_context=cross_repo_context,
     )
 
-    # 14. Call Sonnet
+    # 15. Call Sonnet
     try:
         raw = _call_sonnet(prompt, cfg)
     except Exception as e:

@@ -10,6 +10,8 @@ EXECUTION_RESEARCH_TASK_TYPES = {"architecture", "research", "docs", "design", "
 EXECUTION_RESEARCH_HINTS = {
     "strategy", "roadmap", "research", "competitor", "analytics", "conversion",
     "user feedback", "evidence", "pricing", "positioning", "planning",
+    "self-improvement", "self improvement", "degradation", "routing", "reliability",
+    "observability", "score", "metrics",
 }
 
 
@@ -22,6 +24,17 @@ def read_readme_goal(repo_path: Path, max_chars: int = 1200) -> str:
     if match:
         return match.group(1).strip()[:max_chars]
     return content[:max_chars].strip()
+
+
+def read_north_star(repo_path: Path, max_chars: int = 1800) -> str:
+    north_star = repo_path / "NORTH_STAR.md"
+    if north_star.exists():
+        content = north_star.read_text(encoding="utf-8", errors="replace").strip()
+        return content[:max_chars] if content else "(empty NORTH_STAR.md)"
+    return (
+        "Bootstrap this repo toward stronger autonomy, evidence-driven planning, "
+        "and closed-loop self-improvement without sacrificing auditability."
+    )
 
 
 def read_strategy_context(repo_path: Path, max_chars: int = 2200) -> str:
@@ -71,6 +84,7 @@ def build_execution_context(repo_path: Path, task_type: str, body: str) -> str:
     """Return high-level layered context for worker prompts, adding research only when relevant."""
     sections = [
         ("Product Goal (README.md)", read_readme_goal(repo_path)),
+        ("North Star (NORTH_STAR.md)", read_north_star(repo_path)),
         ("Strategy Context (STRATEGY.md)", read_strategy_context(repo_path)),
         ("Planning Principles (PLANNING_PRINCIPLES.md)", read_planning_principles(repo_path)),
     ]
