@@ -251,6 +251,71 @@ def _recent_completions_summary(records: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _filter_records_for_repo(records: list[dict], github_slug: str, repo_path: Path) -> list[dict]:
+    """Keep only recent metrics that clearly belong to this repo."""
+    repo_names = {
+        github_slug.lower(),
+        github_slug.rsplit("/", 1)[-1].lower(),
+        repo_path.name.lower(),
+        str(repo_path).lower(),
+    }
+    filtered = []
+    for rec in records:
+        repo_value = str(rec.get("repo", "")).strip().lower()
+        if not repo_value:
+            continue
+        if repo_value in repo_names:
+            filtered.append(rec)
+            continue
+        if any(repo_value.endswith(name) for name in repo_names if "/" in repo_value or "/" in name):
+            filtered.append(rec)
+    return filtered
+
+
+def _recent_blocked_tasks(records: list[dict]) -> list[dict]:
+    """Return recent blocked/partial outcomes for follow-up generation."""
+    return [
+        rec for rec in records
+        if str(rec.get("status", "")).strip().lower() in {"blocked", "partial"}
+    ]
+
+
+def _repo_gap_signals(repo_path: Path, open_issues: list[dict]) -> list[str]:
+    """Detect high-leverage repo gaps worth turning into backlog issues."""
+    signals: list[str] = []
+    open_titles = " ".join(i.get("title", "") for i in open_issues).lower()
+
+    def missing_issue_hint(*needles: str) -> bool:
+        return not any(needle in open_titles for needle in needles)
+
+    if not (repo_path / "STRATEGY.md").exists() and missing_issue_hint("strategy.md", "strategy", "planning"):
+        signals.append("STRATEGY.md is missing; backlog may lack durable product direction and planning memory.")
+
+    readme = repo_path / "README.md"
+    if not readme.exists() and missing_issue_hint("readme", "goal"):
+        signals.append("README.md is missing; the repo lacks an explicit goal and operator-facing product context.")
+    elif readme.exists():
+        content = readme.read_text(encoding="utf-8", errors="replace")
+        if "## goal" not in content.lower() and len(content.strip()) < 400 and missing_issue_hint("goal", "vision"):
+            signals.append("README.md lacks a clear Goal section or strong product framing for planning.")
+
+    codebase = repo_path / "CODEBASE.md"
+    if not codebase.exists() and missing_issue_hint("codebase", "known issues"):
+        signals.append("CODEBASE.md is missing; maintainers and agents lack codebase memory and known-issues context.")
+
+    return signals
+
+
+def _blocked_issue_signals(open_issues: list[dict]) -> list[dict]:
+    """Return open blocked issues that may justify unblocker tasks."""
+    blocked = []
+    for issue in open_issues:
+        labels = {l.get("name", "").lower() for l in issue.get("labels", [])}
+        if "blocked" in labels:
+            blocked.append(issue)
+    return blocked
+
+
 # ---------------------------------------------------------------------------
 # Deduplication
 # ---------------------------------------------------------------------------
@@ -291,14 +356,16 @@ def _open_issue_exists(repo: str, title: str) -> bool:
 # LLM analysis
 # ---------------------------------------------------------------------------
 
-ANALYSIS_PROMPT = """You are an AI agent system analyst performing weekly backlog grooming.
+ANALYSIS_PROMPT = """You are an AI agent system analyst performing backlog grooming.
 Review the data below and create exactly {num_issues} targeted, atomic improvement tasks.
 
 Focus on:
 1. Stale issues (open >30 days with no activity) — suggest closing or scoping down
 2. Known Issues from CODEBASE.md that have no linked GitHub issue — create one
 3. Risk flags from recently completed tasks — create follow-up mitigation tasks
-4. General technical debt or gaps visible from recent completions
+4. Recent blocked or partial task outcomes — create unblock or hardening follow-ups
+5. Repository foundation gaps (missing planning/research/ops scaffolding) — create enabling tasks
+6. Backlog pressure or blocked-work patterns visible in open issues — create high-leverage backlog items
 
 Rules:
 - Each task must be atomic and clearly scoped (one specific thing to fix/improve)
@@ -326,6 +393,15 @@ Each object must have:
 --- Risk flags from recent task completions ---
 {risk_flags}
 
+--- Recent blocked or partial task outcomes ---
+{blocked_tasks}
+
+--- Repository foundation gaps ---
+{repo_gaps}
+
+--- Open blocked issues that may need unblockers ---
+{blocked_issues}
+
 --- Recent task completions (last 30 days) ---
 {completions}
 
@@ -336,14 +412,28 @@ Return ONLY the JSON array."""
 
 
 def _call_haiku(prompt: str) -> str:
+    """Call groomer analysis model with Claude first, then Codex fallback."""
+    errors: list[str] = []
+
     claude_bin = os.environ.get("CLAUDE_BIN", "claude")
     result = subprocess.run(
         [claude_bin, "-p", prompt, "--model", ANALYSIS_MODEL],
         capture_output=True, text=True, timeout=120,
     )
-    if result.returncode != 0:
-        raise RuntimeError(f"Claude exit {result.returncode}: {result.stderr[:300]}")
-    return result.stdout.strip()
+    if result.returncode == 0:
+        return result.stdout.strip()
+    errors.append(f"Claude exit {result.returncode}: {(result.stderr or result.stdout)[:300]}")
+
+    codex_bin = os.environ.get("CODEX_BIN", "codex")
+    result = subprocess.run(
+        [codex_bin, "exec", "--skip-git-repo-check", prompt],
+        capture_output=True, text=True, timeout=180,
+    )
+    if result.returncode == 0:
+        return result.stdout.strip()
+    errors.append(f"Codex exit {result.returncode}: {(result.stderr or result.stdout)[:300]}")
+
+    raise RuntimeError(" | ".join(errors))
 
 
 def _parse_issues(text: str) -> list[dict]:
@@ -498,7 +588,8 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
     # 2. Recent completions from metrics
     root = Path(cfg.get("root_dir", ".")).expanduser()
     metrics_file = root / "runtime" / "metrics" / "agent_stats.jsonl"
-    records = load_recent_metrics(metrics_file, window_days=WINDOW_DAYS)
+    all_records = load_recent_metrics(metrics_file, window_days=WINDOW_DAYS)
+    records = _filter_records_for_repo(all_records, github_slug, repo_path)
     print(f"  Completions (last {WINDOW_DAYS}d): {len(records)}")
 
     # 3. CODEBASE.md Known Issues
@@ -509,13 +600,27 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
     risk_flags = _find_risk_flags(cfg)
     print(f"  Risk flags found: {len(risk_flags)}")
 
+    # 5. Additional signals for richer backlog creation
+    blocked_tasks = _recent_blocked_tasks(records)
+    blocked_issues = _blocked_issue_signals(open_issues)
+    repo_gaps = _repo_gap_signals(repo_path, open_issues)
+    print(f"  Blocked/partial task outcomes: {len(blocked_tasks)}")
+    print(f"  Repo gaps: {len(repo_gaps)}, blocked issues: {len(blocked_issues)}")
+
     # Skip if no data to analyze
-    if not stale and not known_issues and not risk_flags and not records:
+    if not stale and not known_issues and not risk_flags and not blocked_tasks and not blocked_issues and not repo_gaps and not records:
         print("  No data to analyze, skipping.")
         return {"status": "no-data", "created": 0, "skipped": 0, "cleaned": len(cleaned)}
 
     # 5. Determine how many issues to propose (3-5, based on data richness)
-    data_signals = len(stale) + len(known_issues) + len(risk_flags)
+    data_signals = (
+        len(stale)
+        + len(known_issues)
+        + len(risk_flags)
+        + len(blocked_tasks)
+        + len(blocked_issues)
+        + len(repo_gaps)
+    )
     num_issues = min(MAX_ISSUES_PER_REPO, max(3, data_signals))
 
     # 6. Build prompt
@@ -530,6 +635,18 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
         f"- [{r['task_id']}] {r['risk']}" for r in risk_flags[:20]
     ) or "(none)"
 
+    blocked_tasks_text = "\n".join(
+        f"- [{r.get('task_id', '?')}] status={r.get('status', '?')} task_type={r.get('task_type', '?')} agent={r.get('agent', '?')}"
+        for r in blocked_tasks[:20]
+    ) or "(none)"
+
+    repo_gaps_text = "\n".join(f"- {gap}" for gap in repo_gaps[:20]) or "(none)"
+
+    blocked_issues_text = "\n".join(
+        f"- #{i.get('number')}: {i.get('title')}"
+        for i in blocked_issues[:20]
+    ) or "(none)"
+
     completions_text = _recent_completions_summary(records)
 
     open_text = "\n".join(
@@ -541,6 +658,9 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
         stale_issues=stale_text,
         known_issues=known_text,
         risk_flags=risk_text,
+        blocked_tasks=blocked_tasks_text,
+        repo_gaps=repo_gaps_text,
+        blocked_issues=blocked_issues_text,
         completions=completions_text,
         open_issues=open_text,
     )

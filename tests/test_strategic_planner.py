@@ -21,6 +21,8 @@ from orchestrator.strategic_planner import (
     _allowed_research_file,
     _build_plan_prompt,
     _clean_research_text,
+    _has_active_sprint_work,
+    _maybe_refresh_backlog_for_early_cycle,
     _create_plan_approval_action,
     _domain_allowed,
     _parse_plan,
@@ -571,6 +573,46 @@ def test_open_issues_summary_only_includes_active_issues(monkeypatch):
     summary = _open_issues_summary("owner/repo", {"trusted_authors": ["kai-linux"]})
     assert "#38" in summary
     assert "#37" not in summary
+
+
+def test_has_active_sprint_work_detects_ready_issue(monkeypatch):
+    raw_issues = [
+        {
+            "number": 39,
+            "labels": [{"name": "Ready"}],
+            "author": {"login": "kai-linux"},
+        }
+    ]
+    monkeypatch.setattr(
+        "orchestrator.strategic_planner._gh",
+        lambda *args, **kwargs: json.dumps(raw_issues) if args[0][0] == "issue" else "[]",
+    )
+    active, reason = _has_active_sprint_work("owner/repo", {"trusted_authors": ["kai-linux"]})
+    assert active is True
+    assert reason == "active issue #39"
+
+
+def test_maybe_refresh_backlog_for_early_cycle_runs_groomer_when_due(monkeypatch, tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setattr("orchestrator.strategic_planner.is_due", lambda *args, **kwargs: (True, "due"))
+    calls = []
+    monkeypatch.setattr(
+        "orchestrator.strategic_planner.groom_repo",
+        lambda cfg, slug, path: calls.append((slug, path)) or {"status": "created"},
+    )
+    recorded = []
+    monkeypatch.setattr(
+        "orchestrator.strategic_planner.record_run",
+        lambda cfg, job_name, github_slug: recorded.append((job_name, github_slug)),
+    )
+
+    should_plan, reason = _maybe_refresh_backlog_for_early_cycle({}, "owner/repo", repo)
+
+    assert should_plan is True
+    assert reason == "early-complete with groomer refresh (created)"
+    assert calls == [("owner/repo", repo)]
+    assert recorded == [("backlog_groomer", "owner/repo")]
 
 
 def test_set_issues_ready_adds_new_issue_to_project(monkeypatch):
