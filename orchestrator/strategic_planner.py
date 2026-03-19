@@ -35,6 +35,7 @@ from orchestrator.agent_scorer import load_recent_metrics
 from orchestrator.gh_project import query_project, set_item_status, edit_issue_labels, ensure_labels
 from orchestrator.queue import planner_reply_markup, save_telegram_action, load_telegram_action, telegram_action_expired
 from orchestrator.scheduler_state import is_due, record_run, job_lock
+from orchestrator.backlog_groomer import groom_repo, _repo_groomer_cadence_days
 from orchestrator.trust import is_trusted
 
 DEFAULT_PLAN_SIZE = 5
@@ -193,7 +194,7 @@ def _open_issues_summary(repo: str, cfg: dict) -> str:
 
 
 def _backlog_issues(repo: str, cfg: dict) -> list[dict]:
-    """Return open issues from trusted authors that are NOT in-progress/ready/done."""
+    """Return open issues from trusted authors that are NOT active/blocked/done."""
     raw = _gh(["issue", "list", "--repo", repo, "--state", "open",
                "--json", "number,title,body,labels,createdAt,author",
                "--limit", "50"])
@@ -211,10 +212,67 @@ def _backlog_issues(repo: str, cfg: dict) -> list[dict]:
             continue
         label_names = {l.get("name", "").lower() for l in i.get("labels", [])}
         # Skip issues already dispatched or in progress
-        if label_names & {"in-progress", "agent-dispatched", "ready", "done"}:
+        if label_names & {"in-progress", "agent-dispatched", "ready", "done", "blocked"}:
             continue
         backlog.append(i)
     return backlog
+
+
+def _has_open_agent_pr(repo: str) -> bool:
+    raw = _gh(["pr", "list", "--repo", repo, "--state", "open",
+               "--json", "number,headRefName,isCrossRepository", "--limit", "100"])
+    if not raw:
+        return False
+    try:
+        prs = json.loads(raw)
+    except json.JSONDecodeError:
+        return False
+    for pr in prs:
+        if pr.get("isCrossRepository"):
+            continue
+        if str(pr.get("headRefName", "")).startswith("agent/"):
+            return True
+    return False
+
+
+def _has_active_sprint_work(repo: str, cfg: dict) -> tuple[bool, str]:
+    """Return whether the repo still has active sprint execution underway."""
+    raw = _gh(["issue", "list", "--repo", repo, "--state", "open",
+               "--json", "number,labels,author", "--limit", "100"])
+    if raw:
+        try:
+            issues = json.loads(raw)
+        except json.JSONDecodeError:
+            issues = []
+        for issue in issues:
+            author = (issue.get("author") or {}).get("login", "")
+            if not is_trusted(author, cfg):
+                continue
+            label_names = {l.get("name", "").lower() for l in issue.get("labels", [])}
+            if label_names & {"ready", "in-progress", "agent-dispatched"}:
+                return True, f"active issue #{issue.get('number')}"
+    if _has_open_agent_pr(repo):
+        return True, "open agent PR"
+    return False, "no active sprint work"
+
+
+def _maybe_refresh_backlog_for_early_cycle(cfg: dict, github_slug: str, repo_path: Path) -> tuple[bool, str]:
+    """Refresh backlog and allow an early planner cycle when the sprint is empty."""
+    cadence_days = _repo_groomer_cadence_days(cfg, github_slug)
+    due, reason = is_due(
+        cfg,
+        "backlog_groomer",
+        github_slug,
+        cadence_hours=cadence_days * 24.0,
+    )
+    if not due:
+        return False, f"early-complete but groomer not due ({reason})"
+
+    print(f"  Early sprint completion override: refreshing backlog for {github_slug} before planning.")
+    result = groom_repo(cfg, github_slug, repo_path)
+    if result.get("status") != "error":
+        record_run(cfg, "backlog_groomer", github_slug)
+    return True, f"early-complete with groomer refresh ({result.get('status', 'unknown')})"
 
 
 def _format_backlog_for_prompt(issues: list[dict]) -> str:
@@ -1626,8 +1684,15 @@ def run():
                 cadence_hours=sprint_cadence_days * 24.0,
             )
             if not due:
-                print(f"  Skipping {github_slug}: {reason}")
-                continue
+                active, active_reason = _has_active_sprint_work(github_slug, cfg)
+                if active:
+                    print(f"  Skipping {github_slug}: {reason} ({active_reason})")
+                    continue
+                should_plan, override_reason = _maybe_refresh_backlog_for_early_cycle(cfg, github_slug, repo_path)
+                if not should_plan:
+                    print(f"  Skipping {github_slug}: {reason} ({override_reason})")
+                    continue
+                print(f"  Proceeding early for {github_slug}: {override_reason}")
 
             # Build cross-repo context from sibling repos
             cross_repo_ctx = _gather_cross_repo_context(

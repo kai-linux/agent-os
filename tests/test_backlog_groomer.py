@@ -3,10 +3,16 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+import subprocess
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from orchestrator.backlog_groomer import _repo_groomer_cadence_days, _resolve_repos
+from orchestrator.backlog_groomer import (
+    _filter_records_for_repo,
+    _repo_gap_signals,
+    _repo_groomer_cadence_days,
+    _resolve_repos,
+)
 from orchestrator import backlog_groomer as bg
 
 
@@ -36,10 +42,17 @@ def test_repo_groomer_cadence_uses_per_repo_override():
     assert _repo_groomer_cadence_days(cfg, "owner/repo-b") == 1.5
 
 
-def test_groom_repo_no_data_status(tmp_path):
+def test_groom_repo_no_data_status(tmp_path, monkeypatch):
     cfg = {"root_dir": str(tmp_path), "worktrees_dir": str(tmp_path / "worktrees")}
     repo = tmp_path / "repo"
     repo.mkdir()
+    (repo / "README.md").write_text("## Goal\n\nKeep the repo healthy.\n", encoding="utf-8")
+    (repo / "STRATEGY.md").write_text("# Strategy\n", encoding="utf-8")
+    (repo / "CODEBASE.md").write_text("# Codebase\n", encoding="utf-8")
+    monkeypatch.setattr(bg, "_list_open_issues", lambda repo, cfg: [])
+    monkeypatch.setattr(bg, "load_recent_metrics", lambda *args, **kwargs: [])
+    monkeypatch.setattr(bg, "_parse_known_issues", lambda repo_path: [])
+    monkeypatch.setattr(bg, "_find_risk_flags", lambda cfg: [])
 
     result = bg.groom_repo(cfg, "owner/repo", repo)
 
@@ -134,3 +147,41 @@ def test_resolve_repos_prefers_explicit_github_projects_local_repo():
     }
     repos = dict(_resolve_repos(cfg))
     assert repos["kai-linux/bookgenerator"] == Path("/home/kai/bookgenerator")
+
+
+def test_filter_records_for_repo_uses_repo_slug_and_path(tmp_path):
+    repo = tmp_path / "agent-os"
+    repo.mkdir()
+    records = [
+        {"repo": "kai-linux/agent-os", "task_id": "a"},
+        {"repo": "agent-os", "task_id": "b"},
+        {"repo": str(repo), "task_id": "c"},
+        {"repo": "kai-linux/bookgenerator", "task_id": "d"},
+    ]
+    filtered = _filter_records_for_repo(records, "kai-linux/agent-os", repo)
+    assert [r["task_id"] for r in filtered] == ["a", "b", "c"]
+
+
+def test_repo_gap_signals_detects_missing_strategy(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "README.md").write_text("# Repo\n", encoding="utf-8")
+
+    gaps = _repo_gap_signals(repo, [])
+
+    assert any("STRATEGY.md is missing" in gap for gap in gaps)
+
+
+def test_call_haiku_falls_back_to_codex_when_claude_fails(monkeypatch):
+    def fake_run(cmd, capture_output=True, text=True, timeout=120):
+        if cmd[0] == "claude":
+            return subprocess.CompletedProcess(cmd, 1, "", "quota")
+        if cmd[0] == "codex":
+            return subprocess.CompletedProcess(cmd, 0, '[{"title":"Fix thing"}]', "")
+        raise AssertionError(f"Unexpected command: {cmd}")
+
+    monkeypatch.setattr(bg.subprocess, "run", fake_run)
+
+    raw = bg._call_haiku("Return JSON")
+
+    assert raw == '[{"title":"Fix thing"}]'
