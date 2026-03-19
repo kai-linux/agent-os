@@ -48,6 +48,8 @@ def parse_issue_body(body: str) -> dict:
         "agent_preference": sections.get("agent preference", "").strip().lower() or "auto",
         "constraints": sections.get("constraints", "").strip(),
         "context": sections.get("context", "").strip(),
+        "base_branch": sections.get("base branch", "").strip(),
+        "branch": sections.get("branch", "").strip(),
     }
 
 
@@ -98,8 +100,8 @@ def build_mailbox_task(cfg: dict, project_key: str, repo_cfg: dict, issue: dict)
         "repo": repo_cfg["local_repo"],
         "agent": agent,
         "task_type": parsed["task_type"] or cfg["default_task_type"],
-        "branch": f"agent/{task_id}",
-        "base_branch": cfg["default_base_branch"],
+        "branch": parsed.get("branch") or f"agent/{task_id}",
+        "base_branch": parsed.get("base_branch") or cfg["default_base_branch"],
         "allow_push": cfg["default_allow_push"],
         "attempt": 1,
         "max_attempts": cfg["default_max_attempts"],
