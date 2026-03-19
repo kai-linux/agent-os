@@ -198,6 +198,39 @@ planning_research:
       type: file
       kind: repo_reference
       path: ../shared/launch-notes.md
+
+planning_signals:
+  enabled: true
+  max_age_hours: 24
+  max_inputs: 6
+  max_source_chars: 4000
+  allowed_domains: [analytics.example.com, community.example.com, competitor.example.com]
+  artifact_file: PLANNING_SIGNALS.md
+  inputs:
+    - name: Weekly activation funnel
+      type: web
+      input_type: analytics
+      url: https://analytics.example.com/public/weekly-funnel
+      observed_at: 2026-03-19T08:00:00Z
+      provenance: Public dashboard snapshot
+      trust_note: Aggregated product analytics exported for planning
+      privacy_note: Aggregated public-safe metrics only
+    - name: Community export requests
+      type: file
+      input_type: user_feedback
+      path: ../shared/community-feedback.md
+      observed_at: 2026-03-18T17:00:00Z
+      provenance: Maintainer-curated summary of public issue comments
+      trust_note: Qualitative sample; treat volume as directional
+      privacy_note: Summary only; no raw user identifiers
+    - name: Competitor pricing
+      type: web
+      input_type: market_signal
+      url: https://competitor.example.com/pricing
+      observed_at: 2026-03-18T10:00:00Z
+      provenance: Public pricing page
+      trust_note: Public market signal; validate before major roadmap shifts
+      privacy_note: Public web content
 ```
 
 DeepSeek has its own provider fallback: `openrouter → nanogpt → chutes`. It is kept last in the chain by default because it depends on extra provider configuration and should not consume retries when those providers are unavailable.
@@ -205,6 +238,8 @@ DeepSeek has its own provider fallback: `openrouter → nanogpt → chutes`. It 
 Strategic planning uses its own narrow fallback chain (`planner_agents`) so the control plane does not stall on a single Claude quota event and does not spray planning work across every model.
 
 Repos can opt into bounded pre-planning research with `planning_research`. Before sprint selection, the planner refreshes `PLANNING_RESEARCH.md` only when it is older than `max_age_hours`; otherwise it reuses the existing artifact. Research is intentionally constrained to explicitly configured `https` URLs on allowed domains plus relative repo or repo-adjacent files. There is no search step and no open-ended browsing path.
+
+Repos can also opt into bounded evidence inputs with `planning_signals`. The first version supports only three explicit `input_type` values: `analytics`, `user_feedback`, and `market_signal`. Before sprint selection, the planner normalizes those inputs into `PLANNING_SIGNALS.md` with timestamps, provenance, freshness, trust notes, privacy notes, extracted metrics, and planning implications. This stays safe for public repos by assuming aggregated or public-safe summaries rather than private raw analytics exports.
 
 Issues can specify a preferred agent. The dispatcher can auto-detect task type. Priority labels (`prio:high`, `prio:normal`, `prio:low`) influence scheduling order.
 

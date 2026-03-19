@@ -6,6 +6,7 @@ from pathlib import Path
 
 
 RESEARCH_ARTIFACT_DEFAULT = "PLANNING_RESEARCH.md"
+SIGNALS_ARTIFACT_DEFAULT = "PLANNING_SIGNALS.md"
 EXECUTION_RESEARCH_TASK_TYPES = {"architecture", "research", "docs", "design", "content"}
 EXECUTION_RESEARCH_HINTS = {
     "strategy", "roadmap", "research", "competitor", "analytics", "conversion",
@@ -72,6 +73,14 @@ def read_planning_research_artifact(repo_path: Path, artifact_name: str = RESEAR
     return content[:max_chars] if content else "(empty planning research artifact)"
 
 
+def read_planning_signals_artifact(repo_path: Path, artifact_name: str = SIGNALS_ARTIFACT_DEFAULT, max_chars: int = 2600) -> str:
+    artifact = repo_path / artifact_name
+    if not artifact.exists():
+        return "(no planning signals artifact)"
+    content = artifact.read_text(encoding="utf-8", errors="replace").strip()
+    return content[:max_chars] if content else "(empty planning signals artifact)"
+
+
 def should_include_research(task_type: str, body: str) -> bool:
     task_type = str(task_type or "").strip().lower()
     if task_type in EXECUTION_RESEARCH_TASK_TYPES:
@@ -89,6 +98,7 @@ def build_execution_context(repo_path: Path, task_type: str, body: str) -> str:
         ("Planning Principles (PLANNING_PRINCIPLES.md)", read_planning_principles(repo_path)),
     ]
     if should_include_research(task_type, body):
+        sections.append(("Planning Signals (PLANNING_SIGNALS.md)", read_planning_signals_artifact(repo_path)))
         sections.append(("Planning Research (PLANNING_RESEARCH.md)", read_planning_research_artifact(repo_path)))
 
     lines = ["", "", "---", "# Repository Context (read-only)", ""]
