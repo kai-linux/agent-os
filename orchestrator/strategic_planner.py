@@ -775,15 +775,57 @@ Each object must have:
 Return ONLY the JSON array."""
 
 
-def _call_sonnet(prompt: str) -> str:
-    claude_bin = os.environ.get("CLAUDE_BIN", "claude")
-    result = subprocess.run(
-        [claude_bin, "-p", prompt, "--model", ANALYSIS_MODEL],
-        capture_output=True, text=True, timeout=180,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"Claude exit {result.returncode}: {result.stderr[:300]}")
-    return result.stdout.strip()
+def _planner_agents(cfg: dict) -> list[str]:
+    """Return planner LLM fallback order.
+
+    Defaults to Claude first for stronger long-form planning, with Codex as the
+    only fallback. We intentionally do not fan out to Gemini/DeepSeek here:
+    sprint planning is a control-plane function and should degrade narrowly.
+    """
+    agents = cfg.get("planner_agents")
+    if isinstance(agents, list):
+        cleaned = [str(agent).strip().lower() for agent in agents if str(agent).strip()]
+        return cleaned or ["claude", "codex"]
+    return ["claude", "codex"]
+
+
+def _call_sonnet(prompt: str, cfg: dict) -> str:
+    errors: list[str] = []
+    planner_model = str(cfg.get("planner_claude_model", ANALYSIS_MODEL)).strip() or ANALYSIS_MODEL
+
+    for agent in _planner_agents(cfg):
+        try:
+            if agent == "claude":
+                claude_bin = os.environ.get("CLAUDE_BIN", "claude")
+                result = subprocess.run(
+                    [claude_bin, "-p", prompt, "--model", planner_model],
+                    capture_output=True, text=True, timeout=180,
+                )
+                if result.returncode == 0:
+                    return result.stdout.strip()
+                detail = (result.stderr or result.stdout or "").strip()[:300]
+                errors.append(f"Claude exit {result.returncode}: {detail}")
+                continue
+
+            if agent == "codex":
+                codex_bin = os.environ.get("CODEX_BIN", "codex")
+                result = subprocess.run(
+                    [codex_bin, "exec", "--skip-git-repo-check", prompt],
+                    capture_output=True, text=True, timeout=180,
+                )
+                if result.returncode == 0:
+                    return result.stdout.strip()
+                detail = (result.stderr or result.stdout or "").strip()[:300]
+                errors.append(f"Codex exit {result.returncode}: {detail}")
+                continue
+
+            errors.append(f"Unsupported planner agent: {agent}")
+        except FileNotFoundError as e:
+            errors.append(f"{agent} missing: {e}")
+        except Exception as e:
+            errors.append(f"{agent} failed: {e}")
+
+    raise RuntimeError(" | ".join(errors) if errors else "No planner agents configured")
 
 
 def _parse_plan(text: str) -> list[dict]:
@@ -1100,7 +1142,7 @@ def plan_repo(
 
     # 12. Call Sonnet
     try:
-        raw = _call_sonnet(prompt)
+        raw = _call_sonnet(prompt, cfg)
     except Exception as e:
         print(f"  Plan generation failed: {e}")
         return None, ""

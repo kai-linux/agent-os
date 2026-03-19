@@ -157,13 +157,19 @@ The system never thrashes. It tries, it hands off, it escalates. Like a real tea
 agent_fallbacks:
   implementation:     [codex, claude, gemini, deepseek]
   debugging:          [claude, codex, gemini, deepseek]
-  architecture:       [claude, codex, gemini, deepseek]
-  research:           [claude, gemini, codex, deepseek]
-  docs:               [claude, gemini, codex, deepseek]
+  architecture:       [claude, codex]
+  research:           [claude, codex]
+  docs:               [claude, codex]
+  design:             [claude, codex]
+  content:            [claude, codex]
   browser_automation: [claude, codex, gemini, deepseek]
+
+planner_agents: [claude, codex]
 ```
 
 DeepSeek has its own provider fallback: `openrouter → nanogpt → chutes`. It is kept last in the chain by default because it depends on extra provider configuration and should not consume retries when those providers are unavailable.
+
+Strategic planning uses its own narrow fallback chain (`planner_agents`) so the control plane does not stall on a single Claude quota event and does not spray planning work across every model.
 
 Issues can specify a preferred agent. The dispatcher can auto-detect task type. Priority labels (`prio:high`, `prio:normal`, `prio:low`) influence scheduling order.
 

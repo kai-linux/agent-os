@@ -1,6 +1,7 @@
 """Tests for strategic_planner focus area analysis and configuration."""
 from __future__ import annotations
 
+import subprocess
 import sys
 import textwrap
 from pathlib import Path
@@ -12,6 +13,7 @@ from orchestrator.strategic_planner import (
     DEFAULT_PLAN_SIZE,
     DEFAULT_SPRINT_CADENCE_DAYS,
     FOCUS_AREA_MARKER,
+    _call_sonnet,
     _extract_sprint_entries,
     _gather_cross_repo_context,
     _is_focus_areas_manually_edited,
@@ -241,6 +243,35 @@ def test_analyze_focus_areas_handles_bad_json():
     with patch("orchestrator.strategic_planner._call_haiku", return_value="not json"):
         result = _analyze_focus_areas(["s1", "s2", "s3"])
     assert result is None
+
+
+def test_call_sonnet_falls_back_to_codex_when_claude_fails():
+    cfg = {}
+
+    def fake_run(cmd, capture_output=True, text=True, timeout=180):
+        if cmd[0] == "claude":
+            return subprocess.CompletedProcess(cmd, 1, "", "You're out of extra usage")
+        if cmd[0] == "codex":
+            return subprocess.CompletedProcess(cmd, 0, '[{"action":"create"}]', "")
+        raise AssertionError(f"Unexpected command: {cmd}")
+
+    with patch("orchestrator.strategic_planner.subprocess.run", side_effect=fake_run):
+        raw = _call_sonnet("Return JSON", cfg)
+
+    assert raw == '[{"action":"create"}]'
+
+
+def test_call_sonnet_uses_configured_planner_agents():
+    cfg = {"planner_agents": ["codex"]}
+
+    def fake_run(cmd, capture_output=True, text=True, timeout=180):
+        assert cmd[0] == "codex"
+        return subprocess.CompletedProcess(cmd, 0, "[]", "")
+
+    with patch("orchestrator.strategic_planner.subprocess.run", side_effect=fake_run):
+        raw = _call_sonnet("Return JSON", cfg)
+
+    assert raw == "[]"
 
 
 # ---------------------------------------------------------------------------
