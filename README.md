@@ -95,6 +95,13 @@ Sprint selection is guided by three layers of context:
 - `STRATEGY.md` for sprint-to-sprint strategy memory
 - `PLANNING_PRINCIPLES.md` for the stable north-star rubric the planner should optimize toward over time
 
+Execution uses the same context model with different depth:
+- high-level context: `README.md`, `STRATEGY.md`, `PLANNING_PRINCIPLES.md`
+- evidence layer: `PLANNING_RESEARCH.md` when the task is strategic or evidence-driven
+- low-level context: `CODEBASE.md`
+
+That keeps context dynamic without collapsing high-level product direction, sprint-local strategy, bounded research, and code-level memory into a single bloated document.
+
 These generated issues are indistinguishable from human-written ones. They enter the same queue, get dispatched to the same agents, go through the same CI → merge pipeline. The system literally engineers itself.
 
 ---

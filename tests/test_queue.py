@@ -21,6 +21,7 @@ from orchestrator.queue import (
     save_telegram_action,
     split_section,
     telegram_action_expired,
+    write_prompt,
 )
 
 
@@ -107,6 +108,60 @@ def test_get_agent_chain_skips_unavailable_deepseek(monkeypatch):
     monkeypatch.setattr("orchestrator.queue.agent_available", fake_available)
     chain = get_agent_chain({"task_type": "debugging"}, cfg)
     assert chain == ["claude", "codex"]
+
+
+def test_write_prompt_includes_layered_repo_context(tmp_path):
+    root = tmp_path / "root"
+    worktree = tmp_path / "repo"
+    root.mkdir()
+    worktree.mkdir()
+    (worktree / "README.md").write_text("## Goal\n\nShip autonomous improvements.\n", encoding="utf-8")
+    (worktree / "STRATEGY.md").write_text("## Product Vision\n\nClosed-loop optimization.\n", encoding="utf-8")
+    (worktree / "PLANNING_PRINCIPLES.md").write_text("Prefer autonomy gains.\n", encoding="utf-8")
+    (worktree / "CODEBASE.md").write_text("# Codebase Memory\n\nKnown gotcha.\n", encoding="utf-8")
+    (worktree / "PLANNING_RESEARCH.md").write_text("# Planning Research\n\nResearch evidence.\n", encoding="utf-8")
+
+    prompt_file = write_prompt(
+        "task-1",
+        {"task_type": "research"},
+        "Investigate roadmap and analytics gaps.",
+        "codex",
+        [],
+        root,
+        worktree=worktree,
+    )
+
+    text = prompt_file.read_text(encoding="utf-8")
+    assert "Product Goal (README.md)" in text
+    assert "Strategy Context (STRATEGY.md)" in text
+    assert "Planning Principles (PLANNING_PRINCIPLES.md)" in text
+    assert "Planning Research (PLANNING_RESEARCH.md)" in text
+    assert "Codebase Memory (read-only context)" in text
+
+
+def test_write_prompt_skips_research_for_plain_implementation(tmp_path):
+    root = tmp_path / "root"
+    worktree = tmp_path / "repo"
+    root.mkdir()
+    worktree.mkdir()
+    (worktree / "README.md").write_text("## Goal\n\nShip autonomous improvements.\n", encoding="utf-8")
+    (worktree / "STRATEGY.md").write_text("## Product Vision\n\nClosed-loop optimization.\n", encoding="utf-8")
+    (worktree / "PLANNING_PRINCIPLES.md").write_text("Prefer autonomy gains.\n", encoding="utf-8")
+    (worktree / "CODEBASE.md").write_text("# Codebase Memory\n\nKnown gotcha.\n", encoding="utf-8")
+    (worktree / "PLANNING_RESEARCH.md").write_text("# Planning Research\n\nResearch evidence.\n", encoding="utf-8")
+
+    prompt_file = write_prompt(
+        "task-2",
+        {"task_type": "implementation"},
+        "Fix the queue lock handling.",
+        "codex",
+        [],
+        root,
+        worktree=worktree,
+    )
+
+    text = prompt_file.read_text(encoding="utf-8")
+    assert "Planning Research (PLANNING_RESEARCH.md)" not in text
 
 
 # ---------------------------------------------------------------------------

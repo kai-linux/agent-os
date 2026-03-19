@@ -20,6 +20,7 @@ from orchestrator.paths import load_config, runtime_paths
 from orchestrator.github_sync import sync_result
 from orchestrator.codebase_memory import read_codebase_context, update_codebase_memory
 from orchestrator.gh_project import add_issue_comment, gh, query_project, set_item_status
+from orchestrator.repo_context import build_execution_context
 
 
 TELEGRAM_ACTION_TTL_HOURS = 48
@@ -696,6 +697,11 @@ def write_prompt(task_id: str, meta: dict, body: str, current_agent: str, prior_
     prompt_file.parent.mkdir(parents=True, exist_ok=True)
 
     codebase_context = read_codebase_context(worktree) if worktree else ""
+    layered_context = build_execution_context(
+        worktree or root,
+        meta.get("task_type", "implementation"),
+        body,
+    ) if worktree else ""
 
     prompt = f"""You are a coding worker running in a controlled automation environment.
 
@@ -709,6 +715,7 @@ Task metadata:
 
 Task instructions:
 {body}
+{layered_context}
 {codebase_context}
 Prior model attempts in this task lineage:
 {render_prior_attempt_history(prior_results)}
