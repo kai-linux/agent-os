@@ -208,26 +208,25 @@ def edit_issue_labels(repo: str, number: int, add=None, remove=None):
 
 def create_pr_for_branch(repo: str, branch: str, title: str, body: str) -> Optional[str]:
     try:
-        out = gh_json([
+        gh([
             "pr", "create", "-R", repo,
             "--head", branch,
             "--title", title,
             "--body", body,
-            "--json", "url,number",
         ])
-        return out["url"] if out else None
     except Exception as e:
         print(f"Warning: gh pr create failed for {branch}: {e} — checking for existing PR")
-        # PR may already exist (agent created it) — look it up by head branch
-        try:
-            results = gh_json([
-                "pr", "list", "-R", repo,
-                "--head", branch,
-                "--state", "open",
-                "--json", "url",
-            ])
-            if results:
-                return results[0]["url"]
-        except Exception as e2:
-            print(f"Warning: gh pr list also failed for {branch}: {e2}")
-        return None
+    # PR may already exist (agent created it) or creation may have succeeded without
+    # returning a machine-readable payload — look it up by head branch.
+    try:
+        results = gh_json([
+            "pr", "list", "-R", repo,
+            "--head", branch,
+            "--state", "open",
+            "--json", "url",
+        ])
+        if results:
+            return results[0]["url"]
+    except Exception as e2:
+        print(f"Warning: gh pr list also failed for {branch}: {e2}")
+    return None
