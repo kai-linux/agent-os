@@ -329,7 +329,7 @@ def _mark_issue_done(cfg: dict, repo: str, issue_number: int, *, close_issue: bo
         repo,
         issue_number,
         add=["done"],
-        remove=["blocked", "in-progress", "ready", "review", "agent-dispatched"],
+        remove=["blocked", "in-progress", "ready", "agent-dispatched"],
     )
     if comment:
         try:

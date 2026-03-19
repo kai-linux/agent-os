@@ -72,7 +72,7 @@ def sync_result(meta: dict, result: dict, commit_hash: str | None):
             repo,
             issue_number,
             add=["done"],
-            remove=["in-progress", "ready", "blocked", "review", "agent-dispatched"],
+            remove=["in-progress", "ready", "blocked", "agent-dispatched"],
         )
         status_value = project_cfg["done_value"]
 
