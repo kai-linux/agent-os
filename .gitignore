@@ -4,6 +4,7 @@ mailbox/*
 logs/*
 *.log
 runtime/*
+crontab.md
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
