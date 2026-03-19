@@ -746,8 +746,9 @@ Your job is to select next week's sprint: exactly {plan_size} prioritized tasks.
 
 You can either PROMOTE existing backlog issues or CREATE new ones. Prefer
 promoting existing issues when they align with the strategy — the backlog
-groomer already identified these as valuable. Only create new issues when the
-backlog doesn't cover a strategic need.
+groomer already identified these as valuable. If there are relevant backlog
+issues, prefer PROMOTE over CREATE. Only create new issues when the backlog
+doesn't cover a strategic need.
 
 Context about this repository:
 
@@ -785,6 +786,7 @@ Rules:
 - Each task must be atomic and executable by an AI agent in a single session
 - Tasks must NOT be vague epics — they should have clear, testable success criteria
 - Order by priority (most impactful first)
+- Do NOT create tasks whose only purpose is bootstrapping STRATEGY.md; the planner updates STRATEGY.md automatically after approval
 - Build on last sprint's outcomes — continue momentum, fix regressions, advance strategy
 - Include a mix of: feature work that advances the product vision, bug fixes, self-improvement, and infrastructure
 - At least 1-2 tasks should push toward the long-term vision, not just maintain the status quo
@@ -1018,26 +1020,26 @@ def _resolve_repos(cfg: dict) -> list[tuple[str, Path]]:
     owner = cfg.get("github_owner", "")
     allowed = cfg.get("allowed_repos", [])
 
-    if github_repos and owner:
-        for key, slug in github_repos.items():
-            full_slug = f"{owner}/{slug}" if "/" not in slug else slug
-            for rp in allowed:
-                rp = Path(rp).expanduser()
-                if rp.name == key or rp.name == slug:
-                    repos.append((full_slug, rp))
-                    break
-            else:
-                if allowed:
-                    repos.append((full_slug, Path(allowed[0]).expanduser()))
-
+    # Prefer explicit repo mappings from github_projects because they include
+    # the correct local path and avoid lossy name matching against allowed_repos.
     for pv in cfg.get("github_projects", {}).values():
         if not isinstance(pv, dict):
             continue
         for rc in pv.get("repos", []):
             gh_repo = rc.get("github_repo", "")
-            local = rc.get("repo", rc.get("path", ""))
+            local = rc.get("local_repo", rc.get("repo", rc.get("path", "")))
             if gh_repo and local:
                 repos.append((gh_repo, Path(local).expanduser()))
+
+    if github_repos and owner:
+        for key, slug in github_repos.items():
+            full_slug = f"{owner}/{slug}" if "/" not in slug else slug
+            for rp in allowed:
+                rp = Path(rp).expanduser()
+                repo_name = full_slug.rsplit("/", 1)[-1]
+                if rp.name in {key, slug, repo_name}:
+                    repos.append((full_slug, rp))
+                    break
 
     if not repos:
         gh_repo = cfg.get("github_repo", "")
@@ -1195,6 +1197,26 @@ def _set_issues_ready(cfg: dict, github_slug: str, issue_urls: list[str]):
             if not info["status_field_id"] or not ready_option:
                 print(f"  Warning: status option '{ready_value}' not found in project")
                 return
+
+            # Newly created issues may not be on the project yet; add them before
+            # attempting to move them to Ready.
+            known_urls = {item["url"] for item in info["items"]}
+            for issue_url in issue_urls:
+                if issue_url in known_urls:
+                    continue
+                add_result = subprocess.run(
+                    [
+                        "gh", "project", "item-add", str(project_cfg["project_number"]),
+                        "--owner", owner,
+                        "--url", issue_url,
+                        "--format", "json",
+                    ],
+                    capture_output=True, text=True,
+                )
+                if add_result.returncode != 0:
+                    print(f"  Warning: failed to add {issue_url} to project: {add_result.stderr.strip()}")
+            # Refresh project state after adds.
+            info = query_project(project_cfg["project_number"], owner)
 
             for item in info["items"]:
                 if item["url"] in issue_urls:

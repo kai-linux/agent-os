@@ -25,6 +25,8 @@ from orchestrator.strategic_planner import (
     _load_strategy_map,
     _order_repos_by_dependencies,
     _repo_planner_config,
+    _resolve_repos,
+    _set_issues_ready,
     _strategy_dependencies,
     _summarize_strategy,
     _update_focus_areas_section,
@@ -398,6 +400,74 @@ def test_repo_planner_config_supports_fractional_and_dormant_cadence():
     _, cadence_b = _repo_planner_config(cfg, "owner/repo-b")
     assert cadence_a == 0.5
     assert cadence_b == 0.0
+
+
+def test_resolve_repos_prefers_explicit_github_projects_local_repo():
+    cfg = {
+        "github_owner": "kai-linux",
+        "allowed_repos": [
+            "/home/kai/agent-os",
+            "/home/kai/bookgenerator",
+        ],
+        "github_repos": {
+            "writeaibook": "kai-linux/bookgenerator",
+            "agent-os": "kai-linux/agent-os",
+        },
+        "github_projects": {
+            "writeaibook": {
+                "repos": [
+                    {
+                        "github_repo": "kai-linux/bookgenerator",
+                        "local_repo": "/home/kai/bookgenerator",
+                    }
+                ]
+            }
+        },
+    }
+    repos = dict(_resolve_repos(cfg))
+    assert repos["kai-linux/bookgenerator"] == Path("/home/kai/bookgenerator")
+
+
+def test_set_issues_ready_adds_new_issue_to_project(monkeypatch):
+    cfg = {
+        "github_owner": "owner",
+        "github_projects": {
+            "proj": {
+                "project_number": 1,
+                "ready_value": "Ready",
+                "repos": [{"github_repo": "owner/repo"}],
+            }
+        },
+    }
+    infos = iter([
+        {
+            "project_id": "project-1",
+            "status_field_id": "status-field",
+            "status_options": {"Ready": "ready-option"},
+            "items": [],
+        },
+        {
+            "project_id": "project-1",
+            "status_field_id": "status-field",
+            "status_options": {"Ready": "ready-option"},
+            "items": [{"url": "https://github.com/owner/repo/issues/7", "item_id": "item-7", "number": 7}],
+        },
+    ])
+    monkeypatch.setattr("orchestrator.strategic_planner.query_project", lambda *args, **kwargs: next(infos))
+    subprocess_calls = []
+    monkeypatch.setattr(
+        "orchestrator.strategic_planner.subprocess.run",
+        lambda cmd, capture_output=True, text=True: subprocess_calls.append(cmd) or subprocess.CompletedProcess(cmd, 0, "{}", ""),
+    )
+    status_calls = []
+    monkeypatch.setattr("orchestrator.strategic_planner.set_item_status", lambda *args: status_calls.append(args))
+    monkeypatch.setattr("orchestrator.strategic_planner.ensure_labels", lambda *args, **kwargs: None)
+    monkeypatch.setattr("orchestrator.strategic_planner.edit_issue_labels", lambda *args, **kwargs: None)
+
+    _set_issues_ready(cfg, "owner/repo", ["https://github.com/owner/repo/issues/7"])
+
+    assert any(cmd[:4] == ["gh", "project", "item-add", "1"] for cmd in subprocess_calls)
+    assert status_calls == [("project-1", "item-7", "status-field", "ready-option")]
 
 
 # ---------------------------------------------------------------------------
