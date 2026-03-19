@@ -33,10 +33,16 @@ repo_configs:
 agent_fallbacks:
   implementation: [codex, claude, gemini, deepseek]
   debugging: [claude, codex, gemini, deepseek]
-  architecture: [claude, codex, gemini, deepseek]
-  research: [claude, gemini, codex, deepseek]
-  docs: [claude, gemini, codex, deepseek]
+  architecture: [claude, codex]
+  research: [claude, codex]
+  docs: [claude, codex]
+  design: [claude, codex]
+  content: [claude, codex]
   browser_automation: [claude, codex, gemini, deepseek]
+
+# Strategic planning is a control-plane task. Keep its LLM fallback narrow.
+planner_agents: [claude, codex]
+# planner_claude_model: opus
 
 agent_timeout_minutes:
   codex: 40
