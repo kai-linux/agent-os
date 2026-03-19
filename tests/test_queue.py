@@ -344,3 +344,25 @@ def test_handle_telegram_callback_expired():
         outcome = handle_telegram_callback({}, actions_dir, "esc:abcdef123456:close")
         assert outcome["show_alert"] is True
         assert "expired" in outcome["text"].lower()
+
+
+def test_handle_telegram_callback_plan_approve():
+    with tempfile.TemporaryDirectory() as d:
+        actions_dir = Path(d)
+        action = {
+            "action_id": "abcdef123456",
+            "type": "plan_approval",
+            "status": "pending",
+            "approval": "pending",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            "chat_id": "1",
+            "message_id": 10,
+            "repo": "owner/repo",
+        }
+        save_telegram_action(actions_dir, action)
+
+        outcome = handle_telegram_callback({}, actions_dir, "plan:abcdef123456:approve")
+        assert "Approved sprint plan" in outcome["text"]
+        stored = actions_dir.joinpath("abcdef123456.json").read_text(encoding="utf-8")
+        assert '"approval": "approved"' in stored

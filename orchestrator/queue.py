@@ -341,6 +341,15 @@ def escalation_reply_markup(action_id: str) -> dict:
     }
 
 
+def planner_reply_markup(action_id: str) -> dict:
+    return {
+        "inline_keyboard": [[
+            {"text": "Approve", "callback_data": f"plan:{action_id}:approve"},
+            {"text": "Skip", "callback_data": f"plan:{action_id}:reject"},
+        ]]
+    }
+
+
 def _load_telegram_offset(offset_path: Path) -> int:
     if not offset_path.exists():
         return 0
@@ -466,11 +475,11 @@ def handle_telegram_callback(
     logfile: Path | None = None,
     queue_summary_log: Path | None = None,
 ) -> dict:
-    m = re.fullmatch(r"esc:([a-f0-9]{12}):(requeue|close)", callback_data or "")
+    m = re.fullmatch(r"(esc|plan):([a-f0-9]{12}):(requeue|close|approve|reject)", callback_data or "")
     if not m:
         return {"text": "Unknown action.", "show_alert": True, "remove_keyboard": False}
 
-    action_id, operation = m.groups()
+    action_type, action_id, operation = m.groups()
     action = load_telegram_action(actions_dir, action_id)
     if not action:
         return {"text": "This escalation action is no longer available.", "show_alert": True, "remove_keyboard": True}
@@ -483,6 +492,21 @@ def handle_telegram_callback(
         action["expired_at"] = datetime.now(timezone.utc).isoformat()
         save_telegram_action(actions_dir, action)
         return {"text": "This escalation action expired after 48 hours.", "show_alert": True, "remove_keyboard": True}
+
+    if action_type == "plan":
+        if operation not in {"approve", "reject"}:
+            return {"text": "Unknown planner action.", "show_alert": True, "remove_keyboard": True}
+        action["status"] = "done"
+        action["handled_action"] = operation
+        action["handled_at"] = datetime.now(timezone.utc).isoformat()
+        action["approval"] = "approved" if operation == "approve" else "rejected"
+        action["result_text"] = (
+            f"Approved sprint plan for {action.get('repo', 'repo')}."
+            if operation == "approve"
+            else f"Skipped sprint plan for {action.get('repo', 'repo')}."
+        )
+        save_telegram_action(actions_dir, action)
+        return {"text": action["result_text"], "show_alert": False, "remove_keyboard": True}
 
     if operation == "requeue":
         new_issue_url = requeue_escalation(cfg, action, logfile, queue_summary_log)

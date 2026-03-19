@@ -15,6 +15,8 @@ from orchestrator.strategic_planner import (
     FOCUS_AREA_MARKER,
     _call_sonnet,
     _extract_sprint_entries,
+    _format_cadence,
+    _format_plan_message,
     _gather_cross_repo_context,
     _is_focus_areas_manually_edited,
     _load_strategy_map,
@@ -272,6 +274,23 @@ def test_call_sonnet_uses_configured_planner_agents():
         raw = _call_sonnet("Return JSON", cfg)
 
     assert raw == "[]"
+
+
+def test_format_cadence_supports_fractional_days():
+    assert _format_cadence(0.01) == "every 14m"
+    assert _format_cadence(0.5) == "every 12h"
+    assert _format_cadence(7) == "every 7d"
+
+
+def test_format_plan_message_includes_real_cadence_and_buttons_copy():
+    text = _format_plan_message(
+        [{"priority": "prio:high", "action": "create", "task_type": "implementation", "title": "Do thing", "rationale": "Because."}],
+        "owner/repo",
+        0.01,
+    )
+    assert "📋 Sprint Plan — owner/repo" in text
+    assert "Cadence: every 14m" in text
+    assert "Tap Approve to create issues." in text
 
 
 # ---------------------------------------------------------------------------
