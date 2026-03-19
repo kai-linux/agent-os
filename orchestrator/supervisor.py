@@ -12,9 +12,9 @@ import os
 import subprocess
 import sys
 import time
-from pathlib import Path
 
 from orchestrator.paths import load_config, runtime_paths
+from orchestrator.queue import process_telegram_callbacks
 
 
 def main():
@@ -27,10 +27,16 @@ def main():
     python = sys.executable
     procs: list[tuple[str, subprocess.Popen]] = []
     worker_counter = 0
+    last_callback_poll = 0.0
 
     print(f"[supervisor] Starting with max_parallel_workers={max_workers}")
 
     while True:
+        now = time.time()
+        if now - last_callback_poll >= 15:
+            process_telegram_callbacks(cfg, paths)
+            last_callback_poll = now
+
         # Reap finished workers
         procs = [(wid, p) for wid, p in procs if p.poll() is None]
 
