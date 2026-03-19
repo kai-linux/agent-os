@@ -16,6 +16,18 @@
 
 ## Recent Changes
 
+### 2026-03-19 — [task-20260319-103913-strategy-md-auto-update-focus-areas-from-sprint-pa] (#23 kai-linux/agent-os)
+Added automatic focus area extraction to the strategic planner. When STRATEGY.md has 3+ sprint entries, a Haiku LLM call analyzes sprint history to identify 3-5 recurring work themes and updates the 'Current Focus Areas' section. User-edited content is preserved via an HTML comment marker (`<!-- auto-focus-areas -->`); if the marker is absent and the section contains non-placeholder content, the update is skipped.
+
+**Files:** `- orchestrator/strategic_planner.py`, `- tests/test_strategic_planner.py`
+
+**Decisions:**
+  - - Used an HTML comment marker (`<!-- auto-focus-areas -->`) to distinguish auto-generated focus areas from manually edited ones — preserves user content without requiring a separate config flag
+  - - Haiku model used for focus area analysis (cheap, fast) while planning stays on the existing model
+  - - Capped sprint entries sent to Haiku at 10 most recent to keep prompts bounded
+  - - Focus area analysis is non-blocking — failures are logged but don't prevent the strategy update
+
+
 ### 2026-03-19 — [task-20260319-103819-sprint-retrospective-quality-llm-generated-analysi] (#22 kai-linux/agent-os)
 Implemented a task decomposer that analyzes incoming issues via Claude Haiku to determine if they are atomic tasks or epics. Atomic tasks pass through unchanged. Epics are automatically split into up to 5 ordered sub-issues with 'Part of #N' cross-references, the first sub-issue is dispatched immediately, and the rest are sent to Backlog. The decomposer is non-blocking — failures fall back to treating the issue as atomic.
 
