@@ -232,3 +232,39 @@ def test_create_pr_for_branch_recovers_when_pr_already_exists(monkeypatch):
         "--state", "open",
         "--json", "url",
     ])
+
+
+def test_get_issue_does_not_fetch_comments_by_default(monkeypatch):
+    calls = []
+
+    def fake_gh_json(cmd):
+        calls.append(cmd)
+        return {"number": 42}
+
+    monkeypatch.setattr(gh_project, "gh_json", fake_gh_json)
+
+    issue = gh_project.get_issue("kai-linux/agent-os", 42)
+
+    assert issue == {"number": 42}
+    assert calls == [[
+        "issue", "view", "42", "-R", "kai-linux/agent-os",
+        "--json", "number,title,body,labels,url,updatedAt",
+    ]]
+
+
+def test_get_issue_can_fetch_comments_explicitly(monkeypatch):
+    calls = []
+
+    def fake_gh_json(cmd):
+        calls.append(cmd)
+        return {"number": 42, "comments": []}
+
+    monkeypatch.setattr(gh_project, "gh_json", fake_gh_json)
+
+    issue = gh_project.get_issue("kai-linux/agent-os", 42, include_comments=True)
+
+    assert issue == {"number": 42, "comments": []}
+    assert calls == [[
+        "issue", "view", "42", "-R", "kai-linux/agent-os",
+        "--json", "number,title,body,labels,url,updatedAt,comments",
+    ]]
