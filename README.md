@@ -127,14 +127,14 @@ MANUAL_STEPS: ...
 
 This file is what makes multi-agent collaboration work. When an agent is blocked, the next agent in the fallback chain receives everything the first one tried, what failed, and what to do next. No context is lost between handoffs.
 
-`MANUAL_STEPS` (cron entries, config changes, secrets) are surfaced as a separate Telegram alert and posted to the issue — so nothing requiring human action gets silently buried.
+`MANUAL_STEPS` (cron entries, config changes, secrets) are surfaced back to GitHub for agent continuity, with secret values redacted.
 
 ### 4. Review & Merge
 
 `pr_monitor.py` polls every 5 minutes:
 - **CI green** → squash-merge, delete branch, close issue, move board to Done
 - **Merge conflict** → auto-rebase onto main, force-push with lease, retry next poll
-- **CI failure** → comment on issue with failed checks, label as blocked, retry up to 3 times, then escalate
+- **CI failure** → comment on issue with failed checks, redacting any detected secret material, label as blocked, retry up to 3 times, then escalate
 
 ### 5. Retry & Escalation
 
@@ -207,8 +207,8 @@ agent-os/
 | What happened | Where you see it |
 |---|---|
 | Task dispatched / completed / blocked | Telegram |
-| Manual action required | Telegram alert + GitHub issue comment |
-| CI failure on agent PR | GitHub issue comment + `blocked` label |
+| Manual action required | Telegram + GitHub issue comment (secret-aware redaction) |
+| CI failure on agent PR | GitHub issue comment + Telegram + `blocked` label |
 | Agent underperforming | GitHub issue (filed weekly) |
 | Failure pattern detected | GitHub issue (filed weekly) |
 | Full execution trace | `runtime/logs/` |
@@ -295,4 +295,3 @@ Level 3 (what's needed for true innovation): An agent that can:
   - Query external data (analytics, user feedback, market data)
   - Form and test hypotheses ("conversion is low → maybe we need social proof → create a testimonials section")
   - Propose things the human never thought of
-

@@ -43,6 +43,47 @@ def log(msg: str, logfile: Path | None = None, also_summary: bool = False, queue
             f.write(msg + "\n")
 
 
+class CommandExecutionError(RuntimeError):
+    def __init__(self, cmd: list[str], returncode: int, stdout: str, stderr: str):
+        self.cmd = [str(c) for c in cmd]
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+        details = [f"Command failed ({returncode}): {' '.join(self.cmd)}"]
+        if stdout.strip():
+            details.append(f"stdout: {_tail_text(stdout)}")
+        if stderr.strip():
+            details.append(f"stderr: {_tail_text(stderr)}")
+        super().__init__(" | ".join(details))
+
+
+def _tail_text(text: str, max_lines: int = 12, max_chars: int = 1200) -> str:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return ""
+    lines = cleaned.splitlines()
+    tail = "\n".join(lines[-max_lines:])
+    if len(tail) > max_chars:
+        tail = tail[-max_chars:]
+    return tail
+
+
+def _format_runner_failure(exc: Exception) -> tuple[str, list[str]]:
+    if isinstance(exc, CommandExecutionError):
+        summary = (
+            f"Runner exited with code {exc.returncode} while executing "
+            f"`{' '.join(exc.cmd)}`."
+        )
+        blockers = [summary]
+        if exc.stdout.strip():
+            blockers.append(f"- stdout tail: {_tail_text(exc.stdout)}")
+        if exc.stderr.strip():
+            blockers.append(f"- stderr tail: {_tail_text(exc.stderr)}")
+        return summary, blockers
+    return str(exc), [f"- Runner/model failure: {exc}"]
+
+
 def run(cmd, *, cwd=None, logfile: Path | None = None, check=True, timeout=None, queue_summary_log: Path | None = None):
     cmd_str = " ".join(map(str, cmd))
     log(f"$ {cmd_str}", logfile, queue_summary_log=queue_summary_log)
@@ -58,7 +99,7 @@ def run(cmd, *, cwd=None, logfile: Path | None = None, check=True, timeout=None,
     if result.stderr:
         log(result.stderr.rstrip(), logfile, queue_summary_log=queue_summary_log)
     if check and result.returncode != 0:
-        raise RuntimeError(f"Command failed ({result.returncode}): {cmd_str}")
+        raise CommandExecutionError(cmd, result.returncode, result.stdout, result.stderr)
     return result
 
 
@@ -1295,29 +1336,32 @@ def main():
                 continue
 
             except Exception as e:
+                failure_summary, failure_blockers = _format_runner_failure(e)
                 runner_result = {
                     "agent": current_agent,
                     "status": "blocked",
-                    "summary": f"{current_agent} failed before producing a valid result file.",
+                    "summary": f"{current_agent} failed before producing a valid result file. {failure_summary}",
                     "done": ["- Agent runner was invoked."],
-                    "blockers": [f"- Runner/model failure: {e}"],
+                    "blockers": failure_blockers,
                     "next_step": "Try the next fallback model. If all models fail, inspect runner config, credentials, or quotas.",
                     "files_changed": ["- Unknown / inspect worktree"],
                     "tests_run": ["- None"],
                     "decisions": ["- Treat runner failure as model-level failure and continue fallback chain if possible."],
                     "risks": ["- Model quota/auth/CLI issues may affect multiple tasks."],
-                    "attempted_approaches": [f"- Attempted model: {current_agent}", f"- Failure: {e}"],
+                    "attempted_approaches": [f"- Attempted model: {current_agent}", f"- Failure detail: {failure_summary}"],
                     "raw": "",
                 }
                 model_attempts.append(current_agent)
                 prior_results.append(runner_result)
                 log(f"{current_agent} runner failure: {e}", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
+                for blocker in failure_blockers:
+                    log(blocker, logfile, queue_summary_log=QUEUE_SUMMARY_LOG)
 
                 next_agent = get_next_agent(meta, cfg, model_attempts)
                 if next_agent is not None:
                     send_telegram(
                         cfg,
-                        f"🔁 Fallback\nTask: {task_id}\nRepo: {repo.name}\nBranch: {branch}\nPrevious model: {current_agent}\nNext model: {next_agent}\nReason: runner/model failure",
+                        f"🔁 Fallback\nTask: {task_id}\nRepo: {repo.name}\nBranch: {branch}\nPrevious model: {current_agent}\nNext model: {next_agent}\nReason: {failure_summary}",
                         logfile,
                         QUEUE_SUMMARY_LOG,
                     )
