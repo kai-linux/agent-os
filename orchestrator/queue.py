@@ -127,7 +127,7 @@ def agent_available(agent: str) -> tuple[bool, str | None]:
         if not _command_available(cline_cmd):
             return False, f"{cline_cmd} not found on PATH"
         provider_configs = [
-            os.environ.get("DEEPSEEK_OPENROUTER_CONFIG", ""),
+            os.environ.get("DEEPSEEK_OPENROUTER_CONFIG", str(Path.home() / ".config" / "openrouter")),
             os.environ.get("DEEPSEEK_NANOGPT_CONFIG", ""),
             os.environ.get("DEEPSEEK_CHUTES_CONFIG", ""),
         ]
