@@ -218,14 +218,16 @@ def create_pr_for_branch(repo: str, branch: str, title: str, body: str) -> Optio
         return out["url"] if out else None
     except Exception as e:
         print(f"Warning: gh pr create failed for {branch}: {e} — checking for existing PR")
-        # PR may already exist (agent created it) — look it up
+        # PR may already exist (agent created it) — look it up by head branch
         try:
-            out = gh_json([
-                "pr", "view", "--repo", repo,
+            results = gh_json([
+                "pr", "list", "-R", repo,
                 "--head", branch,
+                "--state", "open",
                 "--json", "url",
             ])
-            return out["url"] if out else None
+            if results:
+                return results[0]["url"]
         except Exception as e2:
-            print(f"Warning: gh pr view also failed for {branch}: {e2}")
-            return None
+            print(f"Warning: gh pr list also failed for {branch}: {e2}")
+        return None

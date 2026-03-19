@@ -9,6 +9,7 @@ from pathlib import Path
 from orchestrator.paths import load_config, runtime_paths
 from orchestrator.gh_project import (
     add_issue_comment,
+    create_pr_for_branch,
     edit_issue_labels,
     query_project,
     set_item_status,
@@ -128,6 +129,69 @@ def _rebase_pr_onto_main(repo: str, pr: dict) -> bool:
     except Exception as e:
         print(f"  Rebase error for {branch}: {e}")
         return False
+
+
+def _list_agent_branches(repo: str) -> list[str]:
+    """List remote branches starting with agent/ for the given repo."""
+    try:
+        raw = gh(["api", f"repos/{repo}/branches?per_page=100", "--paginate",
+                  "--jq", ".[].name"], check=False)
+        return [b for b in raw.splitlines() if b.startswith("agent/")]
+    except Exception as e:
+        print(f"Warning: failed to list branches for {repo}: {e}")
+        return []
+
+
+def _open_pr_branches(repo: str) -> set[str]:
+    """Return set of head branch names that already have an open PR."""
+    try:
+        prs = gh_json([
+            "pr", "list", "-R", repo, "--state", "open",
+            "--json", "headRefName",
+        ]) or []
+        return {pr["headRefName"] for pr in prs}
+    except Exception:
+        return set()
+
+
+def _branch_has_commits_ahead_of_main(repo: str, branch: str, base: str = "main") -> bool:
+    """Return True if the branch has at least one commit not on base."""
+    try:
+        out = gh(["api", f"repos/{repo}/compare/{base}...{branch}",
+                  "--jq", ".ahead_by"], check=False)
+        return int(out.strip() or "0") > 0
+    except Exception:
+        return False
+
+
+def _create_prs_for_orphan_branches(repos: set[str]):
+    """Open PRs for agent branches that have commits but no open PR yet."""
+    for repo in sorted(repos):
+        try:
+            agent_branches = _list_agent_branches(repo)
+        except Exception:
+            continue
+        if not agent_branches:
+            continue
+
+        pr_branches = _open_pr_branches(repo)
+        orphans = [b for b in agent_branches if b not in pr_branches]
+        if not orphans:
+            continue
+
+        print(f"{repo}: checking {len(orphans)} agent branch(es) without open PRs")
+        for branch in orphans:
+            if not _branch_has_commits_ahead_of_main(repo, branch):
+                continue
+            # Extract task_id slug from branch name (agent/<task_id>)
+            task_id = branch[len("agent/"):]
+            title = f"Agent: {task_id}"
+            body = f"Automated changes from agent branch `{branch}`."
+            pr_url = create_pr_for_branch(repo, branch, title, body)
+            if pr_url:
+                print(f"  Opened PR for orphan branch {branch}: {pr_url}")
+            else:
+                print(f"  Warning: failed to open PR for {branch}")
 
 
 def _list_agent_prs(repo: str) -> list[dict]:
@@ -294,6 +358,9 @@ def monitor_prs():
 
     # Housekeeping: close PRs from forks
     _close_fork_prs(repos)
+
+    # Open PRs for agent branches that completed but have no PR yet
+    _create_prs_for_orphan_branches(repos)
 
     for repo in sorted(repos):
         prs = _list_agent_prs(repo)
