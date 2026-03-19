@@ -1270,10 +1270,6 @@ def run():
                 print(f"  Skipping {github_slug}: {reason}")
                 continue
 
-<<<<<<< HEAD
-=======
-            record_run(cfg, "strategic_planner", github_slug)
-
             # Build cross-repo context from sibling repos
             cross_repo_ctx = _gather_cross_repo_context(
                 repos,
@@ -1281,8 +1277,6 @@ def run():
                 strategy_map=strategy_map,
                 dependencies=dependencies,
             )
-
->>>>>>> 21c826f (agent task-20260319-155323-multi-repo-strategic-planning-cross-repo-dependenc)
             # Phase 1: Generate plan with retrospective
             plan, retrospective = plan_repo(cfg, github_slug, repo_path, cross_repo_ctx)
             if not plan:
