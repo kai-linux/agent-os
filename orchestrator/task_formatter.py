@@ -23,7 +23,7 @@ Return ONLY valid JSON (no markdown fences, no commentary) with exactly these fi
 Rules:
 - goal: expand terse notes into a clear, actionable objective. Keep the original intent.
 - success_criteria: infer 2-4 concrete, testable criteria from the goal if not stated.
-- task_type: one of implementation, debugging, architecture, research, docs, browser_automation.
+- task_type: one of implementation, debugging, architecture, research, docs, browser_automation, design, content.
   Infer from the nature of the work.
 - agent_preference: "auto" unless the issue explicitly names an agent.
 - constraints: always include "Prefer minimal diffs". Add others only if stated or clearly implied.

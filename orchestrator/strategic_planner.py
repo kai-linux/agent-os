@@ -31,7 +31,7 @@ from orchestrator.gh_project import query_project, set_item_status, edit_issue_l
 from orchestrator.trust import is_trusted
 
 PLAN_SIZE = 5
-ANALYSIS_MODEL = "sonnet"
+ANALYSIS_MODEL = "opus"
 METRICS_WINDOW_DAYS = 30
 SIMILARITY_THRESHOLD = 0.75
 POLL_INTERVAL_SECONDS = 300   # 5 minutes
@@ -415,7 +415,7 @@ Each object must have:
   "issue_number" - (promote only) the GitHub issue number to promote, e.g. 8
   "title"      - concise GitHub issue title under 70 chars (for create; for promote, the existing title)
   "goal"       - one-paragraph goal statement
-  "task_type"  - one of: implementation, debugging, architecture, research, docs
+  "task_type"  - one of: implementation, debugging, architecture, research, docs, design, content
   "priority"   - one of: prio:high, prio:normal, prio:low
   "rationale"  - one sentence explaining why this task matters this week, referencing the strategy
   "body"       - (create only) structured body with ## Goal\\n...\\n## Success Criteria\\n...\\n## Constraints\\n- Prefer minimal diffs

@@ -216,18 +216,17 @@ Rules:
 - Do NOT propose re-opening or modifying existing issues
 - Do NOT create tasks that duplicate existing open issues
 - Issue body must use ## Goal, ## Success Criteria, ## Constraints sections
-
-Rules:
 - Order by priority (most impactful first)
 - Assign priority based on risk and impact — security/data-loss risks are high,
   tech-debt cleanup is normal, nice-to-haves are low
 
 Return ONLY a JSON array (no markdown fences, no commentary) of exactly {num_issues} objects.
 Each object must have:
-  "title"    - concise GitHub issue title under 70 chars
-  "body"     - structured body with ## Goal\\n...\\n## Success Criteria\\n...\\n## Constraints\\n- Prefer minimal diffs
-  "priority" - one of: prio:high, prio:normal, prio:low
-  "labels"   - JSON array of label strings (choose from: enhancement, bug, tech-debt)
+  "title"     - concise GitHub issue title under 70 chars
+  "body"      - structured body with ## Goal\\n...\\n## Success Criteria\\n...\\n## Constraints\\n- Prefer minimal diffs
+  "task_type" - one of: implementation, debugging, architecture, research, docs, design, content
+  "priority"  - one of: prio:high, prio:normal, prio:low
+  "labels"    - JSON array of label strings (choose from: enhancement, bug, tech-debt)
 
 --- Stale issues (open >30 days, no activity) ---
 {stale_issues}
