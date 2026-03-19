@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shutil
+import shlex
 import subprocess
 import tempfile
 import traceback
@@ -101,6 +102,39 @@ def _format_runner_failure(exc: Exception) -> tuple[str, list[str], str | None]:
         detail = stderr_tail or stdout_tail or ""
         return summary, blockers, detail
     return str(exc), [f"- Runner/model failure: {exc}"], str(exc)
+
+
+def _command_available(cmd: str) -> bool:
+    if not cmd:
+        return False
+    first = shlex.split(str(cmd))[0]
+    return shutil.which(first) is not None
+
+
+def agent_available(agent: str) -> tuple[bool, str | None]:
+    agent = str(agent).strip().lower()
+    if agent == "codex":
+        cmd = os.environ.get("CODEX_BIN", "codex")
+        return (_command_available(cmd), None if _command_available(cmd) else f"{cmd} not found on PATH")
+    if agent == "claude":
+        cmd = os.environ.get("CLAUDE_BIN", "claude")
+        return (_command_available(cmd), None if _command_available(cmd) else f"{cmd} not found on PATH")
+    if agent == "gemini":
+        cmd = os.environ.get("GEMINI_BIN", "gemini")
+        return (_command_available(cmd), None if _command_available(cmd) else f"{cmd} not found on PATH")
+    if agent == "deepseek":
+        cline_cmd = os.environ.get("CLINE_BIN", "cline")
+        if not _command_available(cline_cmd):
+            return False, f"{cline_cmd} not found on PATH"
+        provider_configs = [
+            os.environ.get("DEEPSEEK_OPENROUTER_CONFIG", ""),
+            os.environ.get("DEEPSEEK_NANOGPT_CONFIG", ""),
+            os.environ.get("DEEPSEEK_CHUTES_CONFIG", ""),
+        ]
+        if not any(cfg and Path(cfg).is_dir() for cfg in provider_configs):
+            return False, "no DeepSeek provider config dir is set"
+        return True, None
+    return True, None
 
 
 def run(cmd, *, cwd=None, logfile: Path | None = None, check=True, timeout=None, queue_summary_log: Path | None = None):
@@ -779,6 +813,40 @@ def commit_and_push(worktree: Path, branch: str, task_id: str, allow_push: bool,
     return True
 
 
+def should_attempt_git_rescue(result: dict, worktree: Path, branch: str) -> bool:
+    if not result:
+        return False
+    if result.get("status") not in ("partial", "blocked"):
+        return False
+    return has_changes(worktree) or has_unpushed_commits(worktree, branch)
+
+
+def rescue_git_progress(result: dict, worktree: Path, branch: str, task_id: str, allow_push: bool, logfile: Path, queue_summary_log: Path) -> dict | None:
+    if not should_attempt_git_rescue(result, worktree, branch):
+        return None
+    try:
+        committed = commit_and_push(worktree, branch, task_id, allow_push, logfile, queue_summary_log)
+    except Exception as e:
+        log(f"Git rescue failed: {e}", logfile, also_summary=True, queue_summary_log=queue_summary_log)
+        return None
+
+    if not committed:
+        return None
+
+    rescued = dict(result)
+    rescued["status"] = "complete"
+    summary = result.get("summary", "Recovered worktree changes.")
+    rescued["summary"] = f"{summary} Orchestrator rescued and pushed the worktree changes."
+    rescued["next_step"] = "Monitor the pushed branch and rerun CI/PR checks."
+    done = list(result.get("done", ["- None"]))
+    done.append("- Orchestrator committed and pushed recovered worktree changes.")
+    rescued["done"] = done
+    decisions = list(result.get("decisions", ["- None"]))
+    decisions.append("- Queue performed git rescue after the agent left valid changes behind.")
+    rescued["decisions"] = decisions
+    return rescued
+
+
 def parse_agent_result(worktree: Path):
     result_file = worktree / ".agent_result.md"
     if not result_file.exists():
@@ -851,10 +919,16 @@ def get_agent_chain(meta: dict, cfg: dict) -> list[str]:
     requested = str(meta.get("agent", cfg["default_agent"])).strip().lower()
 
     if requested in {"", "auto"}:
-        return task_chain
+        chain = task_chain
+    else:
+        chain = [requested] + [a for a in task_chain if a != requested]
 
-    chain = [requested] + [a for a in task_chain if a != requested]
-    return chain
+    filtered = []
+    for agent in chain:
+        available, _reason = agent_available(agent)
+        if available:
+            filtered.append(agent)
+    return filtered
 
 
 def get_next_agent(meta: dict, cfg: dict, model_attempts: list[str]) -> str | None:
@@ -1429,10 +1503,15 @@ def main():
 
         meta["model_attempts"] = model_attempts
 
-        pushed = commit_and_push(worktree, branch, task_id, allow_push, logfile, QUEUE_SUMMARY_LOG)
+        rescued_result = rescue_git_progress(final_result, worktree, branch, task_id, allow_push, logfile, QUEUE_SUMMARY_LOG)
+        rescued_push = rescued_result is not None
+        if rescued_result is not None:
+            final_result = rescued_result
+
+        pushed = False if rescued_push else commit_and_push(worktree, branch, task_id, allow_push, logfile, QUEUE_SUMMARY_LOG)
 
         commit_hash = None
-        if pushed:
+        if pushed or rescued_push:
             commit_hash = run(["git", "rev-parse", "HEAD"], cwd=worktree, logfile=logfile, queue_summary_log=QUEUE_SUMMARY_LOG).stdout.strip()
             log(f"Final commit hash: {commit_hash}", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
         else:

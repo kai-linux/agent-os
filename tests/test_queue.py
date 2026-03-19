@@ -11,11 +11,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from orchestrator.queue import (
     CommandExecutionError,
     _format_runner_failure,
+    agent_available,
     build_escalation_message,
     get_agent_chain,
     handle_telegram_callback,
     parse_agent_result,
     parse_bullets,
+    rescue_git_progress,
     save_telegram_action,
     split_section,
     telegram_action_expired,
@@ -75,12 +77,16 @@ def _cfg(fallbacks=None):
 
 
 def test_get_agent_chain_auto():
-    chain = get_agent_chain({"task_type": "implementation"}, _cfg())
+    from unittest.mock import patch
+    with patch("orchestrator.queue.agent_available", return_value=(True, None)):
+        chain = get_agent_chain({"task_type": "implementation"}, _cfg())
     assert chain == ["codex", "claude", "gemini", "deepseek"]
 
 
 def test_get_agent_chain_requested_first():
-    chain = get_agent_chain({"agent": "claude", "task_type": "implementation"}, _cfg())
+    from unittest.mock import patch
+    with patch("orchestrator.queue.agent_available", return_value=(True, None)):
+        chain = get_agent_chain({"agent": "claude", "task_type": "implementation"}, _cfg())
     assert chain[0] == "claude"
     assert set(chain) == {"codex", "claude", "gemini", "deepseek"}
 
@@ -88,6 +94,17 @@ def test_get_agent_chain_requested_first():
 def test_get_agent_chain_unknown_type_falls_back_to_default():
     chain = get_agent_chain({"task_type": "unknown"}, _cfg())
     assert "codex" in chain
+
+
+def test_get_agent_chain_skips_unavailable_deepseek(monkeypatch):
+    cfg = _cfg({"debugging": ["claude", "deepseek", "codex"]})
+
+    def fake_available(agent):
+        return (agent != "deepseek", None if agent != "deepseek" else "not configured")
+
+    monkeypatch.setattr("orchestrator.queue.agent_available", fake_available)
+    chain = get_agent_chain({"task_type": "debugging"}, cfg)
+    assert chain == ["claude", "codex"]
 
 
 # ---------------------------------------------------------------------------
@@ -235,6 +252,35 @@ def test_format_runner_failure_classifies_usage_limit():
     assert "usage limit / rate limit" in summary
     assert "usage limit reached" in detail
     assert any("stderr tail" in item for item in blockers)
+
+
+def test_agent_available_deepseek_requires_provider_config(monkeypatch):
+    monkeypatch.setenv("CLINE_BIN", "cline")
+    monkeypatch.delenv("DEEPSEEK_OPENROUTER_CONFIG", raising=False)
+    monkeypatch.delenv("DEEPSEEK_NANOGPT_CONFIG", raising=False)
+    monkeypatch.delenv("DEEPSEEK_CHUTES_CONFIG", raising=False)
+    monkeypatch.setattr("orchestrator.queue._command_available", lambda cmd: True)
+
+    available, reason = agent_available("deepseek")
+    assert available is False
+    assert "no DeepSeek provider config dir is set" in reason
+
+
+def test_rescue_git_progress_marks_result_complete(tmp_path, monkeypatch):
+    result = {
+        "status": "blocked",
+        "summary": "Need someone else to commit and push.",
+        "done": ["- Updated files."],
+        "decisions": ["- Could not push from agent environment."],
+    }
+    monkeypatch.setattr("orchestrator.queue.has_changes", lambda worktree: True)
+    monkeypatch.setattr("orchestrator.queue.has_unpushed_commits", lambda worktree, branch: False)
+    monkeypatch.setattr("orchestrator.queue.commit_and_push", lambda *args, **kwargs: True)
+
+    rescued = rescue_git_progress(result, tmp_path, "agent/task-1", "task-1", True, tmp_path / "x.log", tmp_path / "y.log")
+    assert rescued is not None
+    assert rescued["status"] == "complete"
+    assert "rescued and pushed" in rescued["summary"]
 
 
 def test_handle_telegram_callback_requeue(monkeypatch):

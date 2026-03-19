@@ -156,14 +156,14 @@ The system never thrashes. It tries, it hands off, it escalates. Like a real tea
 ```yaml
 agent_fallbacks:
   implementation:     [codex, claude, gemini, deepseek]
-  debugging:          [claude, gemini, codex, deepseek]
-  architecture:       [claude, gemini, codex, deepseek]
+  debugging:          [claude, codex, gemini, deepseek]
+  architecture:       [claude, codex, gemini, deepseek]
   research:           [claude, gemini, codex, deepseek]
   docs:               [claude, gemini, codex, deepseek]
-  browser_automation: [claude, gemini, codex, deepseek]
+  browser_automation: [claude, codex, gemini, deepseek]
 ```
 
-DeepSeek has its own provider fallback: `openrouter → nanogpt → chutes`.
+DeepSeek has its own provider fallback: `openrouter → nanogpt → chutes`. It is kept last in the chain by default because it depends on extra provider configuration and should not consume retries when those providers are unavailable.
 
 Issues can specify a preferred agent. The dispatcher can auto-detect task type. Priority labels (`prio:high`, `prio:normal`, `prio:low`) influence scheduling order.
 
