@@ -26,10 +26,12 @@ from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 from pathlib import Path
+from uuid import uuid4
 
 from orchestrator.paths import load_config, runtime_paths
 from orchestrator.agent_scorer import load_recent_metrics
 from orchestrator.gh_project import query_project, set_item_status, edit_issue_labels, ensure_labels
+from orchestrator.queue import planner_reply_markup, save_telegram_action, load_telegram_action, telegram_action_expired
 from orchestrator.scheduler_state import is_due, record_run, job_lock
 from orchestrator.trust import is_trusted
 
@@ -46,6 +48,18 @@ POLL_INTERVAL_SECONDS = 300   # 5 minutes
 APPROVAL_TIMEOUT_HOURS = 24
 APPROVAL_KEYWORDS = {"yes", "approve", "approved", "ok", "go", "lgtm"}
 REJECTION_KEYWORDS = {"no", "reject", "skip", "cancel", "nope"}
+
+
+def _format_cadence(days: float) -> str:
+    if days <= 0:
+        return "dormant"
+    hours = days * 24.0
+    if hours < 1:
+        minutes = max(1, round(hours * 60))
+        return f"every {minutes}m"
+    if hours < 24:
+        return f"every {hours:g}h"
+    return f"every {days:g}d"
 
 
 # ---------------------------------------------------------------------------
@@ -839,19 +853,17 @@ def _parse_plan(text: str) -> list[dict]:
 # Telegram approval gate
 # ---------------------------------------------------------------------------
 
-def _send_telegram(cfg: dict, text: str) -> int | None:
+def _send_telegram(cfg: dict, text: str, reply_markup: dict | None = None) -> int | None:
     """Send a Telegram message. Return message_id on success, None otherwise."""
     token = str(cfg.get("telegram_bot_token", "")).strip()
     chat_id = str(cfg.get("telegram_chat_id", "")).strip()
     if not token or not chat_id:
         return None
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    result = subprocess.run(
-        ["curl", "-sS", "-X", "POST", url,
-         "-d", f"chat_id={chat_id}",
-         "--data-urlencode", f"text={text}"],
-        capture_output=True, text=True, timeout=20,
-    )
+    cmd = ["curl", "-sS", "-X", "POST", url, "-d", f"chat_id={chat_id}", "--data-urlencode", f"text={text}"]
+    if reply_markup:
+        cmd += ["--data-urlencode", f"reply_markup={json.dumps(reply_markup, separators=(',', ':'))}"]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
     try:
         data = json.loads(result.stdout)
         if data.get("ok"):
@@ -861,10 +873,11 @@ def _send_telegram(cfg: dict, text: str) -> int | None:
     return None
 
 
-def _format_plan_message(plan: list[dict], repo: str) -> str:
+def _format_plan_message(plan: list[dict], repo: str, cadence_days: float) -> str:
     """Format the sprint plan for Telegram display."""
     lines = [
-        f"📋 Weekly Sprint Plan — {repo}",
+        f"📋 Sprint Plan — {repo}",
+        f"Cadence: {_format_cadence(cadence_days)}",
         f"Generated: {datetime.now(tz=timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
         "",
     ]
@@ -876,80 +889,47 @@ def _format_plan_message(plan: list[dict], repo: str) -> str:
         lines.append(f"{i}. {prio_icon} [{source}] [{task.get('task_type', '?')}] {task.get('title', '?')}")
         lines.append(f"   {task.get('rationale', '')}")
         lines.append("")
-    lines.append("Reply YES to approve and create issues.")
-    lines.append("Reply NO to skip this week.")
-    lines.append(f"Auto-skip in {APPROVAL_TIMEOUT_HOURS}h if no response.")
+    lines.append("Tap Approve to create issues.")
+    lines.append("Tap Skip to leave the plan unapplied.")
+    lines.append(f"Auto-skip in {APPROVAL_TIMEOUT_HOURS}h if no action.")
     return "\n".join(lines)
 
 
-def _poll_approval(
-    cfg: dict,
-    plan_message_id: int,
-    timeout_hours: float = APPROVAL_TIMEOUT_HOURS,
-    poll_interval: int = POLL_INTERVAL_SECONDS,
-) -> bool:
-    """Poll Telegram for approval reply. Returns True if approved."""
-    token = str(cfg.get("telegram_bot_token", "")).strip()
-    chat_id = str(cfg.get("telegram_chat_id", "")).strip()
-    if not token or not chat_id:
-        print("No Telegram credentials; cannot poll for approval.")
-        return False
+def _create_plan_approval_action(cfg: dict, repo: str) -> dict:
+    now = datetime.now(timezone.utc)
+    action_id = uuid4().hex[:12]
+    return {
+        "action_id": action_id,
+        "type": "plan_approval",
+        "status": "pending",
+        "created_at": now.isoformat(),
+        "expires_at": (now + timedelta(hours=APPROVAL_TIMEOUT_HOURS)).isoformat(),
+        "chat_id": str(cfg.get("telegram_chat_id", "")).strip(),
+        "message_id": None,
+        "repo": repo,
+        "approval": "pending",
+    }
 
+
+def _poll_approval(paths: dict, action_id: str, timeout_hours: float = APPROVAL_TIMEOUT_HOURS, poll_interval: int = POLL_INTERVAL_SECONDS) -> bool:
+    """Poll the persisted planner approval action. Returns True if approved."""
+    actions_dir = paths["TELEGRAM_ACTIONS"]
     deadline = time.time() + timeout_hours * 3600
-    last_update_id = 0
-
-    # Get current update_id to skip old messages
-    try:
-        init = subprocess.run(
-            ["curl", "-sS",
-             f"https://api.telegram.org/bot{token}/getUpdates?offset=-1&limit=1"],
-            capture_output=True, text=True, timeout=15,
-        )
-        data = json.loads(init.stdout)
-        for u in data.get("result", []):
-            last_update_id = max(last_update_id, u.get("update_id", 0))
-    except Exception:
-        pass
-
     print(f"Polling for approval (timeout: {timeout_hours}h, interval: {poll_interval}s)...")
 
     while time.time() < deadline:
-        time.sleep(poll_interval)
-
-        try:
-            url = (
-                f"https://api.telegram.org/bot{token}/getUpdates"
-                f"?offset={last_update_id + 1}&timeout=10"
-            )
-            result = subprocess.run(
-                ["curl", "-sS", url],
-                capture_output=True, text=True, timeout=30,
-            )
-            data = json.loads(result.stdout)
-        except Exception:
-            continue
-
-        for update in data.get("result", []):
-            uid = update.get("update_id", 0)
-            last_update_id = max(last_update_id, uid)
-
-            msg = update.get("message", {})
-            msg_chat_id = str(msg.get("chat", {}).get("id", ""))
-            if msg_chat_id != str(chat_id):
-                continue
-
-            text = (msg.get("text") or "").strip().lower()
-
-            # Accept reply to our message or standalone keyword
-            reply_to = msg.get("reply_to_message", {})
-            is_reply = reply_to.get("message_id") == plan_message_id
-
-            if text in APPROVAL_KEYWORDS or (is_reply and text in APPROVAL_KEYWORDS):
-                print(f"Approval received: {text!r}")
+        action = load_telegram_action(actions_dir, action_id)
+        if action:
+            if action.get("approval") == "approved":
+                print("Approval received via Telegram button.")
                 return True
-            if text in REJECTION_KEYWORDS or (is_reply and text in REJECTION_KEYWORDS):
-                print(f"Rejection received: {text!r}")
+            if action.get("approval") == "rejected":
+                print("Rejection received via Telegram button.")
                 return False
+            if telegram_action_expired(action):
+                print("Approval timed out.")
+                return False
+        time.sleep(poll_interval)
 
     print("Approval timed out.")
     return False
@@ -1276,6 +1256,7 @@ def create_plan_issues(
 
 def run():
     cfg = load_config()
+    paths = runtime_paths(cfg)
     with job_lock(cfg, "strategic_planner") as acquired:
         if not acquired:
             print("Strategic planner already running; skipping overlapping cron invocation.")
@@ -1326,20 +1307,24 @@ def run():
                 continue
 
             # Phase 2: Post to Telegram and wait for approval
-            plan_text = _format_plan_message(plan, github_slug)
+            plan_text = _format_plan_message(plan, github_slug, sprint_cadence_days)
             print(f"\n{plan_text}\n")
 
-            msg_id = _send_telegram(cfg, plan_text)
+            action = _create_plan_approval_action(cfg, github_slug)
+            save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
+            msg_id = _send_telegram(cfg, plan_text, reply_markup=planner_reply_markup(action["action_id"]))
             if msg_id is None:
                 print("  Failed to send plan to Telegram (or no credentials).")
                 print("  Skipping issue creation — approval gate is mandatory.")
                 continue
+            action["message_id"] = msg_id
+            save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
 
             # Count this as a planning run once the approval request exists.
             record_run(cfg, "strategic_planner", github_slug)
 
             # Phase 3: Wait for human approval
-            approved = _poll_approval(cfg, msg_id)
+            approved = _poll_approval(paths, action["action_id"])
 
             if not approved:
                 skip_msg = f"⏭️ Sprint plan for {github_slug} was not approved. Skipping this cycle."
