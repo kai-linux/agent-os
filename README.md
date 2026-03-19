@@ -252,7 +252,7 @@ gh auth login && gh auth refresh -s project
 # Ensure codex, claude, gemini CLIs are installed and authenticated
 
 # 4. Create GitHub Project
-# Add Status field: Backlog · Ready · In Progress · Review · Blocked · Done
+# Add Status field: Backlog · Ready · In Progress · Blocked · Done
 # Note the project number from the URL (/projects/N) → put in config.yaml
 
 # 5. Set up cron

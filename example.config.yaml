@@ -49,7 +49,6 @@ github_project_number: 1
 github_project_status_field: "Status"
 github_project_ready_value: "Ready"
 github_project_in_progress_value: "In Progress"
-github_project_review_value: "Review"
 github_project_blocked_value: "Blocked"
 github_project_done_value: "Done"
 
