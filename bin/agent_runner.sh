@@ -12,6 +12,10 @@ GEMINI_BIN="${GEMINI_BIN:-gemini}"
 DEEPSEEK_RUNNER="${DEEPSEEK_RUNNER:-${SCRIPT_DIR}/run_deepseek.sh}"
 GEMINI_MODEL="${GEMINI_MODEL:-gemini-2.5-flash}"
 
+# DeepSeek configuration
+export DEEPSEEK_OPENROUTER_CONFIG="${DEEPSEEK_OPENROUTER_CONFIG:-$HOME/.config/openrouter}"
+export DEEPSEEK_OPENROUTER_MODEL="${DEEPSEEK_OPENROUTER_MODEL:-deepseek/deepseek-v3.2}"
+
 cd "$WORKDIR"
 
 if [ "$AGENT" = "codex" ]; then
