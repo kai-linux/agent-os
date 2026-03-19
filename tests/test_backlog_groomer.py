@@ -46,3 +46,38 @@ def test_groom_repo_no_data_status(tmp_path):
     assert result["status"] == "no-data"
     assert result["created"] == 0
     assert result["skipped"] == 0
+
+
+def test_groom_repo_adds_created_issue_to_backlog(tmp_path, monkeypatch):
+    cfg = {
+        "root_dir": str(tmp_path),
+        "worktrees_dir": str(tmp_path / "worktrees"),
+        "github_owner": "owner",
+        "github_projects": {
+            "proj": {
+                "project_number": 1,
+                "backlog_value": "Backlog",
+                "repos": [{"github_repo": "owner/repo", "local_repo": str(tmp_path / "repo")}],
+            }
+        },
+    }
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    monkeypatch.setattr(bg, "_list_open_issues", lambda repo, cfg: [])
+    monkeypatch.setattr(bg, "load_recent_metrics", lambda *args, **kwargs: [{"task_id": "t1"}])
+    monkeypatch.setattr(bg, "_parse_known_issues", lambda repo_path: [])
+    monkeypatch.setattr(bg, "_find_risk_flags", lambda cfg: [])
+    monkeypatch.setattr(bg, "_call_haiku", lambda prompt: '[{"title":"Fix thing","body":"## Goal\\nX\\n## Success Criteria\\nY\\n## Constraints\\n- Prefer minimal diffs","priority":"prio:high","labels":["bug"]}]')
+    monkeypatch.setattr(bg, "_open_issue_exists", lambda repo, title: False)
+
+    created_urls = []
+    monkeypatch.setattr(bg, "_create_issue", lambda repo, title, body, labels: created_urls.append("https://github.com/owner/repo/issues/10") or created_urls[-1])
+    backlog_urls = []
+    monkeypatch.setattr(bg, "_set_issue_backlog", lambda cfg, github_slug, issue_url: backlog_urls.append(issue_url))
+
+    result = bg.groom_repo(cfg, "owner/repo", repo)
+
+    assert result["status"] == "created"
+    assert created_urls == ["https://github.com/owner/repo/issues/10"]
+    assert backlog_urls == ["https://github.com/owner/repo/issues/10"]

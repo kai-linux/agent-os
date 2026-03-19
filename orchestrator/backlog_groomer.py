@@ -21,7 +21,7 @@ from pathlib import Path
 
 from orchestrator.paths import load_config, runtime_paths
 from orchestrator.agent_scorer import load_recent_metrics
-from orchestrator.gh_project import ensure_labels
+from orchestrator.gh_project import ensure_labels, query_project, set_item_status, gh
 from orchestrator.scheduler_state import is_due, record_run, job_lock
 from orchestrator.trust import is_trusted
 
@@ -287,11 +287,10 @@ def _parse_issues(text: str) -> list[dict]:
 
 def _create_issue(repo: str, title: str, body: str, labels: list[str]) -> str:
     """Create a GitHub issue and return its URL."""
-    # Ensure priority and ready labels exist
+    # Ensure priority labels exist
     prio_labels = [l for l in labels if l.startswith("prio:")]
-    custom_labels = prio_labels + ["ready"]
     try:
-        ensure_labels(repo, custom_labels)
+        ensure_labels(repo, prio_labels)
     except Exception:
         pass
     cmd = ["gh", "issue", "create", "--repo", repo, "--title", title, "--body", body]
@@ -301,6 +300,42 @@ def _create_issue(repo: str, title: str, body: str, labels: list[str]) -> str:
     if result.returncode != 0:
         raise RuntimeError(f"gh issue create failed: {result.stderr.strip()}")
     return result.stdout.strip()
+
+
+def _set_issue_backlog(cfg: dict, github_slug: str, issue_url: str):
+    owner = cfg.get("github_owner", "")
+    if not owner:
+        return
+
+    for project_cfg in cfg.get("github_projects", {}).values():
+        if not isinstance(project_cfg, dict):
+            continue
+        repo_match = any(rc.get("github_repo") == github_slug for rc in project_cfg.get("repos", []))
+        if not repo_match:
+            continue
+
+        backlog_value = project_cfg.get("backlog_value", "Backlog")
+        try:
+            raw = gh([
+                "project", "item-add", str(project_cfg["project_number"]),
+                "--owner", owner,
+                "--url", issue_url,
+                "--format", "json",
+            ], check=False)
+            if not raw:
+                return
+            item_data = json.loads(raw)
+            item_id = item_data.get("id")
+            if not item_id:
+                return
+
+            info = query_project(project_cfg["project_number"], owner)
+            option_id = info["status_options"].get(backlog_value)
+            if info["status_field_id"] and option_id:
+                set_item_status(info["project_id"], item_id, info["status_field_id"], option_id)
+        except Exception as e:
+            print(f"Warning: failed to add {issue_url} to project backlog: {e}")
+        return
 
 
 
@@ -487,6 +522,7 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
 
         try:
             url = _create_issue(github_slug, title, body, labels)
+            _set_issue_backlog(cfg, github_slug, url)
             print(f"  Created: {url}")
             created_urls.append(url)
             open_titles.append(title)  # Prevent self-duplication within batch
