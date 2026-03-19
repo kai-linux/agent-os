@@ -264,6 +264,68 @@ def test_groom_repo_prompt_includes_repo_documents(tmp_path, monkeypatch):
     assert "Evidence." in prompt
 
 
+def test_run_does_not_send_telegram_for_due_skips_only(tmp_path, monkeypatch):
+    cfg = {
+        "root_dir": str(tmp_path),
+        "github_owner": "owner",
+        "github_projects": {
+            "proj": {
+                "repos": [{"github_repo": "owner/repo", "local_repo": str(tmp_path / "repo")}],
+            }
+        },
+    }
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    monkeypatch.setattr(bg, "load_config", lambda: cfg)
+    class _Lock:
+        def __enter__(self):
+            return True
+        def __exit__(self, exc_type, exc, tb):
+            return False
+    monkeypatch.setattr(bg, "job_lock", lambda cfg, job_name: _Lock())
+    monkeypatch.setattr(bg, "_resolve_repos", lambda cfg: [("owner/repo", repo)])
+    monkeypatch.setattr(bg, "is_due", lambda *args, **kwargs: (False, "next due in 2.1h"))
+    sent = []
+    monkeypatch.setattr(bg, "_send_telegram", lambda cfg, text: sent.append(text))
+
+    bg.run()
+
+    assert sent == []
+
+
+def test_run_sends_telegram_when_repo_created_items(tmp_path, monkeypatch):
+    cfg = {
+        "root_dir": str(tmp_path),
+        "github_owner": "owner",
+        "github_projects": {
+            "proj": {
+                "repos": [{"github_repo": "owner/repo", "local_repo": str(tmp_path / "repo")}],
+            }
+        },
+    }
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    monkeypatch.setattr(bg, "load_config", lambda: cfg)
+    class _Lock:
+        def __enter__(self):
+            return True
+        def __exit__(self, exc_type, exc, tb):
+            return False
+    monkeypatch.setattr(bg, "job_lock", lambda cfg, job_name: _Lock())
+    monkeypatch.setattr(bg, "_resolve_repos", lambda cfg: [("owner/repo", repo)])
+    monkeypatch.setattr(bg, "is_due", lambda *args, **kwargs: (True, "due"))
+    monkeypatch.setattr(bg, "groom_repo", lambda cfg, slug, path: {"status": "created", "created": 1, "skipped": 0, "cleaned": 0})
+    monkeypatch.setattr(bg, "record_run", lambda *args, **kwargs: None)
+    sent = []
+    monkeypatch.setattr(bg, "_send_telegram", lambda cfg, text: sent.append(text))
+
+    bg.run()
+
+    assert len(sent) == 1
+
+
 def test_call_haiku_falls_back_to_codex_when_claude_fails(monkeypatch):
     def fake_run(cmd, capture_output=True, text=True, timeout=120):
         if cmd[0] == "claude":

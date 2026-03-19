@@ -904,6 +904,7 @@ def run():
         all_cleaned = 0
         status_counts = {"created": 0, "skipped": 0, "no-data": 0, "error": 0, "dormant": 0}
         summaries = []
+        notify = False
 
         for github_slug, repo_path in repos:
             cadence_days = _repo_groomer_cadence_days(cfg, github_slug)
@@ -926,6 +927,8 @@ def run():
             all_created += result.get("created", 0)
             all_skipped += result.get("skipped", 0)
             all_cleaned += result.get("cleaned", 0)
+            if status in {"created", "error"} or result.get("cleaned", 0) > 0:
+                notify = True
             if status in {"created", "skipped"}:
                 record_run(cfg, "backlog_groomer", github_slug)
 
@@ -946,7 +949,8 @@ def run():
             + "\n".join(summaries)
         )
         print(f"\n{summary}")
-        _send_telegram(cfg, summary)
+        if notify:
+            _send_telegram(cfg, summary)
 
 
 if __name__ == "__main__":
