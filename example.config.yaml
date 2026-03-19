@@ -16,6 +16,9 @@ default_max_attempts: 4
 max_parallel_workers: 1
 test_timeout_minutes: 5             # Timeout for test commands (default: 5)
 
+plan_size: 5                         # Number of tasks per sprint plan (default: 5)
+sprint_cadence_days: 7               # Sprint length in days (default: 7); retrospective window matches this
+
 priority_weights:                   # Score added per priority label (default: prio:normal=10)
   prio:high: 30
   prio:normal: 10

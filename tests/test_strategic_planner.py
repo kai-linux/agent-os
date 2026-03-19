@@ -1,4 +1,4 @@
-"""Tests for strategic_planner focus area analysis."""
+"""Tests for strategic_planner focus area analysis and configuration."""
 from __future__ import annotations
 
 import sys
@@ -9,9 +9,12 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from orchestrator.strategic_planner import (
+    DEFAULT_PLAN_SIZE,
+    DEFAULT_SPRINT_CADENCE_DAYS,
     FOCUS_AREA_MARKER,
     _extract_sprint_entries,
     _is_focus_areas_manually_edited,
+    _repo_planner_config,
     _update_focus_areas_section,
     _analyze_focus_areas,
 )
@@ -233,3 +236,56 @@ def test_analyze_focus_areas_handles_bad_json():
     with patch("orchestrator.strategic_planner._call_haiku", return_value="not json"):
         result = _analyze_focus_areas(["s1", "s2", "s3"])
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# _repo_planner_config
+# ---------------------------------------------------------------------------
+
+def test_repo_planner_config_defaults():
+    """Returns defaults when no config is set."""
+    plan_size, cadence = _repo_planner_config({}, "owner/repo")
+    assert plan_size == DEFAULT_PLAN_SIZE
+    assert cadence == DEFAULT_SPRINT_CADENCE_DAYS
+
+
+def test_repo_planner_config_top_level():
+    """Top-level plan_size and sprint_cadence_days are used."""
+    cfg = {"plan_size": 8, "sprint_cadence_days": 14}
+    plan_size, cadence = _repo_planner_config(cfg, "owner/repo")
+    assert plan_size == 8
+    assert cadence == 14
+
+
+def test_repo_planner_config_per_repo_override():
+    """Per-repo config in github_projects overrides top-level."""
+    cfg = {
+        "plan_size": 5,
+        "sprint_cadence_days": 7,
+        "github_projects": {
+            "proj1": {
+                "repos": [
+                    {
+                        "github_repo": "owner/repo-a",
+                        "plan_size": 10,
+                        "sprint_cadence_days": 14,
+                    },
+                    {"github_repo": "owner/repo-b"},
+                ]
+            }
+        },
+    }
+    # repo-a gets overrides
+    plan_size, cadence = _repo_planner_config(cfg, "owner/repo-a")
+    assert plan_size == 10
+    assert cadence == 14
+
+    # repo-b falls back to top-level
+    plan_size, cadence = _repo_planner_config(cfg, "owner/repo-b")
+    assert plan_size == 5
+    assert cadence == 7
+
+    # unknown repo falls back to top-level
+    plan_size, cadence = _repo_planner_config(cfg, "owner/other")
+    assert plan_size == 5
+    assert cadence == 7
