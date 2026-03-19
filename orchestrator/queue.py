@@ -9,14 +9,19 @@ import shutil
 import subprocess
 import tempfile
 import traceback
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from uuid import uuid4
 
 import yaml
 
 from orchestrator.paths import load_config, runtime_paths
 from orchestrator.github_sync import sync_result
 from orchestrator.codebase_memory import read_codebase_context, update_codebase_memory
+from orchestrator.gh_project import add_issue_comment, gh, query_project, set_item_status
+
+
+TELEGRAM_ACTION_TTL_HOURS = 48
 
 
 def now_ts():
@@ -57,34 +62,403 @@ def run(cmd, *, cwd=None, logfile: Path | None = None, check=True, timeout=None,
     return result
 
 
-def send_telegram(cfg: dict, text: str, logfile: Path | None = None, queue_summary_log: Path | None = None):
+def telegram_api(
+    cfg: dict,
+    method: str,
+    payload: dict[str, object] | None = None,
+    logfile: Path | None = None,
+    queue_summary_log: Path | None = None,
+) -> dict | None:
+    token = str(cfg.get("telegram_bot_token", "")).strip()
+    if not token:
+        return None
+
+    url = f"https://api.telegram.org/bot{token}/{method}"
+    try:
+        cmd = ["curl", "-sS", "-X", "POST", url]
+        for key, value in (payload or {}).items():
+            if isinstance(value, (dict, list)):
+                value = json.dumps(value, separators=(",", ":"))
+            elif isinstance(value, bool):
+                value = "true" if value else "false"
+            cmd.extend(["--data-urlencode", f"{key}={value}"])
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
+        if result.returncode != 0:
+            log(f"Telegram {method} failed: {result.stderr}", logfile, queue_summary_log=queue_summary_log)
+            return None
+        data = json.loads(result.stdout) if result.stdout else {}
+        if not data.get("ok"):
+            log(f"Telegram {method} error: {data}", logfile, queue_summary_log=queue_summary_log)
+            return None
+        return data
+    except Exception as e:
+        log(f"Telegram {method} exception: {e}", logfile, queue_summary_log=queue_summary_log)
+        return None
+
+
+def send_telegram(
+    cfg: dict,
+    text: str,
+    logfile: Path | None = None,
+    queue_summary_log: Path | None = None,
+    reply_markup: dict | None = None,
+) -> int | None:
+    chat_id = str(cfg.get("telegram_chat_id", "")).strip()
+    if not chat_id:
+        return None
+    payload: dict[str, object] = {"chat_id": chat_id, "text": text}
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+    data = telegram_api(cfg, "sendMessage", payload, logfile, queue_summary_log)
+    if not data:
+        return None
+    return data.get("result", {}).get("message_id")
+
+
+def answer_telegram_callback(
+    cfg: dict,
+    callback_query_id: str,
+    text: str,
+    logfile: Path | None = None,
+    queue_summary_log: Path | None = None,
+    *,
+    show_alert: bool = False,
+):
+    telegram_api(
+        cfg,
+        "answerCallbackQuery",
+        {
+            "callback_query_id": callback_query_id,
+            "text": text,
+            "show_alert": show_alert,
+        },
+        logfile,
+        queue_summary_log,
+    )
+
+
+def clear_telegram_reply_markup(
+    cfg: dict,
+    chat_id: str,
+    message_id: int,
+    logfile: Path | None = None,
+    queue_summary_log: Path | None = None,
+):
+    telegram_api(
+        cfg,
+        "editMessageReplyMarkup",
+        {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "reply_markup": {"inline_keyboard": []},
+        },
+        logfile,
+        queue_summary_log,
+    )
+
+
+def _telegram_action_path(actions_dir: Path, action_id: str) -> Path:
+    return actions_dir / f"{action_id}.json"
+
+
+def save_telegram_action(actions_dir: Path, action: dict) -> Path:
+    path = _telegram_action_path(actions_dir, action["action_id"])
+    path.write_text(json.dumps(action, indent=2, sort_keys=True), encoding="utf-8")
+    return path
+
+
+def load_telegram_action(actions_dir: Path, action_id: str) -> dict | None:
+    path = _telegram_action_path(actions_dir, action_id)
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def telegram_action_expired(action: dict, now: datetime | None = None) -> bool:
+    now = now or datetime.now(timezone.utc)
+    expires_at = datetime.fromisoformat(action["expires_at"])
+    return now >= expires_at
+
+
+def _telegram_lines(title: str, items: list[str], *, fallback: str, limit: int = 6) -> list[str]:
+    lines = [title]
+    cleaned = [item[2:] if item.startswith("- ") else item for item in items if item and item != "- None"]
+    if not cleaned:
+        lines.append(f"- {fallback}")
+        return lines
+    for item in cleaned[:limit]:
+        lines.append(f"- {item}")
+    if len(cleaned) > limit:
+        lines.append(f"- …and {len(cleaned) - limit} more")
+    return lines
+
+
+def build_escalation_message(meta: dict, result: dict, esc_path: Path | None = None) -> str:
+    lines = [
+        "🛑 Escalated",
+        f"Issue: {meta.get('github_issue_url', 'n/a')}",
+        f"Task ID: {meta.get('task_id', 'unknown')}",
+        f"Repo: {Path(meta.get('repo', 'unknown')).name}",
+        "",
+        "Summary:",
+        result.get("summary", "No summary provided."),
+        "",
+    ]
+    lines.extend(_telegram_lines("Blockers:", result.get("blockers", ["- None"]), fallback="None"))
+    lines.append("")
+    lines.extend(_telegram_lines("Files changed:", result.get("files_changed", ["- None"]), fallback="None"))
+    if esc_path is not None:
+        lines.extend(["", f"Note: {esc_path.name}", f"Actions expire in {TELEGRAM_ACTION_TTL_HOURS}h."])
+    text = "\n".join(lines).strip()
+    if len(text) <= 4000:
+        return text
+    return text[:3997] + "..."
+
+
+def create_escalation_action(meta: dict, result: dict, esc_path: Path, chat_id: str) -> dict:
+    now = datetime.now(timezone.utc)
+    action_id = uuid4().hex[:12]
+    return {
+        "action_id": action_id,
+        "status": "pending",
+        "created_at": now.isoformat(),
+        "expires_at": (now + timedelta(hours=TELEGRAM_ACTION_TTL_HOURS)).isoformat(),
+        "chat_id": str(chat_id),
+        "message_id": None,
+        "task_id": meta.get("task_id"),
+        "github_project_key": meta.get("github_project_key"),
+        "github_repo": meta.get("github_repo"),
+        "github_issue_number": meta.get("github_issue_number"),
+        "github_issue_url": meta.get("github_issue_url"),
+        "branch": meta.get("branch"),
+        "summary": result.get("summary", ""),
+        "blockers": result.get("blockers", ["- None"]),
+        "files_changed": result.get("files_changed", ["- None"]),
+        "escalation_note": esc_path.name,
+    }
+
+
+def escalation_reply_markup(action_id: str) -> dict:
+    return {
+        "inline_keyboard": [[
+            {"text": "Re-queue", "callback_data": f"esc:{action_id}:requeue"},
+            {"text": "Close (won't fix)", "callback_data": f"esc:{action_id}:close"},
+        ]]
+    }
+
+
+def _load_telegram_offset(offset_path: Path) -> int:
+    if not offset_path.exists():
+        return 0
+    try:
+        return int(offset_path.read_text(encoding="utf-8").strip() or "0")
+    except ValueError:
+        return 0
+
+
+def _save_telegram_offset(offset_path: Path, update_id: int):
+    offset_path.write_text(str(update_id), encoding="utf-8")
+
+
+def _get_telegram_updates(cfg: dict, offset: int, logfile: Path | None = None, queue_summary_log: Path | None = None) -> list[dict]:
+    token = str(cfg.get("telegram_bot_token", "")).strip()
+    if not token:
+        return []
+    url = f"https://api.telegram.org/bot{token}/getUpdates?offset={offset}&timeout=0"
+    try:
+        result = subprocess.run(["curl", "-sS", url], capture_output=True, text=True, timeout=20)
+        if result.returncode != 0:
+            log(f"Telegram getUpdates failed: {result.stderr}", logfile, queue_summary_log=queue_summary_log)
+            return []
+        data = json.loads(result.stdout) if result.stdout else {}
+        if not data.get("ok"):
+            log(f"Telegram getUpdates error: {data}", logfile, queue_summary_log=queue_summary_log)
+            return []
+        return data.get("result", [])
+    except Exception as e:
+        log(f"Telegram getUpdates exception: {e}", logfile, queue_summary_log=queue_summary_log)
+        return []
+
+
+def _project_cfg(cfg: dict, project_key: str) -> dict:
+    project_cfg = cfg.get("github_projects", {}).get(project_key)
+    if not isinstance(project_cfg, dict):
+        raise RuntimeError(f"Project config missing for key: {project_key}")
+    return project_cfg
+
+
+def ensure_issue_project_status(cfg: dict, project_key: str, issue_url: str, status_value: str):
+    project_cfg = _project_cfg(cfg, project_key)
+    owner = cfg["github_owner"]
+    project_number = project_cfg["project_number"]
+    try:
+        gh(["project", "item-add", str(project_number), "--owner", owner, "--url", issue_url], check=False)
+    except Exception:
+        pass
+    info = query_project(project_number, owner)
+    option_id = info["status_options"].get(status_value)
+    if not info["status_field_id"] or not option_id:
+        raise RuntimeError(f"Project status option not found: {status_value}")
+    for item in info["items"]:
+        if item["url"] == issue_url:
+            set_item_status(info["project_id"], item["item_id"], info["status_field_id"], option_id)
+            return
+    raise RuntimeError(f"Issue not found on project board: {issue_url}")
+
+
+def get_issue_title_and_body(repo: str, issue_number: int) -> tuple[str, str]:
+    raw = gh([
+        "issue", "view", str(issue_number), "-R", repo,
+        "--json", "title,body",
+    ])
+    data = json.loads(raw)
+    return data.get("title", ""), data.get("body", "")
+
+
+def build_requeue_issue_body(original_body: str, action: dict) -> str:
+    appendix = [
+        "## Re-queued Context",
+        f"- Original issue: {action.get('github_issue_url', 'n/a')}",
+        f"- Escalated task: {action.get('task_id', 'unknown')}",
+        "",
+        "### Last agent summary",
+        action.get("summary", "No summary provided."),
+        "",
+    ]
+    appendix.extend(_telegram_lines("### Blockers", action.get("blockers", ["- None"]), fallback="None"))
+    appendix.append("")
+    appendix.extend(_telegram_lines("### Files changed", action.get("files_changed", ["- None"]), fallback="None"))
+    base = (original_body or "").rstrip()
+    if base:
+        return base + "\n\n" + "\n".join(appendix).strip()
+    return "\n".join(appendix).strip()
+
+
+def requeue_escalation(cfg: dict, action: dict, logfile: Path | None = None, queue_summary_log: Path | None = None) -> str:
+    repo = action["github_repo"]
+    issue_number = int(action["github_issue_number"])
+    project_key = action["github_project_key"]
+    title, original_body = get_issue_title_and_body(repo, issue_number)
+    new_body = build_requeue_issue_body(original_body, action)
+    created = gh(["issue", "create", "-R", repo, "--title", title, "--body", new_body])
+    new_issue_url = created.strip().splitlines()[-1].strip()
+    ensure_issue_project_status(cfg, project_key, new_issue_url, _project_cfg(cfg, project_key).get("ready_value", "Ready"))
+    add_issue_comment(repo, issue_number, f"♻️ Re-queued from Telegram escalation: {new_issue_url}")
+    log(f"Telegram re-queue created {new_issue_url} for {repo}#{issue_number}", logfile, queue_summary_log=queue_summary_log)
+    return new_issue_url
+
+
+def close_escalation(cfg: dict, action: dict, logfile: Path | None = None, queue_summary_log: Path | None = None):
+    repo = action["github_repo"]
+    issue_number = int(action["github_issue_number"])
+    issue_url = action["github_issue_url"]
+    project_key = action["github_project_key"]
+    gh([
+        "api",
+        f"repos/{repo}/issues/{issue_number}",
+        "-X", "PATCH",
+        "-f", "state=closed",
+        "-f", "state_reason=not_planned",
+    ])
+    add_issue_comment(repo, issue_number, "Closed from Telegram escalation as won't-fix.")
+    ensure_issue_project_status(cfg, project_key, issue_url, _project_cfg(cfg, project_key).get("done_value", "Done"))
+    log(f"Telegram close completed for {repo}#{issue_number}", logfile, queue_summary_log=queue_summary_log)
+
+
+def handle_telegram_callback(
+    cfg: dict,
+    actions_dir: Path,
+    callback_data: str,
+    logfile: Path | None = None,
+    queue_summary_log: Path | None = None,
+) -> dict:
+    m = re.fullmatch(r"esc:([a-f0-9]{12}):(requeue|close)", callback_data or "")
+    if not m:
+        return {"text": "Unknown action.", "show_alert": True, "remove_keyboard": False}
+
+    action_id, operation = m.groups()
+    action = load_telegram_action(actions_dir, action_id)
+    if not action:
+        return {"text": "This escalation action is no longer available.", "show_alert": True, "remove_keyboard": True}
+
+    if action.get("status") == "done":
+        return {"text": "This escalation was already handled.", "show_alert": True, "remove_keyboard": True}
+
+    if telegram_action_expired(action):
+        action["status"] = "expired"
+        action["expired_at"] = datetime.now(timezone.utc).isoformat()
+        save_telegram_action(actions_dir, action)
+        return {"text": "This escalation action expired after 48 hours.", "show_alert": True, "remove_keyboard": True}
+
+    if operation == "requeue":
+        new_issue_url = requeue_escalation(cfg, action, logfile, queue_summary_log)
+        result_text = f"Re-queued: {new_issue_url}"
+    else:
+        close_escalation(cfg, action, logfile, queue_summary_log)
+        result_text = f"Closed issue #{action['github_issue_number']} as won't-fix."
+
+    action["status"] = "done"
+    action["handled_action"] = operation
+    action["handled_at"] = datetime.now(timezone.utc).isoformat()
+    action["result_text"] = result_text
+    save_telegram_action(actions_dir, action)
+    return {"text": result_text, "show_alert": False, "remove_keyboard": True}
+
+
+def process_telegram_callbacks(
+    cfg: dict,
+    paths: dict,
+    logfile: Path | None = None,
+    queue_summary_log: Path | None = None,
+):
     token = str(cfg.get("telegram_bot_token", "")).strip()
     chat_id = str(cfg.get("telegram_chat_id", "")).strip()
     if not token or not chat_id:
         return
 
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    try:
-        result = subprocess.run(
-            [
-                "curl",
-                "-sS",
-                "-X",
-                "POST",
-                url,
-                "-d",
-                f"chat_id={chat_id}",
-                "--data-urlencode",
-                f"text={text}",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=20,
-        )
-        if result.returncode != 0:
-            log(f"Telegram send failed: {result.stderr}", logfile, queue_summary_log=queue_summary_log)
-    except Exception as e:
-        log(f"Telegram send exception: {e}", logfile, queue_summary_log=queue_summary_log)
+    offset_path = paths["TELEGRAM_OFFSET"]
+    actions_dir = paths["TELEGRAM_ACTIONS"]
+    last_update_id = _load_telegram_offset(offset_path)
+    updates = _get_telegram_updates(cfg, last_update_id + 1, logfile, queue_summary_log)
+    if not updates:
+        return
+
+    max_update_id = last_update_id
+    for update in updates:
+        max_update_id = max(max_update_id, int(update.get("update_id", 0)))
+        callback = update.get("callback_query") or {}
+        if not callback:
+            continue
+        callback_id = callback.get("id")
+        data = callback.get("data", "")
+        message = callback.get("message") or {}
+        message_chat_id = str((message.get("chat") or {}).get("id", ""))
+        message_id = message.get("message_id")
+        if message_chat_id != chat_id or not callback_id:
+            continue
+        try:
+            outcome = handle_telegram_callback(cfg, actions_dir, data, logfile, queue_summary_log)
+            answer_telegram_callback(
+                cfg,
+                callback_id,
+                outcome["text"],
+                logfile,
+                queue_summary_log,
+                show_alert=bool(outcome.get("show_alert")),
+            )
+            if outcome.get("remove_keyboard") and message_id:
+                clear_telegram_reply_markup(cfg, message_chat_id, int(message_id), logfile, queue_summary_log)
+        except Exception as e:
+            log(f"Telegram callback handling failed: {e}", logfile, queue_summary_log=queue_summary_log)
+            answer_telegram_callback(
+                cfg,
+                callback_id,
+                f"Action failed: {e}",
+                logfile,
+                queue_summary_log,
+                show_alert=True,
+            )
+    _save_telegram_offset(offset_path, max_update_id)
 
 
 def priority_score(task: Path, cfg: dict) -> float:
@@ -1062,12 +1436,23 @@ def main():
                 esc = create_escalation_note(meta, body, final_result, logfile, model_attempts, ESCALATED, QUEUE_SUMMARY_LOG)
                 log("No follow-up created. Final queue state: escalated", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
                 shutil.move(str(processing), str(ESCALATED / processing.name))
-                send_telegram(
+                chat_id = str(cfg.get("telegram_chat_id", "")).strip()
+                action = None
+                reply_markup = None
+                if chat_id and meta.get("github_repo") and meta.get("github_issue_number") and meta.get("github_project_key"):
+                    action = create_escalation_action(meta, final_result, esc, chat_id)
+                    save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
+                    reply_markup = escalation_reply_markup(action["action_id"])
+                message_id = send_telegram(
                     cfg,
-                    f"🛑 Escalated\nTask: {task_id}\nRepo: {repo.name}\nBranch: {branch}\nModels tried: {', '.join(model_attempts)}\nNote: {esc.name}",
+                    build_escalation_message(meta, final_result, esc),
                     logfile,
                     QUEUE_SUMMARY_LOG,
+                    reply_markup=reply_markup,
                 )
+                if action is not None:
+                    action["message_id"] = message_id
+                    save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
         else:
             log("Final queue state: failed", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
             shutil.move(str(processing), str(FAILED / processing.name))

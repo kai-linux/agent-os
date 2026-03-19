@@ -1,14 +1,23 @@
 """Unit tests for pure functions in orchestrator/queue.py"""
 import sys
-import os
 import textwrap
 import tempfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # Ensure orchestrator package is importable
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from orchestrator.queue import split_section, parse_bullets, get_agent_chain, parse_agent_result
+from orchestrator.queue import (
+    build_escalation_message,
+    get_agent_chain,
+    handle_telegram_callback,
+    parse_agent_result,
+    parse_bullets,
+    save_telegram_action,
+    split_section,
+    telegram_action_expired,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -184,3 +193,90 @@ def test_parse_agent_result_manual_steps():
         """))
         result = parse_agent_result(tmp)
         assert "Add cron" in result["manual_steps"]
+
+
+def test_build_escalation_message_contains_required_fields():
+    meta = {
+        "task_id": "task-123",
+        "repo": "/tmp/demo",
+        "github_issue_url": "https://github.com/acme/demo/issues/7",
+    }
+    result = {
+        "summary": "Last agent summary.",
+        "blockers": ["- Missing API token"],
+        "files_changed": ["- orchestrator/queue.py"],
+    }
+
+    message = build_escalation_message(meta, result, Path("note.md"))
+    assert "https://github.com/acme/demo/issues/7" in message
+    assert "Task ID: task-123" in message
+    assert "Last agent summary." in message
+    assert "Missing API token" in message
+    assert "orchestrator/queue.py" in message
+
+
+def test_telegram_action_expired():
+    action = {
+        "expires_at": (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
+    }
+    assert telegram_action_expired(action) is True
+
+
+def test_handle_telegram_callback_requeue(monkeypatch):
+    with tempfile.TemporaryDirectory() as d:
+        actions_dir = Path(d)
+        action = {
+            "action_id": "abcdef123456",
+            "status": "pending",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            "chat_id": "1",
+            "message_id": 10,
+            "task_id": "task-123",
+            "github_project_key": "demo",
+            "github_repo": "acme/demo",
+            "github_issue_number": 7,
+            "github_issue_url": "https://github.com/acme/demo/issues/7",
+            "summary": "summary",
+            "blockers": ["- blocker"],
+            "files_changed": ["- file.py"],
+            "escalation_note": "note.md",
+        }
+        save_telegram_action(actions_dir, action)
+
+        monkeypatch.setattr(
+            "orchestrator.queue.requeue_escalation",
+            lambda cfg, saved_action, logfile=None, queue_summary_log=None: "https://github.com/acme/demo/issues/8",
+        )
+
+        outcome = handle_telegram_callback({}, actions_dir, "esc:abcdef123456:requeue")
+        assert outcome["text"] == "Re-queued: https://github.com/acme/demo/issues/8"
+        stored = actions_dir.joinpath("abcdef123456.json").read_text(encoding="utf-8")
+        assert '"status": "done"' in stored
+
+
+def test_handle_telegram_callback_expired():
+    with tempfile.TemporaryDirectory() as d:
+        actions_dir = Path(d)
+        action = {
+            "action_id": "abcdef123456",
+            "status": "pending",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "expires_at": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+            "chat_id": "1",
+            "message_id": 10,
+            "task_id": "task-123",
+            "github_project_key": "demo",
+            "github_repo": "acme/demo",
+            "github_issue_number": 7,
+            "github_issue_url": "https://github.com/acme/demo/issues/7",
+            "summary": "summary",
+            "blockers": ["- blocker"],
+            "files_changed": ["- file.py"],
+            "escalation_note": "note.md",
+        }
+        save_telegram_action(actions_dir, action)
+
+        outcome = handle_telegram_callback({}, actions_dir, "esc:abcdef123456:close")
+        assert outcome["show_alert"] is True
+        assert "expired" in outcome["text"].lower()
