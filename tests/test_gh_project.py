@@ -141,6 +141,34 @@ def test_cleanup_merged_pr_issues_marks_original_and_remediation_done(monkeypatc
     assert "Resolved automatically after PR #34 merged" in done_calls[1][3]
 
 
+def test_cleanup_stale_ci_remediation_issues_for_merged_pr(monkeypatch):
+    monkeypatch.setattr(
+        pm,
+        "_list_open_ci_remediation_issues",
+        lambda repo: [{"number": 35, "title": "Fix CI failure on PR #34", "url": "https://github.com/owner/repo/issues/35"}],
+    )
+    monkeypatch.setattr(
+        pm,
+        "_get_pr",
+        lambda repo, pr_number: {
+            "number": pr_number,
+            "url": "https://github.com/owner/repo/pull/34",
+            "body": "Fixes #24",
+            "state": "MERGED",
+            "mergedAt": "2026-03-19T18:00:00Z",
+        },
+    )
+    cleaned = []
+    monkeypatch.setattr(pm, "_cleanup_merged_pr_issues", lambda cfg, repo, pr: cleaned.append((repo, pr["number"])))
+
+    state = {"https://github.com/owner/repo/pull/34": {"attempts": 3}}
+    changed = pm._cleanup_stale_ci_remediation_issues({}, "owner/repo", state)
+
+    assert changed is True
+    assert cleaned == [("owner/repo", 34)]
+    assert state == {}
+
+
 # ---------------------------------------------------------------------------
 # _extract_issue_number
 # ---------------------------------------------------------------------------

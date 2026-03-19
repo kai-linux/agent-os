@@ -21,6 +21,7 @@ from orchestrator.privacy import redact_text
 
 MAX_MERGE_ATTEMPTS = 3
 STATE_FILE_NAME = "pr_monitor_state.json"
+_CI_REMEDIATION_RE = re.compile(r"^Fix CI failure on PR #(\d+)$")
 
 _FORK_PR_CLOSE_MSG = (
     "Closed automatically — this repository does not accept pull requests "
@@ -369,6 +370,51 @@ def _cleanup_merged_pr_issues(cfg: dict, repo: str, pr: dict):
         )
 
 
+def _list_open_ci_remediation_issues(repo: str) -> list[dict]:
+    try:
+        issues = gh_json([
+            "issue", "list", "-R", repo, "--state", "open",
+            "--search", '"Fix CI failure on PR #"',
+            "--json", "number,title,url",
+            "--limit", "100",
+        ]) or []
+    except Exception:
+        return []
+    return [issue for issue in issues if _CI_REMEDIATION_RE.match(issue.get("title", ""))]
+
+
+def _get_pr(repo: str, pr_number: int) -> dict | None:
+    try:
+        return gh_json([
+            "pr", "view", str(pr_number), "-R", repo,
+            "--json", "number,url,body,state,mergedAt",
+        ])
+    except Exception:
+        return None
+
+
+def _cleanup_stale_ci_remediation_issues(cfg: dict, repo: str, state: dict) -> bool:
+    changed = False
+    for issue in _list_open_ci_remediation_issues(repo):
+        match = _CI_REMEDIATION_RE.match(issue.get("title", ""))
+        if not match:
+            continue
+        pr_number = int(match.group(1))
+        pr = _get_pr(repo, pr_number)
+        if not pr:
+            continue
+        if (pr.get("state") or "").upper() == "OPEN" and not pr.get("mergedAt"):
+            continue
+
+        print(f"{repo}: cleaning stale CI remediation issue #{issue['number']} for PR #{pr_number}")
+        _cleanup_merged_pr_issues(cfg, repo, pr)
+        pr_url = pr.get("url")
+        if pr_url and pr_url in state:
+            state.pop(pr_url, None)
+            changed = True
+    return changed
+
+
 def _create_issue(repo: str, title: str, body: str, labels: list[str]) -> str:
     ensure_labels(repo, labels)
     cmd = ["issue", "create", "-R", repo, "--title", title, "--body", body]
@@ -586,6 +632,14 @@ def monitor_prs():
 
     # Open PRs for agent branches that completed but have no PR yet
     _create_prs_for_orphan_branches(repos)
+
+    # Housekeeping: resolve CI remediation issues for PRs that already merged/closed.
+    state_changed = False
+    for repo in sorted(repos):
+        if _cleanup_stale_ci_remediation_issues(cfg, repo, state):
+            state_changed = True
+    if state_changed:
+        _save_state(paths, state)
 
     for repo in sorted(repos):
         prs = _list_agent_prs(repo)
