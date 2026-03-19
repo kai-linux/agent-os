@@ -16,6 +16,16 @@
 
 ## Recent Changes
 
+### 2026-03-19 — [task-20260319-155323-multi-repo-strategic-planning-cross-repo-dependenc] (#24 kai-linux/agent-os)
+Implemented multi-repo strategy preloading, conservative cross-repo dependency inference, dependency-aware planning order, and prompt context injection so sprint planning can sequence prerequisite repository work before dependent repository work.
+
+**Files:** `- orchestrator/strategic_planner.py`, `- tests/test_strategic_planner.py`, `- .agent_result.md`
+
+**Decisions:**
+  - - Used conservative dependency inference from explicit dependency headings and phrases instead of broad repo-name matching to avoid false positives
+  - - Reordered repo planning with a topological pass so prerequisite repos are planned first while preserving a deterministic fallback order for cycles or missing links
+
+
 ### 2026-03-19 — [task-20260319-133023-strategic-planner-configurable-plan-size-and-sprin] (#25 kai-linux/agent-os)
 Made plan size and sprint cadence configurable per-repository. Added `plan_size` and `sprint_cadence_days` as top-level config fields with per-repo overrides via `github_projects` repos entries. The retrospective window automatically adjusts to match the configured sprint cadence. Defaults to current behavior (5 tasks, 7 days) when not configured.
 
