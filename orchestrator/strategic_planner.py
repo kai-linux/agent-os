@@ -25,7 +25,9 @@ import time
 from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
+from html import unescape
 from pathlib import Path
+from urllib.parse import urlparse
 from uuid import uuid4
 
 from orchestrator.paths import load_config, runtime_paths
@@ -48,6 +50,17 @@ POLL_INTERVAL_SECONDS = 300   # 5 minutes
 APPROVAL_TIMEOUT_HOURS = 24
 APPROVAL_KEYWORDS = {"yes", "approve", "approved", "ok", "go", "lgtm"}
 REJECTION_KEYWORDS = {"no", "reject", "skip", "cancel", "nope"}
+RESEARCH_ARTIFACT_DEFAULT = "PLANNING_RESEARCH.md"
+RESEARCH_ALLOWED_KINDS = {
+    "official_docs",
+    "competitor",
+    "product_surface",
+    "repo_reference",
+}
+RESEARCH_MAX_SOURCES = 4
+RESEARCH_MAX_SOURCE_CHARS = 4000
+RESEARCH_CONTEXT_MAX_CHARS = 4000
+RESEARCH_FETCH_TIMEOUT_SECONDS = 20
 
 
 def _format_cadence(days: float) -> str:
@@ -442,6 +455,249 @@ def _read_codebase_md(repo_path: Path) -> str:
     return content[:3000] if content else "(empty CODEBASE.md)"
 
 
+def _repo_research_config(cfg: dict, github_slug: str) -> dict:
+    """Return merged planning research config for a repo."""
+    research_cfg = dict(cfg.get("planning_research") or {})
+    for project_cfg in cfg.get("github_projects", {}).values():
+        if not isinstance(project_cfg, dict):
+            continue
+        for repo_cfg in project_cfg.get("repos", []):
+            if repo_cfg.get("github_repo") != github_slug:
+                continue
+            override = repo_cfg.get("planning_research")
+            if isinstance(override, dict):
+                merged = dict(research_cfg)
+                merged.update(override)
+                research_cfg = merged
+            return research_cfg
+    return research_cfg
+
+
+def _normalize_research_domain(domain: str) -> str:
+    return domain.strip().lower().lstrip(".")
+
+
+def _domain_allowed(host: str, allowed_domains: list[str]) -> bool:
+    if not allowed_domains:
+        return True
+    normalized_host = _normalize_research_domain(host)
+    for domain in allowed_domains:
+        normalized_domain = _normalize_research_domain(domain)
+        if normalized_host == normalized_domain or normalized_host.endswith(f".{normalized_domain}"):
+            return True
+    return False
+
+
+def _clean_research_text(raw: str) -> str:
+    text = raw or ""
+    text = re.sub(r"(?is)<script.*?>.*?</script>", " ", text)
+    text = re.sub(r"(?is)<style.*?>.*?</style>", " ", text)
+    text = re.sub(r"(?s)<[^>]+>", " ", text)
+    text = unescape(text)
+    text = text.replace("\xa0", " ")
+    text = re.sub(r"\r", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = re.sub(r"[ \t]+", " ", text)
+    return text.strip()
+
+
+def _artifact_path(repo_path: Path, artifact_name: str) -> Path:
+    artifact = (repo_path / artifact_name).resolve()
+    repo_root = repo_path.resolve()
+    if repo_root == artifact or repo_root not in artifact.parents:
+        raise ValueError(f"Research artifact must stay inside repo: {artifact_name}")
+    return artifact
+
+
+def _allowed_research_file(repo_path: Path, raw_path: str) -> Path | None:
+    if not raw_path or Path(raw_path).is_absolute():
+        return None
+    resolved = (repo_path / raw_path).resolve()
+    repo_root = repo_path.resolve()
+    allowed_roots = {repo_root, repo_root.parent}
+    if not any(root == resolved or root in resolved.parents for root in allowed_roots):
+        return None
+    return resolved
+
+
+def _read_research_source(repo_path: Path, source: dict, research_cfg: dict) -> tuple[str | None, str | None]:
+    source_type = str(source.get("type", "")).strip().lower()
+    max_chars = int(research_cfg.get("max_source_chars", RESEARCH_MAX_SOURCE_CHARS))
+    if source_type == "web":
+        url = str(source.get("url", "")).strip()
+        parsed = urlparse(url)
+        if parsed.scheme != "https" or not parsed.netloc:
+            return None, "web research sources must use https URLs"
+        allowed_domains = [
+            d for d in research_cfg.get("allowed_domains", [])
+            if isinstance(d, str) and d.strip()
+        ]
+        if not _domain_allowed(parsed.hostname or "", allowed_domains):
+            return None, f"domain not allowed: {parsed.hostname or '?'}"
+        result = subprocess.run(
+            ["curl", "-LfsS", "--max-time", str(RESEARCH_FETCH_TIMEOUT_SECONDS), url],
+            capture_output=True,
+            text=True,
+            timeout=RESEARCH_FETCH_TIMEOUT_SECONDS + 5,
+        )
+        if result.returncode != 0:
+            return None, f"fetch failed: {result.stderr.strip()[:200]}"
+        return _clean_research_text(result.stdout)[:max_chars], None
+
+    if source_type == "file":
+        raw_path = str(source.get("path", "")).strip()
+        file_path = _allowed_research_file(repo_path, raw_path)
+        if not file_path:
+            return None, f"file path not allowed: {raw_path}"
+        if not file_path.exists():
+            return None, f"file not found: {raw_path}"
+        try:
+            content = file_path.read_text(encoding="utf-8", errors="replace")
+        except Exception as e:
+            return None, f"failed to read file: {e}"
+        return content[:max_chars].strip(), None
+
+    return None, f"unsupported source type: {source_type or '?'}"
+
+
+_RESEARCH_SUMMARY_PROMPT = """\
+You are preparing tightly bounded planning research for a software sprint planner.
+
+Summarize the source below without speculation. Use only the supplied text.
+Focus on what changed, what capabilities exist, and what product or execution
+implications matter for sprint selection this week.
+
+Source label: {name}
+Source kind: {kind}
+Source location: {location}
+
+Source text:
+{source_text}
+
+Return ONLY JSON with this schema:
+{{
+  "summary": "2-4 sentence factual summary",
+  "planning_implications": ["bullet", "bullet", "bullet"]
+}}
+"""
+
+
+def _summarize_research_source(source: dict, content: str) -> tuple[str, list[str]]:
+    prompt = _RESEARCH_SUMMARY_PROMPT.format(
+        name=source.get("name", "Unnamed source"),
+        kind=source.get("kind", "repo_reference"),
+        location=source.get("url") or source.get("path") or "(unknown)",
+        source_text=content[:RESEARCH_MAX_SOURCE_CHARS],
+    )
+    try:
+        raw = _call_haiku(prompt)
+        text = raw.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        data = json.loads(text)
+        summary = str(data.get("summary", "")).strip()
+        implications = [
+            str(item).strip()
+            for item in data.get("planning_implications", [])
+            if str(item).strip()
+        ]
+        if summary:
+            return summary[:700], implications[:5]
+    except Exception as e:
+        print(f"  Research summarization failed for {source.get('name', '?')}: {e}")
+
+    fallback_summary = content[:700].replace("\n", " ").strip()
+    fallback_summary = re.sub(r"\s{2,}", " ", fallback_summary)
+    if len(content) > 700:
+        fallback_summary += "..."
+    return fallback_summary or "(no content)", ["Treat as raw evidence; summarization fallback was used."]
+
+
+def _write_research_artifact(repo_path: Path, artifact_path: Path, sections: list[dict], refresh_hours: float):
+    generated = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    lines = [
+        "# Planning Research",
+        "",
+        f"- Generated: {generated}",
+        f"- Refresh after: {refresh_hours:g}h",
+        f"- Scope: bounded pre-planning research for sprint selection",
+        "",
+    ]
+    if not sections:
+        lines.extend([
+            "## Findings",
+            "",
+            "(no usable research findings were gathered)",
+            "",
+        ])
+    for section in sections:
+        lines.extend([
+            f"## {section['name']}",
+            "",
+            f"- Kind: {section['kind']}",
+            f"- Location: {section['location']}",
+            "",
+            "### Summary",
+            "",
+            section["summary"],
+            "",
+            "### Planning Implications",
+            "",
+        ])
+        for implication in section["planning_implications"]:
+            lines.append(f"- {implication}")
+        lines.append("")
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+
+
+def _planning_research_context(cfg: dict, github_slug: str, repo_path: Path) -> str:
+    """Return bounded research context, refreshing the artifact when stale."""
+    research_cfg = _repo_research_config(cfg, github_slug)
+    if not research_cfg.get("enabled"):
+        return "(planning research disabled)"
+
+    sources = research_cfg.get("sources", [])
+    if not isinstance(sources, list) or not sources:
+        return "(planning research enabled but no sources configured)"
+
+    artifact_name = str(research_cfg.get("artifact_file", RESEARCH_ARTIFACT_DEFAULT)).strip() or RESEARCH_ARTIFACT_DEFAULT
+    refresh_hours = float(research_cfg.get("max_age_hours", 72))
+    max_sources = max(1, min(int(research_cfg.get("max_sources", RESEARCH_MAX_SOURCES)), RESEARCH_MAX_SOURCES))
+    artifact_path = _artifact_path(repo_path, artifact_name)
+
+    if artifact_path.exists():
+        age_seconds = time.time() - artifact_path.stat().st_mtime
+        if age_seconds <= refresh_hours * 3600:
+            content = artifact_path.read_text(encoding="utf-8", errors="replace").strip()
+            return content[:RESEARCH_CONTEXT_MAX_CHARS] if content else "(empty planning research artifact)"
+
+    sections = []
+    for source in sources[:max_sources]:
+        if not isinstance(source, dict):
+            continue
+        kind = str(source.get("kind", "")).strip().lower()
+        if kind not in RESEARCH_ALLOWED_KINDS:
+            print(f"  Skipping research source with unsupported kind: {kind or '?'}")
+            continue
+        content, error = _read_research_source(repo_path, source, research_cfg)
+        if error:
+            print(f"  Skipping research source {source.get('name', '?')}: {error}")
+            continue
+        summary, implications = _summarize_research_source(source, content or "")
+        sections.append({
+            "name": str(source.get("name", "Unnamed source")).strip() or "Unnamed source",
+            "kind": kind,
+            "location": str(source.get("url") or source.get("path") or "(unknown)").strip(),
+            "summary": summary,
+            "planning_implications": implications or ["No direct sprint implication captured."],
+        })
+
+    _write_research_artifact(repo_path, artifact_path, sections, refresh_hours)
+    content = artifact_path.read_text(encoding="utf-8", errors="replace").strip()
+    return content[:RESEARCH_CONTEXT_MAX_CHARS] if content else "(empty planning research artifact)"
+
+
 def _recently_closed_issues(repo: str, days: int = 7) -> str:
     """Return recently closed issues with close reasons for retrospective."""
     since = (datetime.now(tz=timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
@@ -762,6 +1018,9 @@ Context about this repository:
 --- Codebase Context (CODEBASE.md) ---
 {codebase_context}
 
+--- Pre-Planning Research (PLANNING_RESEARCH.md) ---
+{research_context}
+
 --- Last Sprint Retrospective ---
 {retrospective}
 
@@ -788,6 +1047,7 @@ Rules:
 - Tasks must NOT be vague epics — they should have clear, testable success criteria
 - Order by priority (most impactful first)
 - Build on last sprint's outcomes — continue momentum, fix regressions, advance strategy
+- When fresh research is present, use it to inform prioritization and rationale. Prefer work that is supported by repo-local strategy plus bounded external evidence.
 - Include a mix of: feature work that advances the product vision, bug fixes, self-improvement, and infrastructure
 - At least 1-2 tasks should push toward the long-term vision, not just maintain the status quo
 - If sibling repos are listed above, consider cross-repo dependencies: sequence work so prerequisite changes (e.g. API changes in repo A that repo B depends on) are completed first. If a task depends on work in another repo, note the dependency in the goal (e.g. "Depends on owner/repo-a completing X")
@@ -877,6 +1137,39 @@ def _parse_plan(text: str) -> tuple[list[dict], str | None]:
     if isinstance(data, list):
         return data, None
     raise ValueError(f"Unexpected planner response type: {type(data).__name__}")
+
+
+def _build_plan_prompt(
+    *,
+    plan_size: int,
+    strategy_context: str,
+    readme_goal: str,
+    codebase_context: str,
+    research_context: str,
+    retrospective: str,
+    git_log: str,
+    counts: dict[str, int],
+    metrics_summary: str,
+    backlog_text: str,
+    open_issues: str,
+    cross_repo_context: str,
+) -> str:
+    return PLAN_PROMPT.format(
+        plan_size=plan_size,
+        strategy_context=strategy_context,
+        readme_goal=readme_goal,
+        codebase_context=codebase_context,
+        research_context=research_context,
+        retrospective=retrospective,
+        git_log=git_log,
+        open_count=counts["open"],
+        closed_count=counts["closed"],
+        blocked_count=counts["blocked"],
+        metrics_summary=metrics_summary,
+        backlog_issues=backlog_text,
+        open_issues=open_issues,
+        cross_repo_context=cross_repo_context or "(single-repo mode — no sibling repos configured)",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1112,56 +1405,59 @@ def plan_repo(
     codebase_context = _read_codebase_md(repo_path)
     print(f"  CODEBASE.md: {len(codebase_context)} chars")
 
-    # 4. Sprint retrospective — what shipped last sprint
+    # 4. Pre-planning research
+    research_context = _planning_research_context(cfg, github_slug, repo_path)
+    print(f"  Research context: {len(research_context)} chars")
+
+    # 5. Sprint retrospective — what shipped last sprint
     retrospective = _build_retrospective(github_slug, days=sprint_cadence_days)
     print(f"  Retrospective: {len(retrospective)} chars")
 
-    # 5. Last 30 git commits
+    # 6. Last 30 git commits
     git_log = _git_log(repo_path, n=30)
     print(f"  Git log: {git_log.count(chr(10)) + 1} commits")
 
-    # 6. Issue metrics
+    # 7. Issue metrics
     counts = _issue_counts(github_slug)
     print(f"  Issues — open: {counts['open']}, closed: {counts['closed']}, blocked: {counts['blocked']}")
 
-    # 7. Recent task metrics
+    # 8. Recent task metrics
     metrics_summary = _recent_metrics_summary(cfg)
 
-    # 8. Backlog issues (candidates for promotion — trusted authors only)
+    # 9. Backlog issues (candidates for promotion — trusted authors only)
     backlog = _backlog_issues(github_slug, cfg)
     backlog_text = _format_backlog_for_prompt(backlog)
     print(f"  Backlog candidates: {len(backlog)}")
 
-    # 9. Open issues already in progress (for exclusion — trusted authors only)
+    # 10. Open issues already in progress (for exclusion — trusted authors only)
     open_issues = _open_issues_summary(github_slug, cfg)
 
-    # 10. Cross-repo context
+    # 11. Cross-repo context
     if cross_repo_context:
         print(f"  Cross-repo context: {len(cross_repo_context)} chars from sibling repos")
 
-    # 11. Build prompt with all context
-    prompt = PLAN_PROMPT.format(
+    # 12. Build prompt with all context
+    prompt = _build_plan_prompt(
         plan_size=plan_size,
         strategy_context=strategy_context,
         readme_goal=readme_goal,
         codebase_context=codebase_context,
+        research_context=research_context,
         retrospective=retrospective,
         git_log=git_log,
-        open_count=counts["open"],
-        closed_count=counts["closed"],
-        blocked_count=counts["blocked"],
+        counts=counts,
         metrics_summary=metrics_summary,
-        backlog_issues=backlog_text,
+        backlog_text=backlog_text,
         open_issues=open_issues,
-        cross_repo_context=cross_repo_context or "(single-repo mode — no sibling repos configured)",
+        cross_repo_context=cross_repo_context,
     )
 
-    # 12. Call Sonnet
+    # 13. Call Sonnet
     try:
         raw = _call_sonnet(prompt, cfg)
     except Exception as e:
         print(f"  Plan generation failed: {e}")
-        return None, ""
+        return None, "", None
 
     try:
         plan, empty_reason = _parse_plan(raw)
