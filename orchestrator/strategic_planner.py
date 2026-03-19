@@ -32,7 +32,10 @@ from orchestrator.trust import is_trusted
 
 PLAN_SIZE = 5
 ANALYSIS_MODEL = "opus"
+FOCUS_AREA_MODEL = "haiku"
 METRICS_WINDOW_DAYS = 30
+MIN_SPRINTS_FOR_FOCUS = 3
+FOCUS_AREA_MARKER = "<!-- auto-focus-areas -->"
 SIMILARITY_THRESHOLD = 0.75
 POLL_INTERVAL_SECONDS = 300   # 5 minutes
 APPROVAL_TIMEOUT_HOURS = 24
@@ -251,11 +254,128 @@ _STRATEGY_TEMPLATE = """\
 
 ## Current Focus Areas
 
+{focus_marker}
 (Updated each sprint with the key themes being pursued.)
 
 ## Sprint History
 
 """
+
+
+# ---------------------------------------------------------------------------
+# Focus area analysis
+# ---------------------------------------------------------------------------
+
+_FOCUS_AREA_PROMPT = """\
+You are analyzing sprint history for a software project to identify recurring work themes.
+
+Below are the most recent sprint entries (plans and retrospectives). Identify the 3-5
+dominant focus areas that these sprints reveal. Each focus area should be a concise
+bullet point (one line) describing a theme of ongoing work.
+
+Focus on patterns that appear across multiple sprints, not one-off tasks.
+Write from the perspective of guiding future sprint planning.
+
+Sprint entries:
+{sprint_entries}
+
+Return ONLY a JSON array of 3-5 strings, each a concise focus area bullet point.
+No markdown fences, no commentary. Example: ["Improve CI reliability", "Expand API coverage"]"""
+
+
+def _call_haiku(prompt: str) -> str:
+    """Call Claude Haiku for cheap, fast analysis."""
+    claude_bin = os.environ.get("CLAUDE_BIN", "claude")
+    result = subprocess.run(
+        [claude_bin, "-p", prompt, "--model", FOCUS_AREA_MODEL],
+        capture_output=True, text=True, timeout=120,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"Claude exit {result.returncode}: {result.stderr[:300]}")
+    return result.stdout.strip()
+
+
+def _extract_sprint_entries(content: str) -> list[str]:
+    """Extract individual sprint entries from STRATEGY.md content.
+
+    Each entry starts with '### Sprint YYYY-MM-DD' and runs until the next
+    ### heading or end of file.
+    """
+    pattern = r"(### Sprint \d{4}-\d{2}-\d{2}.*?)(?=### Sprint \d{4}-\d{2}-\d{2}|\Z)"
+    entries = re.findall(pattern, content, re.DOTALL)
+    return [e.strip() for e in entries if e.strip()]
+
+
+def _is_focus_areas_manually_edited(content: str) -> bool:
+    """Detect if the Current Focus Areas section was manually edited.
+
+    If the auto-marker is missing but the section has content beyond the
+    placeholder, assume manual editing.
+    """
+    match = re.search(
+        r"## Current Focus Areas\n(.*?)(?=^## |\Z)",
+        content, re.DOTALL | re.MULTILINE,
+    )
+    if not match:
+        return False
+    section = match.group(1).strip()
+    # If the marker is present, it's auto-managed
+    if FOCUS_AREA_MARKER in section:
+        return False
+    # If it's the default placeholder, empty, or whitespace-only, not manually edited
+    stripped = section.strip()
+    if not stripped or stripped == "(Updated each sprint with the key themes being pursued.)":
+        return False
+    # Has content without our marker → manual edit
+    return True
+
+
+def _analyze_focus_areas(sprint_entries: list[str]) -> list[str] | None:
+    """Use Haiku to extract recurring themes from sprint entries.
+
+    Returns a list of 3-5 focus area strings, or None on failure.
+    """
+    # Cap input to avoid huge prompts — use the most recent entries (max 10)
+    entries_text = "\n\n---\n\n".join(sprint_entries[:10])
+    prompt = _FOCUS_AREA_PROMPT.format(sprint_entries=entries_text)
+    try:
+        raw = _call_haiku(prompt)
+    except Exception as e:
+        print(f"  Focus area analysis failed: {e}")
+        return None
+    # Parse JSON
+    text = raw.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+    try:
+        areas = json.loads(text)
+    except json.JSONDecodeError:
+        print(f"  Failed to parse focus areas: {text[:200]}")
+        return None
+    if not isinstance(areas, list) or not all(isinstance(a, str) for a in areas):
+        return None
+    return areas[:5]
+
+
+def _update_focus_areas_section(content: str, areas: list[str]) -> str:
+    """Replace the Current Focus Areas section content with new auto-generated areas.
+
+    Preserves everything outside the section. Only replaces content between
+    '## Current Focus Areas' and the next '## ' heading.
+    """
+    bullets = "\n".join(f"- {a}" for a in areas)
+    new_section = f"{FOCUS_AREA_MARKER}\n{bullets}"
+
+    # Match the section content between heading and next heading
+    pattern = r"(## Current Focus Areas\s*\n).*?(?=\n## )"
+    replacement = rf"\g<1>\n{new_section}\n"
+    updated, count = re.subn(pattern, replacement, content, count=1, flags=re.DOTALL)
+    if count == 0:
+        # Section exists but is at end of file (no following ## heading)
+        pattern_end = r"(## Current Focus Areas\s*\n).*"
+        replacement_end = rf"\g<1>\n{new_section}\n"
+        updated = re.sub(pattern_end, replacement_end, content, count=1, flags=re.DOTALL)
+    return updated
 
 
 def _update_strategy(
@@ -271,7 +391,9 @@ def _update_strategy(
     if not strategy_md.exists():
         # Bootstrap with template + README goal
         readme_goal = _read_readme_goal(repo_path)
-        template = _STRATEGY_TEMPLATE.format(repo_name=repo_name)
+        template = _STRATEGY_TEMPLATE.format(
+            repo_name=repo_name, focus_marker=FOCUS_AREA_MARKER,
+        )
         template = template.replace(
             "(Extracted from README on first run — agents refine this over time.)",
             readme_goal[:1500] if readme_goal else "(see README.md)",
@@ -290,6 +412,18 @@ def _update_strategy(
         updated = content.replace(anchor, anchor + "\n" + entry, 1)
     else:
         updated = content + f"\n{anchor}\n{entry}"
+
+    # Auto-update focus areas when 3+ sprint entries exist
+    sprint_entries = _extract_sprint_entries(updated)
+    if len(sprint_entries) >= MIN_SPRINTS_FOR_FOCUS:
+        if not _is_focus_areas_manually_edited(updated):
+            print(f"  Analyzing focus areas from {len(sprint_entries)} sprint entries...")
+            areas = _analyze_focus_areas(sprint_entries)
+            if areas:
+                updated = _update_focus_areas_section(updated, areas)
+                print(f"  Updated focus areas: {len(areas)} themes")
+        else:
+            print("  Skipping focus area update — section was manually edited")
 
     strategy_md.write_text(updated, encoding="utf-8")
 
