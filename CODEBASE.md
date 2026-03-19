@@ -16,6 +16,18 @@
 
 ## Recent Changes
 
+### 2026-03-19 — [task-20260319-101806-task-task-decomposer-agent] (#2 kai-linux/agent-os)
+Implemented a task decomposer that analyzes incoming issues via Claude Haiku to determine if they are atomic tasks or epics. Atomic tasks pass through unchanged. Epics are automatically split into up to 5 ordered sub-issues with 'Part of #N' cross-references, the first sub-issue is dispatched immediately, and the rest are sent to Backlog. The decomposer is non-blocking — failures fall back to treating the issue as atomic.
+
+**Files:** `- orchestrator/task_decomposer.py`, `- orchestrator/github_dispatcher.py`, `- tests/test_task_decomposer.py`
+
+**Decisions:**
+  - - Reused the existing structured-JSON Claude pattern from task_formatter.py so decomposition stays deterministic and cheap with Haiku
+  - - Kept decomposition inside the dispatcher path (_dispatch_item) instead of adding another job or queue stage, which preserved the existing atomic-task flow and simplified fallback behavior
+  - - Parent epic is closed after decomposition since work is tracked in sub-issues — avoids double-dispatch
+  - - Used lazy imports for gh_project functions in task_decomposer.py to avoid circular imports
+
+
 ### 2026-03-19 — [task-20260319-073306-task-daily-digest-to-telegram] (#8 kai-linux/agent-os)
 Implemented a daily digest job that reads the last 24 hours of mailbox outcomes and queue logs, computes per-agent success rates, counts agent PR creation and merges, and sends a compact Telegram summary with a no-activity fallback.
 
