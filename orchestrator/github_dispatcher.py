@@ -17,6 +17,7 @@ from orchestrator.gh_project import (
     gh,
 )
 from orchestrator.task_formatter import format_task
+from orchestrator.task_decomposer import decompose_issue, create_sub_issues
 from orchestrator.trust import is_trusted
 
 
@@ -273,6 +274,117 @@ def _requeue_unblocked_items(queried, repo_to_project, issue_lookup):
                     print(f"Warning: failed to set project status: {e}")
 
 
+def _try_decompose(cfg, repo_full, item, info, pcfg) -> list[dict] | None:
+    """Attempt to decompose an epic issue into sub-issues.
+
+    Returns list of created child issue dicts (first = to dispatch, rest = backlog),
+    or None if the issue is atomic or decomposition fails.
+    """
+    decomposer_model = cfg.get("decomposer_model")
+    result = decompose_issue(item["title"], item["body"], model=decomposer_model)
+    if result is None or result["type"] == "atomic":
+        return None
+
+    sub_issues = result["sub_issues"]
+
+    # Carry over priority labels from parent
+    parent_labels = []
+    for lbl in item.get("labels", set()):
+        if lbl.startswith("prio:"):
+            parent_labels.append(lbl)
+
+    created = create_sub_issues(
+        repo_full,
+        item["number"],
+        sub_issues,
+        labels=parent_labels or None,
+    )
+
+    if len(created) < 2:
+        # Not enough sub-issues were actually created — treat as atomic
+        return None
+
+    # Fetch the body of created sub-issues so we can build mailbox tasks
+    for ci in created:
+        try:
+            raw = gh([
+                "issue", "view", str(ci["number"]), "-R", repo_full,
+                "--json", "body",
+            ], check=False)
+            if raw:
+                ci["body"] = json.loads(raw).get("body", "")
+        except Exception:
+            ci["body"] = ""
+
+    # Comment on parent linking to children
+    child_list = "\n".join(f"- #{c['number']} {c['title']}" for c in created)
+    add_issue_comment(
+        repo_full,
+        item["number"],
+        f"🤖 Decomposed into sub-issues:\n\n{child_list}\n\nDispatching #{created[0]['number']} first.",
+    )
+
+    # Close the parent epic (work is tracked in sub-issues now)
+    try:
+        gh(["issue", "close", str(item["number"]), "-R", repo_full,
+            "--comment", "Closed — tracked via sub-issues above."], check=False)
+    except Exception as e:
+        print(f"Warning: failed to close parent #{item['number']}: {e}")
+
+    # Send remaining sub-issues (index 1+) to Backlog
+    backlog_value = pcfg.get("backlog_value", "Backlog")
+    ready_value = pcfg.get("ready_value", "Ready")
+    for ci in created[1:]:
+        # Add to project and set status to Backlog
+        try:
+            raw = gh([
+                "project", "item-add", str(pcfg["project_number"]),
+                "--owner", cfg["github_owner"],
+                "--url", ci["url"],
+                "--format", "json",
+            ], check=False)
+            if raw:
+                item_data = json.loads(raw)
+                child_item_id = item_data.get("id")
+                if child_item_id:
+                    option_id = info["status_options"].get(backlog_value)
+                    if info["status_field_id"] and option_id:
+                        set_item_status(
+                            info["project_id"],
+                            child_item_id,
+                            info["status_field_id"],
+                            option_id,
+                        )
+                        print(f"Sub-issue #{ci['number']} -> {backlog_value}")
+        except Exception as e:
+            print(f"Warning: failed to set backlog status for #{ci['number']}: {e}")
+
+    # Add first child to project and set to Ready
+    try:
+        raw = gh([
+            "project", "item-add", str(pcfg["project_number"]),
+            "--owner", cfg["github_owner"],
+            "--url", created[0]["url"],
+            "--format", "json",
+        ], check=False)
+        if raw:
+            item_data = json.loads(raw)
+            child_item_id = item_data.get("id")
+            if child_item_id:
+                option_id = info["status_options"].get(ready_value)
+                if info["status_field_id"] and option_id:
+                    set_item_status(
+                        info["project_id"],
+                        child_item_id,
+                        info["status_field_id"],
+                        option_id,
+                    )
+    except Exception as e:
+        print(f"Warning: failed to set ready status for #{created[0]['number']}: {e}")
+
+    return created
+
+
 def _dispatch_item(cfg, paths, owner, repo_to_project, info, ready_items, issue_lookup) -> bool:
     """Try to dispatch one ready item (highest priority first). Returns True if dispatched."""
     ready_items = sorted(ready_items, key=_item_priority)
@@ -307,6 +419,33 @@ def _dispatch_item(cfg, paths, owner, repo_to_project, info, ready_items, issue_
         if resolution["status"] == "unknown":
             print(f"Warning: could not resolve dependency #{resolution['dependency']} for {repo_full}#{item['number']}")
             continue
+
+        # --- Task decomposition: split epics into sub-issues ---
+        decomp = _try_decompose(cfg, repo_full, item, info, pcfg)
+        if decomp is not None:
+            # Epic was decomposed — dispatch the first sub-issue
+            first_child = decomp[0]
+            child_issue = {
+                "number": first_child["number"],
+                "title": first_child["title"],
+                "body": first_child.get("body", ""),
+                "url": first_child["url"],
+                "labels": [{"name": l} for l in item["labels"]],
+            }
+            task_id, task_md = build_mailbox_task(cfg, pk, rcfg, child_issue)
+            task_path = paths["INBOX"] / f"{task_id}.md"
+            task_path.write_text(task_md, encoding="utf-8")
+
+            edit_issue_labels(
+                repo_full, first_child["number"],
+                add=["in-progress", "agent-dispatched"],
+            )
+            add_issue_comment(
+                repo_full, first_child["number"],
+                f"🤖 Dispatched to orchestrator.\n\nTask ID: `{task_id}`\nProject key: `{pk}`",
+            )
+            print(f"Dispatched (decomposed child) {repo_full}#{first_child['number']} -> {task_path}")
+            return True
 
         # Build issue dict for build_mailbox_task
         issue = {
