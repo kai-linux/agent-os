@@ -53,16 +53,21 @@ APPROVAL_TIMEOUT_HOURS = 24
 APPROVAL_KEYWORDS = {"yes", "approve", "approved", "ok", "go", "lgtm"}
 REJECTION_KEYWORDS = {"no", "reject", "skip", "cancel", "nope"}
 RESEARCH_ARTIFACT_DEFAULT = "PLANNING_RESEARCH.md"
+SIGNALS_ARTIFACT_DEFAULT = "PLANNING_SIGNALS.md"
 RESEARCH_ALLOWED_KINDS = {
     "official_docs",
     "competitor",
     "product_surface",
     "repo_reference",
 }
+SIGNAL_INPUT_TYPES = {"analytics", "user_feedback", "market_signal"}
 RESEARCH_MAX_SOURCES = 4
 RESEARCH_MAX_SOURCE_CHARS = 4000
 RESEARCH_CONTEXT_MAX_CHARS = 4000
 RESEARCH_FETCH_TIMEOUT_SECONDS = 20
+SIGNALS_MAX_INPUTS = 6
+SIGNALS_MAX_SOURCE_CHARS = 4000
+SIGNALS_CONTEXT_MAX_CHARS = 5000
 
 
 def _format_cadence(days: float) -> str:
@@ -582,6 +587,21 @@ def _artifact_path(repo_path: Path, artifact_name: str) -> Path:
     return artifact
 
 
+def _parse_signal_timestamp(raw: str | None) -> datetime | None:
+    value = str(raw or "").strip()
+    if not value:
+        return None
+    if value.endswith("Z"):
+        value = value[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
 def _allowed_research_file(repo_path: Path, raw_path: str) -> Path | None:
     if not raw_path or Path(raw_path).is_absolute():
         return None
@@ -769,6 +789,210 @@ def _planning_research_context(cfg: dict, github_slug: str, repo_path: Path) -> 
     _write_research_artifact(repo_path, artifact_path, sections, refresh_hours)
     content = artifact_path.read_text(encoding="utf-8", errors="replace").strip()
     return content[:RESEARCH_CONTEXT_MAX_CHARS] if content else "(empty planning research artifact)"
+
+
+def _repo_signals_config(cfg: dict, github_slug: str) -> dict:
+    """Return merged planning signals config for a repo."""
+    signals_cfg = dict(cfg.get("planning_signals") or {})
+    for project_cfg in cfg.get("github_projects", {}).values():
+        if not isinstance(project_cfg, dict):
+            continue
+        for repo_cfg in project_cfg.get("repos", []):
+            if repo_cfg.get("github_repo") != github_slug:
+                continue
+            override = repo_cfg.get("planning_signals")
+            if isinstance(override, dict):
+                merged = dict(signals_cfg)
+                merged.update(override)
+                signals_cfg = merged
+            return signals_cfg
+    return signals_cfg
+
+
+_SIGNAL_SUMMARY_PROMPT = """\
+You are normalizing bounded planning signals for a software sprint planner.
+
+Use only the provided source text and the explicit metadata. Do not invent facts.
+Extract measurable evidence first, then concise planning implications.
+
+Input type: {input_type}
+Source name: {name}
+Source location: {location}
+Observed at: {observed_at}
+Trust note: {trust_note}
+Privacy note: {privacy_note}
+
+Source text:
+{source_text}
+
+Return ONLY JSON with this schema:
+{{
+  "summary": "2-4 sentence factual summary",
+  "key_metrics": ["metric with number or bounded qualitative count", "metric"],
+  "planning_implications": ["bullet", "bullet", "bullet"]
+}}
+"""
+
+
+def _summarize_signal_input(signal: dict, content: str) -> tuple[str, list[str], list[str]]:
+    prompt = _SIGNAL_SUMMARY_PROMPT.format(
+        input_type=signal.get("input_type", "unknown"),
+        name=signal.get("name", "Unnamed input"),
+        location=signal.get("url") or signal.get("path") or "(unknown)",
+        observed_at=signal.get("observed_at") or "unspecified",
+        trust_note=signal.get("trust_note") or "not specified",
+        privacy_note=signal.get("privacy_note") or "public-safe source expected",
+        source_text=content[:SIGNALS_MAX_SOURCE_CHARS],
+    )
+    try:
+        raw = _call_haiku(prompt)
+        text = raw.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        data = json.loads(text)
+        summary = str(data.get("summary", "")).strip()
+        metrics = [
+            str(item).strip()
+            for item in data.get("key_metrics", [])
+            if str(item).strip()
+        ]
+        implications = [
+            str(item).strip()
+            for item in data.get("planning_implications", [])
+            if str(item).strip()
+        ]
+        if summary:
+            return summary[:700], metrics[:5], implications[:5]
+    except Exception as e:
+        print(f"  Signal summarization failed for {signal.get('name', '?')}: {e}")
+
+    fallback_summary = content[:700].replace("\n", " ").strip()
+    fallback_summary = re.sub(r"\s{2,}", " ", fallback_summary)
+    if len(content) > 700:
+        fallback_summary += "..."
+    return (
+        fallback_summary or "(no content)",
+        ["No normalized metric extracted; raw evidence fallback was used."],
+        ["Treat as raw evidence; normalization fallback was used."],
+    )
+
+
+def _format_freshness_hours(observed_at: datetime | None) -> str:
+    if not observed_at:
+        return "unknown"
+    age_hours = max(0.0, (datetime.now(tz=timezone.utc) - observed_at).total_seconds() / 3600.0)
+    if age_hours < 1:
+        return "<1h old"
+    if age_hours < 24:
+        return f"{round(age_hours)}h old"
+    return f"{round(age_hours / 24, 1):g}d old"
+
+
+def _write_signals_artifact(repo_path: Path, artifact_path: Path, sections: list[dict], refresh_hours: float):
+    generated = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    lines = [
+        "# Planning Signals",
+        "",
+        f"- Generated: {generated}",
+        f"- Refresh after: {refresh_hours:g}h",
+        "- Scope: bounded analytics, user feedback, and market signals for sprint selection",
+        "",
+    ]
+    if not sections:
+        lines.extend([
+            "## Findings",
+            "",
+            "(no usable planning signals were gathered)",
+            "",
+        ])
+    for section in sections:
+        lines.extend([
+            f"## {section['name']}",
+            "",
+            f"- Input Type: {section['input_type']}",
+            f"- Source Location: {section['location']}",
+            f"- Observed At: {section['observed_at']}",
+            f"- Freshness: {section['freshness']}",
+            f"- Provenance: {section['provenance']}",
+            f"- Trust Boundary: {section['trust_note']}",
+            f"- Privacy Boundary: {section['privacy_note']}",
+            "",
+            "### Signal Summary",
+            "",
+            section["summary"],
+            "",
+            "### Key Metrics",
+            "",
+        ])
+        for metric in section["key_metrics"]:
+            lines.append(f"- {metric}")
+        lines.extend([
+            "",
+            "### Planning Implications",
+            "",
+        ])
+        for implication in section["planning_implications"]:
+            lines.append(f"- {implication}")
+        lines.append("")
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+
+
+def _planning_signals_context(cfg: dict, github_slug: str, repo_path: Path) -> str:
+    """Return normalized planning signals, refreshing the artifact when stale."""
+    signals_cfg = _repo_signals_config(cfg, github_slug)
+    if not signals_cfg.get("enabled"):
+        return "(planning signals disabled)"
+
+    inputs = signals_cfg.get("inputs", [])
+    if not isinstance(inputs, list) or not inputs:
+        return "(planning signals enabled but no inputs configured)"
+
+    artifact_name = str(signals_cfg.get("artifact_file", SIGNALS_ARTIFACT_DEFAULT)).strip() or SIGNALS_ARTIFACT_DEFAULT
+    refresh_hours = float(signals_cfg.get("max_age_hours", 24))
+    max_inputs = max(1, min(int(signals_cfg.get("max_inputs", SIGNALS_MAX_INPUTS)), SIGNALS_MAX_INPUTS))
+    artifact_path = _artifact_path(repo_path, artifact_name)
+
+    if artifact_path.exists():
+        age_seconds = time.time() - artifact_path.stat().st_mtime
+        if age_seconds <= refresh_hours * 3600:
+            content = artifact_path.read_text(encoding="utf-8", errors="replace").strip()
+            return content[:SIGNALS_CONTEXT_MAX_CHARS] if content else "(empty planning signals artifact)"
+
+    sections = []
+    for signal in inputs[:max_inputs]:
+        if not isinstance(signal, dict):
+            continue
+        input_type = str(signal.get("input_type", "")).strip().lower()
+        if input_type not in SIGNAL_INPUT_TYPES:
+            print(f"  Skipping signal input with unsupported type: {input_type or '?'}")
+            continue
+        content, error = _read_research_source(repo_path, signal, {
+            "allowed_domains": signals_cfg.get("allowed_domains", []),
+            "max_source_chars": signals_cfg.get("max_source_chars", SIGNALS_MAX_SOURCE_CHARS),
+        })
+        if error:
+            print(f"  Skipping signal input {signal.get('name', '?')}: {error}")
+            continue
+        observed_at = _parse_signal_timestamp(signal.get("observed_at"))
+        summary, key_metrics, implications = _summarize_signal_input(signal, content or "")
+        sections.append({
+            "name": str(signal.get("name", "Unnamed input")).strip() or "Unnamed input",
+            "input_type": input_type,
+            "location": str(signal.get("url") or signal.get("path") or "(unknown)").strip(),
+            "observed_at": observed_at.strftime("%Y-%m-%d %H:%M UTC") if observed_at else "unspecified",
+            "freshness": _format_freshness_hours(observed_at),
+            "provenance": str(signal.get("provenance") or "configured source").strip(),
+            "trust_note": str(signal.get("trust_note") or "treat as advisory external evidence; verify before irreversible action").strip(),
+            "privacy_note": str(signal.get("privacy_note") or "public-safe summary only; do not include raw personal data").strip(),
+            "summary": summary,
+            "key_metrics": key_metrics or ["No explicit metric extracted."],
+            "planning_implications": implications or ["No direct sprint implication captured."],
+        })
+
+    _write_signals_artifact(repo_path, artifact_path, sections, refresh_hours)
+    content = artifact_path.read_text(encoding="utf-8", errors="replace").strip()
+    return content[:SIGNALS_CONTEXT_MAX_CHARS] if content else "(empty planning signals artifact)"
 
 
 def _recently_closed_issues(repo: str, days: int = 7) -> str:
@@ -1094,6 +1318,9 @@ Context about this repository:
 --- Stable Planning Principles (PLANNING_PRINCIPLES.md) ---
 {planning_principles}
 
+--- Planning Signals (PLANNING_SIGNALS.md) ---
+{signals_context}
+
 --- Codebase Context (CODEBASE.md) ---
 {codebase_context}
 
@@ -1127,6 +1354,7 @@ Rules:
 - Order by priority (most impactful first)
 - Build on last sprint's outcomes — continue momentum, fix regressions, advance strategy
 - Treat the planning principles as the stable north-star rubric when strategy and backlog quality are ambiguous
+- When planning signals are present, prioritize measurable user, market, and analytics outcomes over narrative summaries alone
 - When fresh research is present, use it to inform prioritization and rationale. Prefer work that is supported by repo-local strategy plus bounded external evidence.
 - Prefer unblockers, autonomy gains, planning-quality gains, and evidence-driven improvements over local churn
 - Include a mix of: feature work that advances the product vision, bug fixes, self-improvement, and infrastructure
@@ -1228,6 +1456,7 @@ def _build_plan_prompt(
     north_star: str,
     planning_principles: str,
     codebase_context: str,
+    signals_context: str,
     research_context: str,
     retrospective: str,
     git_log: str,
@@ -1243,6 +1472,7 @@ def _build_plan_prompt(
         readme_goal=readme_goal,
         north_star=north_star,
         planning_principles=planning_principles,
+        signals_context=signals_context,
         codebase_context=codebase_context,
         research_context=research_context,
         retrospective=retrospective,
@@ -1498,38 +1728,42 @@ def plan_repo(
     codebase_context = _read_codebase_md(repo_path)
     print(f"  CODEBASE.md: {len(codebase_context)} chars")
 
-    # 6. Pre-planning research
+    # 6. Planning signals
+    signals_context = _planning_signals_context(cfg, github_slug, repo_path)
+    print(f"  Signals context: {len(signals_context)} chars")
+
+    # 7. Pre-planning research
     research_context = _planning_research_context(cfg, github_slug, repo_path)
     print(f"  Research context: {len(research_context)} chars")
 
-    # 7. Sprint retrospective — what shipped last sprint
+    # 8. Sprint retrospective — what shipped last sprint
     retrospective = _build_retrospective(github_slug, days=sprint_cadence_days)
     print(f"  Retrospective: {len(retrospective)} chars")
 
-    # 8. Last 30 git commits
+    # 9. Last 30 git commits
     git_log = _git_log(repo_path, n=30)
     print(f"  Git log: {git_log.count(chr(10)) + 1} commits")
 
-    # 9. Issue metrics
+    # 10. Issue metrics
     counts = _issue_counts(github_slug)
     print(f"  Issues — open: {counts['open']}, closed: {counts['closed']}, blocked: {counts['blocked']}")
 
-    # 10. Recent task metrics
+    # 11. Recent task metrics
     metrics_summary = _recent_metrics_summary(cfg)
 
-    # 11. Backlog issues (candidates for promotion — trusted authors only)
+    # 12. Backlog issues (candidates for promotion — trusted authors only)
     backlog = _backlog_issues(github_slug, cfg)
     backlog_text = _format_backlog_for_prompt(backlog)
     print(f"  Backlog candidates: {len(backlog)}")
 
-    # 12. Open issues already in progress (for exclusion — trusted authors only)
+    # 13. Open issues already in progress (for exclusion — trusted authors only)
     open_issues = _open_issues_summary(github_slug, cfg)
 
-    # 13. Cross-repo context
+    # 14. Cross-repo context
     if cross_repo_context:
         print(f"  Cross-repo context: {len(cross_repo_context)} chars from sibling repos")
 
-    # 14. Build prompt with all context
+    # 15. Build prompt with all context
     prompt = _build_plan_prompt(
         plan_size=plan_size,
         strategy_context=strategy_context,
@@ -1537,6 +1771,7 @@ def plan_repo(
         north_star=north_star,
         planning_principles=planning_principles,
         codebase_context=codebase_context,
+        signals_context=signals_context,
         research_context=research_context,
         retrospective=retrospective,
         git_log=git_log,
@@ -1547,7 +1782,7 @@ def plan_repo(
         cross_repo_context=cross_repo_context,
     )
 
-    # 15. Call Sonnet
+    # 16. Call Sonnet
     try:
         raw = _call_sonnet(prompt, cfg)
     except Exception as e:

@@ -16,6 +16,7 @@ from orchestrator.strategic_planner import (
     DEFAULT_SPRINT_CADENCE_DAYS,
     FOCUS_AREA_MARKER,
     RESEARCH_ARTIFACT_DEFAULT,
+    SIGNALS_ARTIFACT_DEFAULT,
     _call_sonnet,
     _approval_timeout_hours,
     _allowed_research_file,
@@ -35,6 +36,8 @@ from orchestrator.strategic_planner import (
     _load_strategy_map,
     _order_repos_by_dependencies,
     _planning_research_context,
+    _planning_signals_context,
+    _repo_signals_config,
     _read_planning_principles,
     _repo_planner_config,
     _repo_research_config,
@@ -447,6 +450,7 @@ def test_build_plan_prompt_includes_research_context():
         north_star="north star",
         planning_principles="north-star rubric",
         codebase_context="codebase",
+        signals_context="signals",
         research_context="# Planning Research\n\nEvidence",
         retrospective="retro",
         git_log="abc123 commit",
@@ -468,6 +472,7 @@ def test_build_plan_prompt_includes_planning_principles():
         north_star="north star",
         planning_principles="Prefer autonomy and evidence.",
         codebase_context="codebase",
+        signals_context="signals",
         research_context="research",
         retrospective="retro",
         git_log="abc123 commit",
@@ -489,6 +494,7 @@ def test_build_plan_prompt_includes_north_star():
         north_star="Closed-loop self-improvement.",
         planning_principles="Prefer autonomy and evidence.",
         codebase_context="codebase",
+        signals_context="signals",
         research_context="research",
         retrospective="retro",
         git_log="abc123 commit",
@@ -500,6 +506,113 @@ def test_build_plan_prompt_includes_north_star():
     )
     assert "--- North Star (NORTH_STAR.md) ---" in prompt
     assert "Closed-loop self-improvement." in prompt
+
+
+def test_repo_signals_config_merges_per_repo_override():
+    cfg = {
+        "planning_signals": {
+            "enabled": True,
+            "max_age_hours": 24,
+            "inputs": [{"name": "base"}],
+        },
+        "github_projects": {
+            "proj": {
+                "repos": [
+                    {
+                        "github_repo": "owner/repo",
+                        "planning_signals": {
+                            "max_age_hours": 12,
+                            "inputs": [{"name": "override"}],
+                        },
+                    }
+                ]
+            }
+        },
+    }
+    signals_cfg = _repo_signals_config(cfg, "owner/repo")
+    assert signals_cfg["enabled"] is True
+    assert signals_cfg["max_age_hours"] == 12
+    assert signals_cfg["inputs"] == [{"name": "override"}]
+
+
+def test_planning_signals_context_uses_fresh_artifact(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    artifact = repo / SIGNALS_ARTIFACT_DEFAULT
+    artifact.write_text("# Planning Signals\n\nFresh signals\n", encoding="utf-8")
+    cfg = {
+        "planning_signals": {
+            "enabled": True,
+            "max_age_hours": 24,
+            "inputs": [{"name": "ignored", "type": "file", "path": "signals.md", "input_type": "analytics"}],
+        }
+    }
+    context = _planning_signals_context(cfg, "owner/repo", repo)
+    assert "Fresh signals" in context
+
+
+def test_planning_signals_context_refreshes_and_writes_artifact(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "signals.md").write_text(
+        "Activation rate: 32% this week.\nThree users explicitly requested export support.\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "orchestrator.strategic_planner._summarize_signal_input",
+        lambda signal, content: (
+            "Activation is low and feedback points to export demand.",
+            ["Activation rate 32%", "3 users requested export"],
+            ["Prioritize export instrumentation and delivery."],
+        ),
+    )
+    cfg = {
+        "planning_signals": {
+            "enabled": True,
+            "max_age_hours": 0,
+            "inputs": [
+                {
+                    "name": "Weekly activation snapshot",
+                    "type": "file",
+                    "path": "signals.md",
+                    "input_type": "analytics",
+                    "observed_at": "2026-03-19T08:00:00Z",
+                    "provenance": "Derived from public launch-week notes",
+                    "trust_note": "Public aggregated metric",
+                    "privacy_note": "Aggregated counts only",
+                }
+            ],
+        }
+    }
+    context = _planning_signals_context(cfg, "owner/repo", repo)
+    artifact = repo / SIGNALS_ARTIFACT_DEFAULT
+    assert artifact.exists()
+    assert "Weekly activation snapshot" in context
+    assert "Activation rate 32%" in context
+    assert "Trust Boundary: Public aggregated metric" in context
+    assert "Privacy Boundary: Aggregated counts only" in context
+
+
+def test_build_plan_prompt_includes_planning_signals():
+    prompt = _build_plan_prompt(
+        plan_size=3,
+        strategy_context="strategy",
+        readme_goal="goal",
+        north_star="north star",
+        planning_principles="Prefer autonomy and evidence.",
+        codebase_context="codebase",
+        signals_context="# Planning Signals\n\nActivation dropped 20%.",
+        research_context="research",
+        retrospective="retro",
+        git_log="abc123 commit",
+        counts={"open": 1, "closed": 2, "blocked": 0},
+        metrics_summary="metrics",
+        backlog_text="- #1: Task",
+        open_issues="(none)",
+        cross_repo_context="(single repo)",
+    )
+    assert "--- Planning Signals (PLANNING_SIGNALS.md) ---" in prompt
+    assert "Activation dropped 20%." in prompt
 
 
 # ---------------------------------------------------------------------------
