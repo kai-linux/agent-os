@@ -44,6 +44,29 @@ agent_fallbacks:
 planner_agents: [claude, codex]
 # planner_claude_model: opus
 
+planning_research:
+  enabled: false
+  max_age_hours: 72                # Refresh stale research every 72h before planning
+  max_sources: 4                   # Hard cap; first version stays intentionally small
+  max_source_chars: 4000           # Per-source fetch/read cap before summarization
+  allowed_domains:                 # Only used for type=web sources; host must match
+    - docs.example.com
+    - competitor.example.com
+  artifact_file: "PLANNING_RESEARCH.md"
+  sources:
+    - name: "Official docs"
+      type: "web"
+      kind: "official_docs"
+      url: "https://docs.example.com/product/changelog"
+    - name: "Competitor pricing"
+      type: "web"
+      kind: "competitor"
+      url: "https://competitor.example.com/pricing"
+    - name: "Shared launch notes"
+      type: "file"
+      kind: "repo_reference"
+      path: "../shared/launch-notes.md"
+
 agent_timeout_minutes:
   codex: 40
   claude: 45
@@ -69,6 +92,15 @@ github_projects:
         plan_size: 3
         sprint_cadence_days: 1      # Daily planning for this repo
         groomer_cadence_days: 0.5   # Groom every 12 hours for this repo; requires cron to run at least every 12 hours
+        planning_research:
+          enabled: true
+          allowed_domains:
+            - docs.example.com
+          sources:
+            - name: "Repo1 docs"
+              type: "web"
+              kind: "official_docs"
+              url: "https://docs.example.com/repo1"
 
 telegram_bot_token: "YOUR_TELEGRAM_BOT_TOKEN"
 telegram_chat_id: "YOUR_CHAT_ID"
