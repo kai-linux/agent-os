@@ -38,6 +38,8 @@ Implemented Telegram escalation notifications with inline reply buttons, persist
 
 ### 2026-03-19 — [task-20260319-073106-task-task-dependency-resolver] (#6 kai-linux/agent-os)
 Implemented dependency-aware dispatching in the GitHub dispatcher so issues declaring `Depends on #N` or `Blocked by #N` stay blocked until their dependency chain is resolved, then automatically return to `Ready` on later dispatcher runs.
+### 2026-03-19 — [task-20260319-073106-task-task-dependency-resolver] (#6 kai-linux/agent-os)
+Added dependency-aware dispatching to `orchestrator/github_dispatcher.py`. Issues can now declare `Depends on #N` or `Blocked by #N`; ready tasks are held in `Status=Blocked` with a `Waiting for #N` comment until dependencies close, blocked tasks are moved back to `Ready` on later dispatcher runs, and circular/deep dependency chains are skipped with warnings.
 
 **Files:** `- orchestrator/github_dispatcher.py`, `- tests/test_github_dispatcher.py`, `- CODEBASE.md`, `- .agent_result.md`
 
@@ -45,6 +47,8 @@ Implemented dependency-aware dispatching in the GitHub dispatcher so issues decl
   - - Reused project query results as the primary dependency cache to avoid unnecessary extra `gh` calls
   - - Capped dependency traversal at 3 levels and limited uncached remote lookups to one `gh issue view` per candidate
 
+  - - Reused the existing project query payload as the primary dependency cache so most checks do not add extra `gh` calls
+  - - Limited remote dependency lookups to one `gh issue view` per candidate and capped recursive dependency traversal at three levels
 
 ### 2026-03-18 — [task-20260318-224806-task-task-decomposer-agent] (#2 kai-linux/agent-os)
 Added a fast Claude Haiku decomposition step to the dispatcher so atomic issues still dispatch unchanged while epic issues are split into ordered sub-issues, linked back to the parent, and the first child is dispatched immediately.
@@ -154,5 +158,4 @@ Implemented parallel queue worker execution by creating a thin `orchestrator/sup
   - - Locked-repo workers return task to inbox and exit; supervisor respawns workers, so tasks eventually run when repo is free
   - - Global flock in run_queue.sh kept on supervisor to prevent duplicate supervisor instances
   - - Worker IDs (w0, w1, ...) are sequential integers from supervisor lifetime counter
-
 
