@@ -16,6 +16,16 @@
 
 ## Recent Changes
 
+### 2026-03-19 — [task-20260319-215808-integrate-analytics-and-user-signal-inputs-into-pl] (#41 kai-linux/agent-os)
+Added a bounded planning-signals path to the strategic planner so repos can opt into analytics, user-feedback, and market inputs, normalize them into `PLANNING_SIGNALS.md` with freshness/provenance/trust/privacy metadata, and use that evidence during sprint selection and evidence-heavy execution work.
+
+**Files:** `- .agent_result.md`, `- .gitignore`, `- CODEBASE.md`, `- README.md`, `- example.config.yaml`, `- orchestrator/repo_context.py`, `- orchestrator/strategic_planner.py`, `- tests/test_queue.py`
+
+**Decisions:**
+  - - Kept the first version bounded to one opt-in `planning_signals` artifact and three explicit input types instead of adding a general ingestion framework
+  - - Reused the existing safe web/file source model and required trust/privacy notes in the normalized artifact so public repos can use external evidence without assuming private raw analytics access
+
+
 ### 2026-03-19 — [task-20260319-205609-add-pre-planning-research-inputs-to-strategic-plan] (#39 kai-linux/agent-os)
 Added an opt-in pre-planning research phase to the strategic planner. It now refreshes a bounded `PLANNING_RESEARCH.md` artifact from explicitly configured trusted web and local sources before sprint selection, then injects that structured research context into the planning prompt.
 
