@@ -16,6 +16,16 @@
 
 ## Recent Changes
 
+### 2026-03-19 — [task-20260319-073306-task-daily-digest-to-telegram] (#8 kai-linux/agent-os)
+Implemented a daily digest job that reads the last 24 hours of mailbox outcomes and queue logs, computes per-agent success rates, counts agent PR creation and merges, and sends a compact Telegram summary with a no-activity fallback.
+
+**Files:** `- orchestrator/daily_digest.py`, `- bin/run_daily_digest.sh`, `- tests/test_daily_digest.py`, `- CRON.md`, `- .agent_result.md`
+
+**Decisions:**
+  - - Used mailbox file timestamps to define the 24-hour window and `queue-summary.log` task segments to recover the final agent per task without mutating runtime state.
+  - - Counted PR activity via read-only `gh pr list` queries across configured repos so created and merged counts remain accurate for the last 24 hours even though local logs do not carry reliable timestamps for both events.
+
+
 ### 2026-03-19 — [task-20260319-073206-task-structured-telegram-escalation-with-reply-but] (#7 kai-linux/agent-os)
 Implemented Telegram escalation notifications with inline reply buttons, persisted 48-hour callback actions, and a long-poll callback handler that can re-queue escalated work or close the original issue as won't-fix from Telegram.
 
