@@ -742,13 +742,11 @@ def _recent_metrics_summary(cfg: dict) -> str:
 # ---------------------------------------------------------------------------
 
 PLAN_PROMPT = """You are the Strategic Planner for an autonomous AI software team.
-Your job is to select next week's sprint: exactly {plan_size} prioritized tasks.
+Your job is to select the next sprint from the existing backlog: up to {plan_size} prioritized tasks.
 
-You can either PROMOTE existing backlog issues or CREATE new ones. Prefer
-promoting existing issues when they align with the strategy — the backlog
-groomer already identified these as valuable. If there are relevant backlog
-issues, prefer PROMOTE over CREATE. Only create new issues when the backlog
-doesn't cover a strategic need.
+You may only PROMOTE existing backlog issues. Do not create new issues. Backlog
+curation and issue creation belong to the backlog groomer; the planner's job is
+to choose which existing backlog issues should move to Ready next.
 
 Context about this repository:
 
@@ -786,23 +784,21 @@ Rules:
 - Each task must be atomic and executable by an AI agent in a single session
 - Tasks must NOT be vague epics — they should have clear, testable success criteria
 - Order by priority (most impactful first)
-- Do NOT create tasks whose only purpose is bootstrapping STRATEGY.md; the planner updates STRATEGY.md automatically after approval
 - Build on last sprint's outcomes — continue momentum, fix regressions, advance strategy
 - Include a mix of: feature work that advances the product vision, bug fixes, self-improvement, and infrastructure
 - At least 1-2 tasks should push toward the long-term vision, not just maintain the status quo
 - If sibling repos are listed above, consider cross-repo dependencies: sequence work so prerequisite changes (e.g. API changes in repo A that repo B depends on) are completed first. If a task depends on work in another repo, note the dependency in the goal (e.g. "Depends on owner/repo-a completing X")
-- For NEW issues: body must use ## Goal, ## Success Criteria, ## Constraints sections
+- If there is no suitable backlog item, return fewer than {plan_size} tasks rather than inventing new work
 
-Return ONLY a JSON array (no markdown fences, no commentary) of exactly {plan_size} objects.
+Return ONLY a JSON array (no markdown fences, no commentary) of at most {plan_size} objects.
 Each object must have:
-  "action"     - either "promote" (existing backlog issue) or "create" (new issue)
-  "issue_number" - (promote only) the GitHub issue number to promote, e.g. 8
-  "title"      - concise GitHub issue title under 70 chars (for create; for promote, the existing title)
+  "action"     - always "promote"
+  "issue_number" - the GitHub issue number to promote, e.g. 8
+  "title"      - the existing GitHub issue title
   "goal"       - one-paragraph goal statement
   "task_type"  - one of: implementation, debugging, architecture, research, docs, design, content
   "priority"   - one of: prio:high, prio:normal, prio:low
   "rationale"  - one sentence explaining why this task matters this week, referencing the strategy
-  "body"       - (create only) structured body with ## Goal\\n...\\n## Success Criteria\\n...\\n## Constraints\\n- Prefer minimal diffs
   "labels"     - JSON array of label strings (choose from: enhancement, bug, tech-debt)
 
 Return ONLY the JSON array."""
@@ -894,8 +890,6 @@ def _send_telegram(cfg: dict, text: str, reply_markup: dict | None = None) -> in
 
 def _format_plan_message(plan: list[dict], repo: str, cadence_days: float) -> str:
     """Format the sprint plan for Telegram display."""
-    create_count = sum(1 for task in plan if (task.get("action") or "create").lower() == "create")
-    promote_count = sum(1 for task in plan if (task.get("action") or "create").lower() == "promote")
     approval_timeout_hours = _approval_timeout_hours(cadence_days)
 
     lines = [
@@ -913,12 +907,7 @@ def _format_plan_message(plan: list[dict], repo: str, cadence_days: float) -> st
         lines.append(f"   {task.get('rationale', '')}")
         lines.append("")
 
-    if create_count and promote_count:
-        lines.append("Tap Approve to apply this plan: create new issues and move selected backlog issues to Ready.")
-    elif create_count:
-        lines.append("Tap Approve to apply this plan: create issues and move them to Ready.")
-    else:
-        lines.append("Tap Approve to apply this plan: move selected backlog issues to Ready.")
+    lines.append("Tap Approve to apply this plan: move selected backlog issues to Ready.")
 
     lines.append("Tap Skip to leave the plan unapplied.")
     lines.append(f"Auto-skip in {_format_duration_hours(approval_timeout_hours)} if no action.")
@@ -1253,52 +1242,38 @@ def _promote_issue(repo: str, issue_number: int, priority: str, labels: list[str
         return None
 
 
-def create_plan_issues(
+def apply_plan_promotions(
     cfg: dict, github_slug: str, plan: list[dict],
 ) -> tuple[list[str], list[str]]:
-    """Execute an approved plan: promote existing issues or create new ones, then set all to Ready."""
+    """Execute an approved plan by promoting existing backlog issues to Ready."""
     ready_urls: list[str] = []
     skipped: list[str] = []
 
     for task in plan:
-        action = (task.get("action") or "create").lower()
+        action = (task.get("action") or "promote").lower()
         title = (task.get("title") or "").strip()
         priority = task.get("priority", "prio:normal")
         labels = [str(l) for l in task.get("labels", []) if l]
         if priority not in labels:
             labels.append(priority)
 
-        if action == "promote":
-            issue_number = task.get("issue_number")
-            if not issue_number:
-                print(f"  Skip (promote without issue_number): {title!r}")
-                skipped.append(title)
-                continue
-            url = _promote_issue(github_slug, int(issue_number), priority, labels)
-            if url:
-                ready_urls.append(url)
-            else:
-                skipped.append(title)
+        if action != "promote":
+            print(f"  Skip (planner returned unsupported action {action!r}): {title!r}")
+            skipped.append(title)
+            continue
+
+        issue_number = task.get("issue_number")
+        if not issue_number:
+            print(f"  Skip (promote without issue_number): {title!r}")
+            skipped.append(title)
+            continue
+        url = _promote_issue(github_slug, int(issue_number), priority, labels)
+        if url:
+            ready_urls.append(url)
         else:
-            # Create new issue
-            body = (task.get("body") or "").strip()
-            if not title:
-                continue
+            skipped.append(title)
 
-            if _open_issue_exists(github_slug, title):
-                print(f"  Skip (duplicate): {title!r}")
-                skipped.append(title)
-                continue
-
-            try:
-                url = _create_issue(github_slug, title, body, labels)
-                print(f"  Created: {url}")
-                ready_urls.append(url)
-            except Exception as e:
-                print(f"  Failed to create {title!r}: {e}")
-                skipped.append(title)
-
-    # Move all issues (promoted + created) to Ready — triggers dispatch on next cycle
+    # Move promoted issues to Ready — triggers dispatch on next cycle
     if ready_urls:
         print(f"\n  Setting {len(ready_urls)} issue(s) to Ready on project board...")
         _set_issues_ready(cfg, github_slug, ready_urls)
@@ -1367,7 +1342,7 @@ def run():
             msg_id = _send_telegram(cfg, plan_text, reply_markup=planner_reply_markup(action["action_id"]))
             if msg_id is None:
                 print("  Failed to send plan to Telegram (or no credentials).")
-                print("  Skipping issue creation — approval gate is mandatory.")
+                print("  Skipping plan application — approval gate is mandatory.")
                 continue
             action["message_id"] = msg_id
             save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
@@ -1384,9 +1359,9 @@ def run():
                 _send_telegram(cfg, skip_msg)
                 continue
 
-            # Phase 4: Create issues (only on approval)
-            print(f"\n  Creating issues for approved plan ({github_slug})...")
-            created_urls, skipped = create_plan_issues(cfg, github_slug, plan)
+            # Phase 4: Promote selected backlog issues (only on approval)
+            print(f"\n  Applying approved plan ({github_slug})...")
+            ready_urls, skipped = apply_plan_promotions(cfg, github_slug, plan)
 
             # Phase 5: Update STRATEGY.md with sprint plan and retrospective
             sprint_summary = "\n".join(
@@ -1397,10 +1372,10 @@ def run():
 
             summary = (
                 f"✅ Sprint plan approved for {github_slug}\n"
-                f"Issues created: {len(created_urls)} | Skipped (duplicate): {len(skipped)}\n"
+                f"Issues moved to Ready: {len(ready_urls)} | Skipped: {len(skipped)}\n"
                 f"Status: Ready → dispatch will begin within 1 minute"
             )
-            for url in created_urls:
+            for url in ready_urls:
                 summary += f"\n  {url}"
             print(summary)
             _send_telegram(cfg, summary)
