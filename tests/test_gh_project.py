@@ -120,6 +120,27 @@ def test_ensure_ci_remediation_issue_creates_ready_debugging_issue(monkeypatch):
     assert ready_calls == [("owner/repo", "https://github.com/owner/repo/issues/99")]
 
 
+def test_cleanup_merged_pr_issues_marks_original_and_remediation_done(monkeypatch):
+    done_calls = []
+
+    monkeypatch.setattr(pm, "_extract_issue_number", lambda body: 24)
+    monkeypatch.setattr(pm, "_find_open_issue_by_title", lambda repo, title: {"number": 35, "title": title})
+    monkeypatch.setattr(
+        pm,
+        "_mark_issue_done",
+        lambda cfg, repo, issue_number, close_issue, comment=None: done_calls.append((repo, issue_number, close_issue, comment)),
+    )
+
+    pm._cleanup_merged_pr_issues({}, "owner/repo", {"number": 34, "body": "Fixes #24"})
+
+    assert done_calls[0][1] == 24
+    assert done_calls[0][2] is True
+    assert "PR #34 merged successfully" in done_calls[0][3]
+    assert done_calls[1][1] == 35
+    assert done_calls[1][2] is True
+    assert "Resolved automatically after PR #34 merged" in done_calls[1][3]
+
+
 # ---------------------------------------------------------------------------
 # _extract_issue_number
 # ---------------------------------------------------------------------------

@@ -302,6 +302,73 @@ def _find_open_issue_by_title(repo: str, title: str) -> dict | None:
     return None
 
 
+def _set_project_issue_status(cfg: dict, repo: str, issue_number: int, status_value: str):
+    owner = cfg.get("github_owner", "")
+    _project_key, project_cfg, _repo_cfg = _find_repo_project(cfg, repo)
+    if not owner or not project_cfg:
+        return
+
+    try:
+        info = query_project(project_cfg["project_number"], owner)
+        option_id = info["status_options"].get(status_value)
+        if not info["status_field_id"] or not option_id:
+            return
+        issue_url_prefix = f"https://github.com/{repo}/issues/{issue_number}"
+        for item in info["items"]:
+            if item["url"].startswith(issue_url_prefix):
+                set_item_status(info["project_id"], item["item_id"], info["status_field_id"], option_id)
+                return
+    except Exception as e:
+        print(f"Warning: failed to set project status {status_value!r} for {repo}#{issue_number}: {e}")
+
+
+def _mark_issue_done(cfg: dict, repo: str, issue_number: int, *, close_issue: bool, comment: str | None = None):
+    _project_key, project_cfg, _repo_cfg = _find_repo_project(cfg, repo)
+    edit_issue_labels(
+        repo,
+        issue_number,
+        add=["done"],
+        remove=["blocked", "in-progress", "ready", "review", "agent-dispatched"],
+    )
+    if comment:
+        try:
+            add_issue_comment(repo, issue_number, comment)
+        except Exception as e:
+            print(f"Warning: failed to comment on {repo}#{issue_number}: {e}")
+    if close_issue:
+        try:
+            gh(["issue", "close", str(issue_number), "-R", repo], check=False)
+        except Exception as e:
+            print(f"Warning: failed to close {repo}#{issue_number}: {e}")
+    if project_cfg:
+        _set_project_issue_status(cfg, repo, issue_number, project_cfg.get("done_value", "Done"))
+
+
+def _cleanup_merged_pr_issues(cfg: dict, repo: str, pr: dict):
+    pr_number = pr["number"]
+    issue_number = _extract_issue_number(pr.get("body", ""))
+
+    if issue_number:
+        _mark_issue_done(
+            cfg,
+            repo,
+            issue_number,
+            close_issue=True,
+            comment=f"✅ PR #{pr_number} merged successfully. Clearing blocked state and marking the issue done.",
+        )
+
+    remediation_title = f"Fix CI failure on PR #{pr_number}"
+    remediation_issue = _find_open_issue_by_title(repo, remediation_title)
+    if remediation_issue and remediation_issue.get("number"):
+        _mark_issue_done(
+            cfg,
+            repo,
+            int(remediation_issue["number"]),
+            close_issue=True,
+            comment=f"✅ Resolved automatically after PR #{pr_number} merged.",
+        )
+
+
 def _create_issue(repo: str, title: str, body: str, labels: list[str]) -> str:
     ensure_labels(repo, labels)
     cmd = ["issue", "create", "-R", repo, "--title", title, "--body", body]
@@ -574,6 +641,7 @@ def monitor_prs():
                 print(f"  PR #{pr_number}: merged successfully")
                 state.pop(pr_url, None)
                 _save_state(paths, state)
+                _cleanup_merged_pr_issues(cfg, repo, pr)
             else:
                 print(f"  PR #{pr_number}: merge failed")
 
