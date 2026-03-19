@@ -30,6 +30,7 @@ STALE_DAYS = 30
 MAX_ISSUES_PER_REPO = 5
 ANALYSIS_MODEL = "haiku"
 SIMILARITY_THRESHOLD = 0.75  # Title similarity threshold for dedup
+PR_NUMBER_RE = re.compile(r"\bPR\s*#(\d+)\b|/pull/(\d+)\b", re.IGNORECASE)
 
 
 def _repo_groomer_cadence_days(cfg: dict, github_slug: str) -> float:
@@ -62,7 +63,7 @@ def _list_open_issues(repo: str, cfg: dict) -> list[dict]:
     """Return open issues from trusted authors for a repo via gh CLI."""
     raw = _gh([
         "issue", "list", "--repo", repo, "--state", "open",
-        "--json", "number,title,createdAt,updatedAt,labels,author",
+        "--json", "number,title,createdAt,updatedAt,labels,author,url",
         "--limit", "100",
     ])
     if not raw:
@@ -75,6 +76,77 @@ def _list_open_issues(repo: str, cfg: dict) -> list[dict]:
         i for i in issues
         if is_trusted((i.get("author") or {}).get("login", ""), cfg)
     ]
+
+
+def _extract_pr_number(text: str) -> int | None:
+    match = PR_NUMBER_RE.search(text or "")
+    if not match:
+        return None
+    return int(match.group(1) or match.group(2))
+
+
+def _get_pr_state(repo: str, pr_number: int) -> dict | None:
+    raw = _gh([
+        "pr", "view", str(pr_number), "--repo", repo,
+        "--json", "number,state,mergedAt,url",
+    ])
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+
+
+def _set_issue_done(cfg: dict, github_slug: str, issue_url: str):
+    owner = cfg.get("github_owner", "")
+    if not owner:
+        return
+    for project_cfg in cfg.get("github_projects", {}).values():
+        if not isinstance(project_cfg, dict):
+            continue
+        repo_match = any(rc.get("github_repo") == github_slug for rc in project_cfg.get("repos", []))
+        if not repo_match:
+            continue
+        done_value = project_cfg.get("done_value", "Done")
+        try:
+            info = query_project(project_cfg["project_number"], owner)
+            option_id = info["status_options"].get(done_value)
+            if not info["status_field_id"] or not option_id:
+                return
+            for item in info["items"]:
+                if item["url"] == issue_url:
+                    set_item_status(info["project_id"], item["item_id"], info["status_field_id"], option_id)
+                    return
+        except Exception as e:
+            print(f"Warning: failed to set {issue_url} to Done: {e}")
+        return
+
+
+def _cleanup_stale_issues(cfg: dict, github_slug: str, open_issues: list[dict]) -> list[int]:
+    """Close stale PR-linked backlog issues whose referenced PR is already merged/closed."""
+    cleaned: list[int] = []
+    for issue in open_issues:
+        pr_number = _extract_pr_number(issue.get("title", ""))
+        if not pr_number:
+            continue
+        pr = _get_pr_state(github_slug, pr_number)
+        if not pr:
+            continue
+        if pr.get("mergedAt") or pr.get("state") == "MERGED":
+            comment = f"Closed automatically by backlog groomer: referenced PR #{pr_number} is already merged."
+        elif pr.get("state") == "CLOSED":
+            comment = f"Closed automatically by backlog groomer: referenced PR #{pr_number} is already closed."
+        else:
+            continue
+        try:
+            gh(["issue", "close", str(issue["number"]), "-R", github_slug, "--comment", comment], check=False)
+            _set_issue_done(cfg, github_slug, issue.get("url", ""))
+            cleaned.append(int(issue["number"]))
+            print(f"  Closed stale issue #{issue['number']} (PR #{pr_number} already resolved)")
+        except Exception as e:
+            print(f"  Warning: failed to close stale issue #{issue.get('number')}: {e}")
+    return cleaned
 
 
 def _stale_issues(issues: list[dict], stale_days: int = STALE_DAYS) -> list[dict]:
@@ -360,34 +432,30 @@ def _send_telegram(cfg: dict, text: str):
 def _resolve_repos(cfg: dict) -> list[tuple[str, Path]]:
     """Return [(github_slug, local_path)] for configured repos."""
     repos = []
-    # Try github_repos mapping first
     github_repos = cfg.get("github_repos", {})
     owner = cfg.get("github_owner", "")
     allowed = cfg.get("allowed_repos", [])
 
-    if github_repos and owner:
-        for key, slug in github_repos.items():
-            full_slug = f"{owner}/{slug}" if "/" not in slug else slug
-            # Find matching allowed_repo path
-            for rp in allowed:
-                rp = Path(rp).expanduser()
-                if rp.name == key or rp.name == slug:
-                    repos.append((full_slug, rp))
-                    break
-            else:
-                # Use first allowed repo or guess path
-                if allowed:
-                    repos.append((full_slug, Path(allowed[0]).expanduser()))
-
-    # Also check github_projects for repo configs
+    # Prefer explicit repo mappings from github_projects because they include
+    # the correct local path and avoid lossy name matching against allowed_repos.
     for pv in cfg.get("github_projects", {}).values():
         if not isinstance(pv, dict):
             continue
         for rc in pv.get("repos", []):
             gh_repo = rc.get("github_repo", "")
-            local = rc.get("repo", rc.get("path", ""))
+            local = rc.get("local_repo", rc.get("repo", rc.get("path", "")))
             if gh_repo and local:
                 repos.append((gh_repo, Path(local).expanduser()))
+
+    if github_repos and owner:
+        for key, slug in github_repos.items():
+            full_slug = f"{owner}/{slug}" if "/" not in slug else slug
+            for rp in allowed:
+                rp = Path(rp).expanduser()
+                repo_name = full_slug.rsplit("/", 1)[-1]
+                if rp.name in {key, slug, repo_name}:
+                    repos.append((full_slug, rp))
+                    break
 
     # Fallback: single repo from top-level config
     if not repos:
@@ -420,9 +488,12 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
 
     # 1. Gather open issues (trusted authors only — prompt injection defense)
     open_issues = _list_open_issues(github_slug, cfg)
+    cleaned = _cleanup_stale_issues(cfg, github_slug, open_issues)
+    if cleaned:
+        open_issues = [issue for issue in open_issues if issue.get("number") not in cleaned]
     open_titles = [i.get("title", "") for i in open_issues]
     stale = _stale_issues(open_issues)
-    print(f"  Open issues: {len(open_issues)}, stale (>{STALE_DAYS}d): {len(stale)}")
+    print(f"  Open issues: {len(open_issues)}, stale (>{STALE_DAYS}d): {len(stale)}, cleaned: {len(cleaned)}")
 
     # 2. Recent completions from metrics
     root = Path(cfg.get("root_dir", ".")).expanduser()
@@ -441,7 +512,7 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
     # Skip if no data to analyze
     if not stale and not known_issues and not risk_flags and not records:
         print("  No data to analyze, skipping.")
-        return {"status": "no-data", "created": 0, "skipped": 0}
+        return {"status": "no-data", "created": 0, "skipped": 0, "cleaned": len(cleaned)}
 
     # 5. Determine how many issues to propose (3-5, based on data richness)
     data_signals = len(stale) + len(known_issues) + len(risk_flags)
@@ -541,6 +612,7 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
         "status": status,
         "created": len(created_urls),
         "skipped": len(skipped),
+        "cleaned": len(cleaned),
         "urls": created_urls,
     }
     if status == "error":
@@ -565,6 +637,7 @@ def run():
 
         all_created = 0
         all_skipped = 0
+        all_cleaned = 0
         status_counts = {"created": 0, "skipped": 0, "no-data": 0, "error": 0, "dormant": 0}
         summaries = []
 
@@ -588,21 +661,22 @@ def run():
             status_counts[status] = status_counts.get(status, 0) + 1
             all_created += result.get("created", 0)
             all_skipped += result.get("skipped", 0)
+            all_cleaned += result.get("cleaned", 0)
             if status in {"created", "skipped"}:
                 record_run(cfg, "backlog_groomer", github_slug)
 
             if status == "created":
-                summaries.append(f"{github_slug}: {result.get('created', 0)} created, {result.get('skipped', 0)} skipped")
+                summaries.append(f"{github_slug}: {result.get('created', 0)} created, {result.get('skipped', 0)} skipped, {result.get('cleaned', 0)} cleaned")
             elif status == "skipped":
-                summaries.append(f"{github_slug}: skipped ({result.get('skipped', 0)} duplicate/failed creates)")
+                summaries.append(f"{github_slug}: skipped ({result.get('skipped', 0)} duplicate/failed creates, {result.get('cleaned', 0)} cleaned)")
             elif status == "no-data":
-                summaries.append(f"{github_slug}: no-data")
+                summaries.append(f"{github_slug}: no-data ({result.get('cleaned', 0)} cleaned)")
             else:
                 summaries.append(f"{github_slug}: error ({result.get('error', 'unknown error')})")
 
         summary = (
             f"Backlog Groomer complete\n"
-            f"Issues created: {all_created} | Skipped: {all_skipped}\n"
+            f"Issues created: {all_created} | Skipped: {all_skipped} | Cleaned: {all_cleaned}\n"
             f"Repo statuses: created={status_counts['created']} skipped={status_counts['skipped']} "
             f"no-data={status_counts['no-data']} error={status_counts['error']} dormant={status_counts['dormant']}\n"
             + "\n".join(summaries)
