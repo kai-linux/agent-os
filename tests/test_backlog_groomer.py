@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from orchestrator.backlog_groomer import _repo_groomer_cadence_days
+from orchestrator.backlog_groomer import _repo_groomer_cadence_days, _resolve_repos
 from orchestrator import backlog_groomer as bg
 
 
@@ -81,3 +81,56 @@ def test_groom_repo_adds_created_issue_to_backlog(tmp_path, monkeypatch):
     assert result["status"] == "created"
     assert created_urls == ["https://github.com/owner/repo/issues/10"]
     assert backlog_urls == ["https://github.com/owner/repo/issues/10"]
+
+
+def test_cleanup_stale_issue_when_referenced_pr_merged(monkeypatch):
+    closed = []
+    done = []
+
+    monkeypatch.setattr(
+        bg,
+        "_get_pr_state",
+        lambda repo, pr_number: {"number": pr_number, "state": "MERGED", "mergedAt": "2026-03-19T18:00:00Z"},
+    )
+    monkeypatch.setattr(bg, "_set_issue_done", lambda cfg, github_slug, issue_url: done.append((github_slug, issue_url)))
+    monkeypatch.setattr(
+        bg,
+        "gh",
+        lambda cmd, check=False: closed.append(cmd) or "",
+    )
+
+    cleaned = bg._cleanup_stale_issues(
+        {"github_owner": "owner"},
+        "owner/repo",
+        [{"number": 37, "title": "Diagnose and resolve CI failure blocking PR #34 merge", "url": "https://github.com/owner/repo/issues/37"}],
+    )
+
+    assert cleaned == [37]
+    assert any(cmd[:3] == ["issue", "close", "37"] for cmd in closed)
+    assert done == [("owner/repo", "https://github.com/owner/repo/issues/37")]
+
+
+def test_resolve_repos_prefers_explicit_github_projects_local_repo():
+    cfg = {
+        "github_owner": "kai-linux",
+        "allowed_repos": [
+            "/home/kai/agent-os",
+            "/home/kai/bookgenerator",
+        ],
+        "github_repos": {
+            "writeaibook": "kai-linux/bookgenerator",
+            "agent-os": "kai-linux/agent-os",
+        },
+        "github_projects": {
+            "writeaibook": {
+                "repos": [
+                    {
+                        "github_repo": "kai-linux/bookgenerator",
+                        "local_repo": "/home/kai/bookgenerator",
+                    }
+                ]
+            }
+        },
+    }
+    repos = dict(_resolve_repos(cfg))
+    assert repos["kai-linux/bookgenerator"] == Path("/home/kai/bookgenerator")
