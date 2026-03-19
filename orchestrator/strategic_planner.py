@@ -788,9 +788,15 @@ Rules:
 - Include a mix of: feature work that advances the product vision, bug fixes, self-improvement, and infrastructure
 - At least 1-2 tasks should push toward the long-term vision, not just maintain the status quo
 - If sibling repos are listed above, consider cross-repo dependencies: sequence work so prerequisite changes (e.g. API changes in repo A that repo B depends on) are completed first. If a task depends on work in another repo, note the dependency in the goal (e.g. "Depends on owner/repo-a completing X")
-- If there is no suitable backlog item, return fewer than {plan_size} tasks rather than inventing new work
+- If there is at least one credible backlog candidate, return at least 1 promoted issue. Do not return an empty list just because no issue is perfect; choose the best available issue.
+- Return an empty result only if every backlog candidate is clearly unsuitable this cycle.
 
-Return ONLY a JSON array (no markdown fences, no commentary) of at most {plan_size} objects.
+Return ONLY one of these JSON shapes (no markdown fences, no commentary):
+
+1. A JSON array of at most {plan_size} promotion objects.
+2. A JSON object like {{"empty_reason": "why every backlog issue is unsuitable right now"}} when no issue should be promoted.
+
+For promotion arrays:
 Each object must have:
   "action"     - always "promote"
   "issue_number" - the GitHub issue number to promote, e.g. 8
@@ -801,7 +807,7 @@ Each object must have:
   "rationale"  - one sentence explaining why this task matters this week, referencing the strategy
   "labels"     - JSON array of label strings (choose from: enhancement, bug, tech-debt)
 
-Return ONLY the JSON array."""
+Return ONLY the JSON."""
 
 
 def _planner_agents(cfg: dict) -> list[str]:
@@ -857,11 +863,17 @@ def _call_sonnet(prompt: str, cfg: dict) -> str:
     raise RuntimeError(" | ".join(errors) if errors else "No planner agents configured")
 
 
-def _parse_plan(text: str) -> list[dict]:
-    """Parse JSON array from Claude response, stripping markdown fences if present."""
+def _parse_plan(text: str) -> tuple[list[dict], str | None]:
+    """Parse planner JSON response, stripping markdown fences if present."""
     if text.startswith("```"):
         text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-    return json.loads(text)
+    data = json.loads(text)
+    if isinstance(data, dict):
+        reason = str(data.get("empty_reason", "")).strip() or "Planner selected no backlog issues."
+        return [], reason
+    if isinstance(data, list):
+        return data, None
+    raise ValueError(f"Unexpected planner response type: {type(data).__name__}")
 
 
 # ---------------------------------------------------------------------------
@@ -1076,8 +1088,8 @@ def plan_repo(
     github_slug: str,
     repo_path: Path,
     cross_repo_context: str = "",
-) -> tuple[list[dict] | None, str]:
-    """Generate a sprint plan for one repo. Returns (plan, retrospective) or (None, "")."""
+) -> tuple[list[dict] | None, str, str | None]:
+    """Generate a sprint plan for one repo. Returns (plan, retrospective, empty_reason)."""
     plan_size, sprint_cadence_days = _repo_planner_config(cfg, github_slug)
     print(f"\n--- Planning {github_slug} (plan_size={plan_size}, cadence={sprint_cadence_days}d) ---")
 
@@ -1149,17 +1161,15 @@ def plan_repo(
         return None, ""
 
     try:
-        plan = _parse_plan(raw)
+        plan, empty_reason = _parse_plan(raw)
     except Exception as e:
         print(f"  Failed to parse plan: {e}\n  Raw: {raw[:300]}")
-        return None, ""
-
-    if not isinstance(plan, list):
-        print(f"  Unexpected response format:\n  {raw[:300]}")
-        return None, ""
+        return None, "", None
 
     print(f"  Generated {len(plan)} tasks")
-    return plan[:plan_size], retrospective
+    if not plan and empty_reason:
+        print(f"  Planner rationale for empty plan: {empty_reason}")
+    return plan[:plan_size], retrospective, empty_reason
 
 
 def _set_issues_ready(cfg: dict, github_slug: str, issue_urls: list[str]):
@@ -1328,9 +1338,20 @@ def run():
                 dependencies=dependencies,
             )
             # Phase 1: Generate plan with retrospective
-            plan, retrospective = plan_repo(cfg, github_slug, repo_path, cross_repo_ctx)
-            if not plan:
+            plan, retrospective, empty_reason = plan_repo(cfg, github_slug, repo_path, cross_repo_ctx)
+            if plan is None:
                 print(f"  No plan generated for {github_slug}; skipping.")
+                continue
+            if not plan:
+                record_run(cfg, "strategic_planner", github_slug)
+                no_op_msg = (
+                    f"ℹ️ Sprint plan for {github_slug}\n"
+                    f"Cadence: {_format_cadence(sprint_cadence_days)}\n"
+                    f"No backlog issues were promoted this cycle.\n"
+                    f"Reason: {empty_reason or 'No suitable backlog issues were selected.'}"
+                )
+                print(no_op_msg)
+                _send_telegram(cfg, no_op_msg)
                 continue
 
             # Phase 2: Post to Telegram and wait for approval

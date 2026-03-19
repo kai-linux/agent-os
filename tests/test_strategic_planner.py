@@ -16,6 +16,7 @@ from orchestrator.strategic_planner import (
     _call_sonnet,
     _approval_timeout_hours,
     _create_plan_approval_action,
+    _parse_plan,
     _extract_sprint_entries,
     _format_cadence,
     _format_duration_hours,
@@ -279,6 +280,12 @@ def test_call_sonnet_uses_configured_planner_agents():
         raw = _call_sonnet("Return JSON", cfg)
 
     assert raw == "[]"
+
+
+def test_parse_plan_supports_explicit_empty_reason():
+    plan, reason = _parse_plan('{"empty_reason":"All backlog items are stale or blocked."}')
+    assert plan == []
+    assert reason == "All backlog items are stale or blocked."
 
 
 def test_format_cadence_supports_fractional_days():
