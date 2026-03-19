@@ -259,13 +259,13 @@ def test_call_sonnet_falls_back_to_codex_when_claude_fails():
         if cmd[0] == "claude":
             return subprocess.CompletedProcess(cmd, 1, "", "You're out of extra usage")
         if cmd[0] == "codex":
-            return subprocess.CompletedProcess(cmd, 0, '[{"action":"create"}]', "")
+            return subprocess.CompletedProcess(cmd, 0, '[{"action":"promote","issue_number":39}]', "")
         raise AssertionError(f"Unexpected command: {cmd}")
 
     with patch("orchestrator.strategic_planner.subprocess.run", side_effect=fake_run):
         raw = _call_sonnet("Return JSON", cfg)
 
-    assert raw == '[{"action":"create"}]'
+    assert raw == '[{"action":"promote","issue_number":39}]'
 
 
 def test_call_sonnet_uses_configured_planner_agents():
@@ -295,13 +295,13 @@ def test_approval_timeout_scales_with_cadence():
 
 def test_format_plan_message_includes_real_cadence_and_buttons_copy():
     text = _format_plan_message(
-        [{"priority": "prio:high", "action": "create", "task_type": "implementation", "title": "Do thing", "rationale": "Because."}],
+        [{"priority": "prio:high", "action": "promote", "issue_number": 12, "task_type": "implementation", "title": "Do thing", "rationale": "Because."}],
         "owner/repo",
         0.01,
     )
     assert "📋 Sprint Plan — owner/repo" in text
     assert "Cadence: every 14m" in text
-    assert "Tap Approve to apply this plan: create issues and move them to Ready." in text
+    assert "Tap Approve to apply this plan: move selected backlog issues to Ready." in text
     assert "Auto-skip in 12m if no action." in text
 
 
@@ -312,18 +312,6 @@ def test_format_plan_message_for_promote_only_plan():
         1,
     )
     assert "Tap Approve to apply this plan: move selected backlog issues to Ready." in text
-
-
-def test_format_plan_message_for_mixed_plan():
-    text = _format_plan_message(
-        [
-            {"priority": "prio:high", "action": "promote", "issue_number": 12, "task_type": "implementation", "title": "Promote thing", "rationale": "Because."},
-            {"priority": "prio:normal", "action": "create", "task_type": "docs", "title": "Create thing", "rationale": "Because too."},
-        ],
-        "owner/repo",
-        1,
-    )
-    assert "Tap Approve to apply this plan: create new issues and move selected backlog issues to Ready." in text
 
 
 def test_create_plan_approval_action_uses_dynamic_timeout():
