@@ -165,11 +165,34 @@ agent_fallbacks:
   browser_automation: [claude, codex, gemini, deepseek]
 
 planner_agents: [claude, codex]
+
+planning_research:
+  enabled: true
+  max_age_hours: 72
+  max_sources: 4
+  max_source_chars: 4000
+  allowed_domains: [docs.example.com, competitor.example.com]
+  artifact_file: PLANNING_RESEARCH.md
+  sources:
+    - name: Official docs
+      type: web
+      kind: official_docs
+      url: https://docs.example.com/changelog
+    - name: Competitor pricing
+      type: web
+      kind: competitor
+      url: https://competitor.example.com/pricing
+    - name: Launch notes
+      type: file
+      kind: repo_reference
+      path: ../shared/launch-notes.md
 ```
 
 DeepSeek has its own provider fallback: `openrouter → nanogpt → chutes`. It is kept last in the chain by default because it depends on extra provider configuration and should not consume retries when those providers are unavailable.
 
 Strategic planning uses its own narrow fallback chain (`planner_agents`) so the control plane does not stall on a single Claude quota event and does not spray planning work across every model.
+
+Repos can opt into bounded pre-planning research with `planning_research`. Before sprint selection, the planner refreshes `PLANNING_RESEARCH.md` only when it is older than `max_age_hours`; otherwise it reuses the existing artifact. Research is intentionally constrained to explicitly configured `https` URLs on allowed domains plus relative repo or repo-adjacent files. There is no search step and no open-ended browsing path.
 
 Issues can specify a preferred agent. The dispatcher can auto-detect task type. Priority labels (`prio:high`, `prio:normal`, `prio:low`) influence scheduling order.
 

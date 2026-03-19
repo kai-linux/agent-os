@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import textwrap
@@ -14,9 +15,14 @@ from orchestrator.strategic_planner import (
     DEFAULT_PLAN_SIZE,
     DEFAULT_SPRINT_CADENCE_DAYS,
     FOCUS_AREA_MARKER,
+    RESEARCH_ARTIFACT_DEFAULT,
     _call_sonnet,
     _approval_timeout_hours,
+    _allowed_research_file,
+    _build_plan_prompt,
+    _clean_research_text,
     _create_plan_approval_action,
+    _domain_allowed,
     _parse_plan,
     _extract_sprint_entries,
     _format_cadence,
@@ -26,7 +32,9 @@ from orchestrator.strategic_planner import (
     _is_focus_areas_manually_edited,
     _load_strategy_map,
     _order_repos_by_dependencies,
+    _planning_research_context,
     _repo_planner_config,
+    _repo_research_config,
     _resolve_repos,
     _set_issues_ready,
     _open_issues_summary,
@@ -259,9 +267,9 @@ def test_call_sonnet_falls_back_to_codex_when_claude_fails():
     cfg = {}
 
     def fake_run(cmd, capture_output=True, text=True, timeout=180):
-        if cmd[0] == "claude":
+        if os.path.basename(cmd[0]) == "claude":
             return subprocess.CompletedProcess(cmd, 1, "", "You're out of extra usage")
-        if cmd[0] == "codex":
+        if os.path.basename(cmd[0]) == "codex":
             return subprocess.CompletedProcess(cmd, 0, '[{"action":"promote","issue_number":39}]', "")
         raise AssertionError(f"Unexpected command: {cmd}")
 
@@ -275,7 +283,7 @@ def test_call_sonnet_uses_configured_planner_agents():
     cfg = {"planner_agents": ["codex"]}
 
     def fake_run(cmd, capture_output=True, text=True, timeout=180):
-        assert cmd[0] == "codex"
+        assert os.path.basename(cmd[0]) == "codex"
         return subprocess.CompletedProcess(cmd, 0, "[]", "")
 
     with patch("orchestrator.strategic_planner.subprocess.run", side_effect=fake_run):
@@ -326,6 +334,125 @@ def test_format_plan_message_for_promote_only_plan():
 def test_create_plan_approval_action_uses_dynamic_timeout():
     action = _create_plan_approval_action({"telegram_chat_id": "1"}, "owner/repo", 0.01)
     assert action["timeout_hours"] == _approval_timeout_hours(0.01)
+
+
+# ---------------------------------------------------------------------------
+# Planning research
+# ---------------------------------------------------------------------------
+
+def test_repo_research_config_merges_per_repo_override():
+    cfg = {
+        "planning_research": {
+            "enabled": True,
+            "max_age_hours": 72,
+            "sources": [{"name": "base"}],
+        },
+        "github_projects": {
+            "proj": {
+                "repos": [
+                    {
+                        "github_repo": "owner/repo",
+                        "planning_research": {
+                            "max_age_hours": 24,
+                            "sources": [{"name": "override"}],
+                        },
+                    }
+                ]
+            }
+        },
+    }
+    research_cfg = _repo_research_config(cfg, "owner/repo")
+    assert research_cfg["enabled"] is True
+    assert research_cfg["max_age_hours"] == 24
+    assert research_cfg["sources"] == [{"name": "override"}]
+
+
+def test_domain_allowed_accepts_subdomains():
+    assert _domain_allowed("docs.example.com", ["example.com"]) is True
+    assert _domain_allowed("evil.com", ["example.com"]) is False
+
+
+def test_allowed_research_file_allows_repo_and_adjacent_paths(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    inside = _allowed_research_file(repo, "notes.md")
+    adjacent = _allowed_research_file(repo, "../shared/notes.md")
+    blocked = _allowed_research_file(repo, "../../outside.md")
+    assert inside == (repo / "notes.md").resolve()
+    assert adjacent == (repo / "../shared/notes.md").resolve()
+    assert blocked is None
+
+
+def test_clean_research_text_strips_html():
+    raw = "<html><body><script>bad()</script><h1>Title</h1><p>Hello&nbsp;world</p></body></html>"
+    cleaned = _clean_research_text(raw)
+    assert "Title" in cleaned
+    assert "Hello world" in cleaned
+    assert "bad()" not in cleaned
+
+
+def test_planning_research_context_uses_fresh_artifact(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    artifact = repo / RESEARCH_ARTIFACT_DEFAULT
+    artifact.write_text("# Planning Research\n\nFresh artifact\n", encoding="utf-8")
+    cfg = {
+        "planning_research": {
+            "enabled": True,
+            "max_age_hours": 72,
+            "sources": [{"name": "ignored", "type": "file", "path": "notes.md", "kind": "repo_reference"}],
+        }
+    }
+    context = _planning_research_context(cfg, "owner/repo", repo)
+    assert "Fresh artifact" in context
+
+
+def test_planning_research_context_refreshes_and_writes_artifact(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "notes.md").write_text("Launch week notes for planning.\nNew onboarding flow is missing analytics.\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "orchestrator.strategic_planner._summarize_research_source",
+        lambda source, content: ("Docs show a missing analytics gap.", ["Add analytics before launch."]),
+    )
+    cfg = {
+        "planning_research": {
+            "enabled": True,
+            "max_age_hours": 0,
+            "sources": [
+                {
+                    "name": "Launch notes",
+                    "type": "file",
+                    "path": "notes.md",
+                    "kind": "repo_reference",
+                }
+            ],
+        }
+    }
+    context = _planning_research_context(cfg, "owner/repo", repo)
+    artifact = repo / RESEARCH_ARTIFACT_DEFAULT
+    assert artifact.exists()
+    assert "Launch notes" in context
+    assert "Add analytics before launch." in context
+
+
+def test_build_plan_prompt_includes_research_context():
+    prompt = _build_plan_prompt(
+        plan_size=3,
+        strategy_context="strategy",
+        readme_goal="goal",
+        codebase_context="codebase",
+        research_context="# Planning Research\n\nEvidence",
+        retrospective="retro",
+        git_log="abc123 commit",
+        counts={"open": 1, "closed": 2, "blocked": 0},
+        metrics_summary="metrics",
+        backlog_text="- #1: Task",
+        open_issues="(none)",
+        cross_repo_context="(single repo)",
+    )
+    assert "--- Pre-Planning Research (PLANNING_RESEARCH.md) ---" in prompt
+    assert "Evidence" in prompt
 
 
 # ---------------------------------------------------------------------------
