@@ -1,4 +1,4 @@
-"""Weekly strategic planner (Level 2).
+"""Strategic planner (Level 2).
 
 Reads product context (README, CODEBASE.md, STRATEGY.md, last sprint
 retrospective, recent PRs and closed issues) from each repository, generates a
@@ -10,9 +10,10 @@ project board, triggering immediate dispatch to agents. STRATEGY.md is updated
 with the new sprint plan and retrospective findings. One tap on Telegram
 starts an entire sprint.
 
-Runs weekly on Sundays at 20:00.  Approval gate is mandatory — no issues are
-created without explicit human confirmation via Telegram reply. If no response
-within 24 hours, the plan is skipped and a fresh one is generated next week.
+Cron can invoke this frequently; per-repo cadence and dormancy are enforced in
+code. Approval gate is mandatory — no issues are created without explicit human
+confirmation via Telegram reply. If no response within 24 hours, the plan is
+skipped until the repo is due again.
 """
 from __future__ import annotations
 
@@ -28,6 +29,7 @@ from pathlib import Path
 from orchestrator.paths import load_config, runtime_paths
 from orchestrator.agent_scorer import load_recent_metrics
 from orchestrator.gh_project import query_project, set_item_status, edit_issue_labels, ensure_labels
+from orchestrator.scheduler_state import is_due, record_run, job_lock
 from orchestrator.trust import is_trusted
 
 DEFAULT_PLAN_SIZE = 5
@@ -790,7 +792,7 @@ def _resolve_repos(cfg: dict) -> list[tuple[str, Path]]:
     return unique
 
 
-def _repo_planner_config(cfg: dict, github_slug: str) -> tuple[int, int]:
+def _repo_planner_config(cfg: dict, github_slug: str) -> tuple[int, float]:
     """Return (plan_size, sprint_cadence_days) for a repo, checking per-repo overrides."""
     plan_size = cfg.get("plan_size", DEFAULT_PLAN_SIZE)
     cadence = cfg.get("sprint_cadence_days", DEFAULT_SPRINT_CADENCE_DAYS)
@@ -803,9 +805,9 @@ def _repo_planner_config(cfg: dict, github_slug: str) -> tuple[int, int]:
             if rc.get("github_repo") == github_slug:
                 plan_size = rc.get("plan_size", plan_size)
                 cadence = rc.get("sprint_cadence_days", cadence)
-                return int(plan_size), int(cadence)
+                return int(plan_size), float(cadence)
 
-    return int(plan_size), int(cadence)
+    return int(plan_size), float(cadence)
 
 
 # ---------------------------------------------------------------------------
@@ -1008,60 +1010,78 @@ def create_plan_issues(
 
 def run():
     cfg = load_config()
-    repos = _resolve_repos(cfg)
+    with job_lock(cfg, "strategic_planner") as acquired:
+        if not acquired:
+            print("Strategic planner already running; skipping overlapping cron invocation.")
+            return
 
-    if not repos:
-        print("No repos configured; nothing to plan.")
-        return
+        repos = _resolve_repos(cfg)
 
-    print(f"Strategic planner starting for {len(repos)} repo(s).")
+        if not repos:
+            print("No repos configured; nothing to plan.")
+            return
 
-    for github_slug, repo_path in repos:
-        # Phase 1: Generate plan with retrospective
-        plan, retrospective = plan_repo(cfg, github_slug, repo_path)
-        if not plan:
-            print(f"  No plan generated for {github_slug}; skipping.")
-            continue
+        print(f"Strategic planner starting for {len(repos)} repo(s).")
 
-        # Phase 2: Post to Telegram and wait for approval
-        plan_text = _format_plan_message(plan, github_slug)
-        print(f"\n{plan_text}\n")
+        for github_slug, repo_path in repos:
+            _, sprint_cadence_days = _repo_planner_config(cfg, github_slug)
+            due, reason = is_due(
+                cfg,
+                "strategic_planner",
+                github_slug,
+                cadence_hours=sprint_cadence_days * 24.0,
+            )
+            if not due:
+                print(f"  Skipping {github_slug}: {reason}")
+                continue
 
-        msg_id = _send_telegram(cfg, plan_text)
-        if msg_id is None:
-            print("  Failed to send plan to Telegram (or no credentials).")
-            print("  Skipping issue creation — approval gate is mandatory.")
-            continue
+            record_run(cfg, "strategic_planner", github_slug)
 
-        # Phase 3: Wait for human approval
-        approved = _poll_approval(cfg, msg_id)
+            # Phase 1: Generate plan with retrospective
+            plan, retrospective = plan_repo(cfg, github_slug, repo_path)
+            if not plan:
+                print(f"  No plan generated for {github_slug}; skipping.")
+                continue
 
-        if not approved:
-            skip_msg = f"⏭️ Sprint plan for {github_slug} was not approved. Skipping this week."
-            print(skip_msg)
-            _send_telegram(cfg, skip_msg)
-            continue
+            # Phase 2: Post to Telegram and wait for approval
+            plan_text = _format_plan_message(plan, github_slug)
+            print(f"\n{plan_text}\n")
 
-        # Phase 4: Create issues (only on approval)
-        print(f"\n  Creating issues for approved plan ({github_slug})...")
-        created_urls, skipped = create_plan_issues(cfg, github_slug, plan)
+            msg_id = _send_telegram(cfg, plan_text)
+            if msg_id is None:
+                print("  Failed to send plan to Telegram (or no credentials).")
+                print("  Skipping issue creation — approval gate is mandatory.")
+                continue
 
-        # Phase 5: Update STRATEGY.md with sprint plan and retrospective
-        sprint_summary = "\n".join(
-            f"- [{t.get('priority', '?')}] {t.get('title', '?')}: {t.get('rationale', '')}"
-            for t in plan
-        )
-        _update_strategy(repo_path, github_slug, sprint_summary, retrospective)
+            # Phase 3: Wait for human approval
+            approved = _poll_approval(cfg, msg_id)
 
-        summary = (
-            f"✅ Sprint plan approved for {github_slug}\n"
-            f"Issues created: {len(created_urls)} | Skipped (duplicate): {len(skipped)}\n"
-            f"Status: Ready → dispatch will begin within 1 minute"
-        )
-        for url in created_urls:
-            summary += f"\n  {url}"
-        print(summary)
-        _send_telegram(cfg, summary)
+            if not approved:
+                skip_msg = f"⏭️ Sprint plan for {github_slug} was not approved. Skipping this cycle."
+                print(skip_msg)
+                _send_telegram(cfg, skip_msg)
+                continue
+
+            # Phase 4: Create issues (only on approval)
+            print(f"\n  Creating issues for approved plan ({github_slug})...")
+            created_urls, skipped = create_plan_issues(cfg, github_slug, plan)
+
+            # Phase 5: Update STRATEGY.md with sprint plan and retrospective
+            sprint_summary = "\n".join(
+                f"- [{t.get('priority', '?')}] {t.get('title', '?')}: {t.get('rationale', '')}"
+                for t in plan
+            )
+            _update_strategy(repo_path, github_slug, sprint_summary, retrospective)
+
+            summary = (
+                f"✅ Sprint plan approved for {github_slug}\n"
+                f"Issues created: {len(created_urls)} | Skipped (duplicate): {len(skipped)}\n"
+                f"Status: Ready → dispatch will begin within 1 minute"
+            )
+            for url in created_urls:
+                summary += f"\n  {url}"
+            print(summary)
+            _send_telegram(cfg, summary)
 
 
 if __name__ == "__main__":

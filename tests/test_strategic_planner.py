@@ -254,7 +254,7 @@ def test_repo_planner_config_top_level():
     cfg = {"plan_size": 8, "sprint_cadence_days": 14}
     plan_size, cadence = _repo_planner_config(cfg, "owner/repo")
     assert plan_size == 8
-    assert cadence == 14
+    assert cadence == 14.0
 
 
 def test_repo_planner_config_per_repo_override():
@@ -278,14 +278,32 @@ def test_repo_planner_config_per_repo_override():
     # repo-a gets overrides
     plan_size, cadence = _repo_planner_config(cfg, "owner/repo-a")
     assert plan_size == 10
-    assert cadence == 14
+    assert cadence == 14.0
 
     # repo-b falls back to top-level
     plan_size, cadence = _repo_planner_config(cfg, "owner/repo-b")
     assert plan_size == 5
-    assert cadence == 7
+    assert cadence == 7.0
 
     # unknown repo falls back to top-level
     plan_size, cadence = _repo_planner_config(cfg, "owner/other")
     assert plan_size == 5
-    assert cadence == 7
+    assert cadence == 7.0
+
+
+def test_repo_planner_config_supports_fractional_and_dormant_cadence():
+    cfg = {
+        "sprint_cadence_days": 1,
+        "github_projects": {
+            "proj1": {
+                "repos": [
+                    {"github_repo": "owner/repo-a", "sprint_cadence_days": 0.5},
+                    {"github_repo": "owner/repo-b", "sprint_cadence_days": 0},
+                ]
+            }
+        },
+    }
+    _, cadence_a = _repo_planner_config(cfg, "owner/repo-a")
+    _, cadence_b = _repo_planner_config(cfg, "owner/repo-b")
+    assert cadence_a == 0.5
+    assert cadence_b == 0.0

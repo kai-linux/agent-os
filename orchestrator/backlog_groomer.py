@@ -1,4 +1,4 @@
-"""Weekly backlog groomer.
+"""Backlog groomer.
 
 Reviews each repository's open issues, recent task completions, CODEBASE.md
 Known Issues section, and risk flags from completed tasks to identify gaps
@@ -6,7 +6,8 @@ and technical debt.  Creates 3-5 targeted, scoped improvement tasks per repo
 with priorities assigned. Issues land in Backlog for the strategic planner
 to review and promote to Ready.
 
-Runs weekly on Saturday at 20:00 (one day before the strategic planner).
+Cron can invoke this frequently; per-repo cadence and dormancy are enforced in
+code.
 """
 from __future__ import annotations
 
@@ -21,6 +22,7 @@ from pathlib import Path
 from orchestrator.paths import load_config, runtime_paths
 from orchestrator.agent_scorer import load_recent_metrics
 from orchestrator.gh_project import ensure_labels
+from orchestrator.scheduler_state import is_due, record_run, job_lock
 from orchestrator.trust import is_trusted
 
 WINDOW_DAYS = 30
@@ -28,6 +30,21 @@ STALE_DAYS = 30
 MAX_ISSUES_PER_REPO = 5
 ANALYSIS_MODEL = "haiku"
 SIMILARITY_THRESHOLD = 0.75  # Title similarity threshold for dedup
+
+
+def _repo_groomer_cadence_days(cfg: dict, github_slug: str) -> float:
+    """Return cadence in days for backlog grooming, checking per-repo overrides."""
+    cadence = cfg.get("groomer_cadence_days", cfg.get("sprint_cadence_days", 7))
+
+    for pv in cfg.get("github_projects", {}).values():
+        if not isinstance(pv, dict):
+            continue
+        for rc in pv.get("repos", []):
+            if rc.get("github_repo") == github_slug:
+                cadence = rc.get("groomer_cadence_days", rc.get("sprint_cadence_days", cadence))
+                return float(cadence)
+
+    return float(cadence)
 
 
 # ---------------------------------------------------------------------------
@@ -482,31 +499,49 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
 
 def run():
     cfg = load_config()
-    repos = _resolve_repos(cfg)
+    with job_lock(cfg, "backlog_groomer") as acquired:
+        if not acquired:
+            print("Backlog groomer already running; skipping overlapping cron invocation.")
+            return
 
-    if not repos:
-        print("No repos configured; nothing to groom.")
-        return
+        repos = _resolve_repos(cfg)
 
-    print(f"Backlog groomer starting for {len(repos)} repo(s).")
+        if not repos:
+            print("No repos configured; nothing to groom.")
+            return
 
-    all_created = 0
-    all_skipped = 0
-    summaries = []
+        print(f"Backlog groomer starting for {len(repos)} repo(s).")
 
-    for github_slug, repo_path in repos:
-        result = groom_repo(cfg, github_slug, repo_path)
-        all_created += result.get("created", 0)
-        all_skipped += result.get("skipped", 0)
-        summaries.append(f"{github_slug}: {result.get('created', 0)} created, {result.get('skipped', 0)} skipped")
+        all_created = 0
+        all_skipped = 0
+        summaries = []
 
-    summary = (
-        f"Backlog Groomer complete\n"
-        f"Issues created: {all_created} | Skipped: {all_skipped}\n"
-        + "\n".join(summaries)
-    )
-    print(f"\n{summary}")
-    _send_telegram(cfg, summary)
+        for github_slug, repo_path in repos:
+            cadence_days = _repo_groomer_cadence_days(cfg, github_slug)
+            due, reason = is_due(
+                cfg,
+                "backlog_groomer",
+                github_slug,
+                cadence_hours=cadence_days * 24.0,
+            )
+            if not due:
+                print(f"  Skipping {github_slug}: {reason}")
+                summaries.append(f"{github_slug}: skipped ({reason})")
+                continue
+
+            record_run(cfg, "backlog_groomer", github_slug)
+            result = groom_repo(cfg, github_slug, repo_path)
+            all_created += result.get("created", 0)
+            all_skipped += result.get("skipped", 0)
+            summaries.append(f"{github_slug}: {result.get('created', 0)} created, {result.get('skipped', 0)} skipped")
+
+        summary = (
+            f"Backlog Groomer complete\n"
+            f"Issues created: {all_created} | Skipped: {all_skipped}\n"
+            + "\n".join(summaries)
+        )
+        print(f"\n{summary}")
+        _send_telegram(cfg, summary)
 
 
 if __name__ == "__main__":
