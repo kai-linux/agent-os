@@ -285,18 +285,36 @@ The system is its own first customer. This README was one of its tasks. The CI p
 
 That's the vision: not a tool you use, but a team you deploy.
 
-## Current State
+## Roadmap
 
-Level 1 (as of March 18th '26): Task executor with weekly planning — prompted, bounded, reactive.
+Agent OS is not meant to stop at task execution. Its job is to bootstrap itself from a reliable execution engine into an evidence-driven, closed-loop operator that can grow products with decreasing human supervision.
 
-Level 2 (what's needed for goal-driven growth): A planner that:
-  - Maintains a strategy document (like CODEBASE.md but for product direction) that persists across weeks
-  - Reviews last sprint's outcomes before planning the next one ("we built X, did it move the needle?")
-  - Can research before planning (read competitor sites, check if analytics exists, audit the live product)
-  - Has domain knowledge injection — the README alone isn't enough, it needs to know what good looks like for a website/book/bot
+That means the repository should be evolved intentionally toward Level 4 and beyond. New orchestration, planning, research, memory, and feedback systems should be judged by whether they move Agent OS up this ladder.
 
-Level 3 (what's needed for true innovation): An agent that can:
-  - Browse the live product and identify gaps
-  - Query external data (analytics, user feedback, market data)
-  - Form and test hypotheses ("conversion is low → maybe we need social proof → create a testimonials section")
-  - Propose things the human never thought of
+Level 1: Reliable execution engine
+- dispatch, queue, retries, CI, merge, memory
+
+Level 2: Strategic planning
+- persistent strategy
+- retrospectives
+- backlog shaping
+- sprint selection
+
+Level 3: Evidence-driven planning
+- live product inspection
+- external research
+- analytics/user feedback input
+- domain-specific evaluation
+
+Level 4: Closed-loop optimization
+- hypothesis generation
+- experiments
+- outcome measurement
+- autonomous iteration
+
+Level 5+: Self-directed growth
+- Agent OS expands its own capabilities, operating surface, and quality bar
+- it identifies missing subsystems, builds them, validates them, and folds them back into the loop
+- human input becomes governance, constraint-setting, and occasional intervention, not day-to-day direction
+
+Current position: approximately Level 2. The system already has reliable execution, persistent memory, backlog grooming, strategic planning, retrospectives, and self-healing CI remediation. The next bottleneck is evidence: richer product inspection, research, analytics, and measurable outcomes.
