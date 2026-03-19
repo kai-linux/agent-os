@@ -1035,8 +1035,6 @@ def run():
                 print(f"  Skipping {github_slug}: {reason}")
                 continue
 
-            record_run(cfg, "strategic_planner", github_slug)
-
             # Phase 1: Generate plan with retrospective
             plan, retrospective = plan_repo(cfg, github_slug, repo_path)
             if not plan:
@@ -1052,6 +1050,9 @@ def run():
                 print("  Failed to send plan to Telegram (or no credentials).")
                 print("  Skipping issue creation — approval gate is mandatory.")
                 continue
+
+            # Count this as a planning run once the approval request exists.
+            record_run(cfg, "strategic_planner", github_slug)
 
             # Phase 3: Wait for human approval
             approved = _poll_approval(cfg, msg_id)

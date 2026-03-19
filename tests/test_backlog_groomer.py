@@ -7,6 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from orchestrator.backlog_groomer import _repo_groomer_cadence_days
+from orchestrator import backlog_groomer as bg
 
 
 def test_repo_groomer_cadence_defaults_to_sprint_cadence():
@@ -33,3 +34,15 @@ def test_repo_groomer_cadence_uses_per_repo_override():
     }
     assert _repo_groomer_cadence_days(cfg, "owner/repo-a") == 0.0
     assert _repo_groomer_cadence_days(cfg, "owner/repo-b") == 1.5
+
+
+def test_groom_repo_no_data_status(tmp_path):
+    cfg = {"root_dir": str(tmp_path), "worktrees_dir": str(tmp_path / "worktrees")}
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    result = bg.groom_repo(cfg, "owner/repo", repo)
+
+    assert result["status"] == "no-data"
+    assert result["created"] == 0
+    assert result["skipped"] == 0

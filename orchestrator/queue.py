@@ -69,19 +69,38 @@ def _tail_text(text: str, max_lines: int = 12, max_chars: int = 1200) -> str:
     return tail
 
 
-def _format_runner_failure(exc: Exception) -> tuple[str, list[str]]:
+def _classify_runner_failure(text: str) -> str | None:
+    lowered = (text or "").lower()
+    if not lowered:
+        return None
+    if any(token in lowered for token in ["rate limit", "rate-limit", "too many requests", "429", "usage limit", "quota"]):
+        return "usage limit / rate limit"
+    if any(token in lowered for token in ["authentication", "unauthorized", "forbidden", "invalid api key", "not authenticated", "login required"]):
+        return "authentication failure"
+    if any(token in lowered for token in ["command not found", "no such file or directory", "unknown option", "unrecognized option"]):
+        return "runner/cli configuration failure"
+    return None
+
+
+def _format_runner_failure(exc: Exception) -> tuple[str, list[str], str | None]:
     if isinstance(exc, CommandExecutionError):
+        stdout_tail = _tail_text(exc.stdout)
+        stderr_tail = _tail_text(exc.stderr)
+        classification = _classify_runner_failure("\n".join([stdout_tail, stderr_tail]))
         summary = (
             f"Runner exited with code {exc.returncode} while executing "
             f"`{' '.join(exc.cmd)}`."
         )
+        if classification:
+            summary += f" Classified as: {classification}."
         blockers = [summary]
-        if exc.stdout.strip():
-            blockers.append(f"- stdout tail: {_tail_text(exc.stdout)}")
-        if exc.stderr.strip():
-            blockers.append(f"- stderr tail: {_tail_text(exc.stderr)}")
-        return summary, blockers
-    return str(exc), [f"- Runner/model failure: {exc}"]
+        if stdout_tail:
+            blockers.append(f"- stdout tail: {stdout_tail}")
+        if stderr_tail:
+            blockers.append(f"- stderr tail: {stderr_tail}")
+        detail = stderr_tail or stdout_tail or ""
+        return summary, blockers, detail
+    return str(exc), [f"- Runner/model failure: {exc}"], str(exc)
 
 
 def run(cmd, *, cwd=None, logfile: Path | None = None, check=True, timeout=None, queue_summary_log: Path | None = None):
@@ -1336,7 +1355,7 @@ def main():
                 continue
 
             except Exception as e:
-                failure_summary, failure_blockers = _format_runner_failure(e)
+                failure_summary, failure_blockers, failure_detail = _format_runner_failure(e)
                 runner_result = {
                     "agent": current_agent,
                     "status": "blocked",
@@ -1359,9 +1378,10 @@ def main():
 
                 next_agent = get_next_agent(meta, cfg, model_attempts)
                 if next_agent is not None:
+                    detail_line = f"\nDetail: {_tail_text(failure_detail, max_lines=4, max_chars=300)}" if failure_detail else ""
                     send_telegram(
                         cfg,
-                        f"🔁 Fallback\nTask: {task_id}\nRepo: {repo.name}\nBranch: {branch}\nPrevious model: {current_agent}\nNext model: {next_agent}\nReason: {failure_summary}",
+                        f"🔁 Fallback\nTask: {task_id}\nRepo: {repo.name}\nBranch: {branch}\nPrevious model: {current_agent}\nNext model: {next_agent}\nReason: {failure_summary}{detail_line}",
                         logfile,
                         QUEUE_SUMMARY_LOG,
                     )

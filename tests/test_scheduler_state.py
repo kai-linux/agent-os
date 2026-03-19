@@ -60,3 +60,9 @@ def test_is_due_dormant_when_cadence_zero(tmp_path):
     due, reason = ss.is_due(_cfg(tmp_path), "planner", "owner/repo", cadence_hours=0)
     assert due is False
     assert reason == "dormant"
+
+
+def test_scheduler_state_uses_configured_root_dir(tmp_path):
+    cfg = _cfg(tmp_path)
+    ss.record_run(cfg, "planner", "owner/repo")
+    assert (tmp_path / "runtime" / "state" / "scheduler_state.json").exists()

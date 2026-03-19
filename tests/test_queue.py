@@ -9,6 +9,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from orchestrator.queue import (
+    CommandExecutionError,
+    _format_runner_failure,
     build_escalation_message,
     get_agent_chain,
     handle_telegram_callback,
@@ -220,6 +222,19 @@ def test_telegram_action_expired():
         "expires_at": (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
     }
     assert telegram_action_expired(action) is True
+
+
+def test_format_runner_failure_classifies_usage_limit():
+    exc = CommandExecutionError(
+        ["/bin/agent_runner.sh", "claude"],
+        1,
+        "",
+        "Claude error: usage limit reached for this billing period (429)",
+    )
+    summary, blockers, detail = _format_runner_failure(exc)
+    assert "usage limit / rate limit" in summary
+    assert "usage limit reached" in detail
+    assert any("stderr tail" in item for item in blockers)
 
 
 def test_handle_telegram_callback_requeue(monkeypatch):
