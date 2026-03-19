@@ -154,26 +154,29 @@ def _issue_counts(repo: str) -> dict[str, int]:
 
 
 def _open_issues_summary(repo: str, cfg: dict) -> str:
-    """Return formatted list of open issues from trusted authors for dedup context."""
+    """Return formatted list of genuinely active issues from trusted authors."""
     raw = _gh(["issue", "list", "--repo", repo, "--state", "open",
                "--json", "number,title,labels,author", "--limit", "50"])
     if not raw:
-        return "(no open issues)"
+        return "(no issues already in progress)"
     try:
         issues = json.loads(raw)
     except json.JSONDecodeError:
         return "(failed to parse)"
     if not issues:
-        return "(no open issues)"
+        return "(no issues already in progress)"
     lines = []
     for i in issues[:50]:
         author = (i.get("author") or {}).get("login", "")
         if not is_trusted(author, cfg):
             continue
+        label_names = {l.get("name", "").lower() for l in i.get("labels", [])}
+        if not (label_names & {"in-progress", "agent-dispatched", "ready"}):
+            continue
         labels = ", ".join(l.get("name", "") for l in i.get("labels", []))
         lbl = f" [{labels}]" if labels else ""
         lines.append(f"- #{i.get('number')}: {i.get('title')}{lbl}")
-    return "\n".join(lines) if lines else "(no open issues)"
+    return "\n".join(lines) if lines else "(no issues already in progress)"
 
 
 def _backlog_issues(repo: str, cfg: dict) -> list[dict]:
