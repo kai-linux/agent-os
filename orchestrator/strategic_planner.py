@@ -22,6 +22,7 @@ import os
 import re
 import subprocess
 import time
+from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -40,6 +41,7 @@ METRICS_WINDOW_DAYS = 30
 MIN_SPRINTS_FOR_FOCUS = 3
 FOCUS_AREA_MARKER = "<!-- auto-focus-areas -->"
 SIMILARITY_THRESHOLD = 0.75
+CROSS_REPO_SUMMARY_MAX_CHARS = 1500  # per-repo summary cap for cross-repo context
 POLL_INTERVAL_SECONDS = 300   # 5 minutes
 APPROVAL_TIMEOUT_HOURS = 24
 APPROVAL_KEYWORDS = {"yes", "approve", "approved", "ok", "go", "lgtm"}
@@ -187,6 +189,214 @@ def _read_strategy(repo_path: Path) -> str:
     if not strategy_md.exists():
         return ""
     return strategy_md.read_text(encoding="utf-8", errors="replace").strip()
+
+
+def _load_strategy_map(all_repos: list[tuple[str, Path]]) -> dict[str, str]:
+    """Read STRATEGY.md for all configured repos once."""
+    return {slug: _read_strategy(path) for slug, path in all_repos}
+
+
+def _summarize_strategy(content: str) -> str:
+    """Extract a compact summary from a STRATEGY.md for cross-repo context.
+
+    Pulls Product Vision, Current Focus Areas, and the most recent sprint entry
+    to keep prompt size bounded.
+    """
+    if not content:
+        return "(no strategy yet)"
+    parts = []
+
+    # Product Vision
+    match = re.search(
+        r"## Product Vision\s*\n(.*?)(?=\n## |\Z)",
+        content, re.DOTALL,
+    )
+    if match:
+        vision = match.group(1).strip()[:500]
+        if vision:
+            parts.append(f"Vision: {vision}")
+
+    # Current Focus Areas
+    match = re.search(
+        r"## Current Focus Areas\s*\n(.*?)(?=\n## |\Z)",
+        content, re.DOTALL,
+    )
+    if match:
+        areas = match.group(1).replace(FOCUS_AREA_MARKER, "").strip()[:500]
+        if areas and areas != "(Updated each sprint with the key themes being pursued.)":
+            parts.append(f"Focus areas:\n{areas}")
+
+    # Most recent sprint entry
+    entries = _extract_sprint_entries(content)
+    if entries:
+        latest = entries[0][:500]
+        parts.append(f"Latest sprint:\n{latest}")
+
+    summary = "\n\n".join(parts) if parts else "(no strategy yet)"
+    return summary[:CROSS_REPO_SUMMARY_MAX_CHARS]
+
+
+def _strategy_dependencies(
+    all_repo_slugs: list[str],
+    strategy_map: dict[str, str],
+) -> dict[str, set[str]]:
+    """Infer explicit cross-repo dependencies from strategy content.
+
+    Only phrases near dependency keywords or dependency-focused headings count,
+    which keeps matches conservative and reduces false positives.
+    """
+    dependencies: dict[str, set[str]] = {slug: set() for slug in all_repo_slugs}
+    aliases = {
+        slug: {slug.lower(), slug.rsplit("/", 1)[-1].lower()}
+        for slug in all_repo_slugs
+    }
+    heading_re = re.compile(
+        r"##\s+(?:Cross-Repo\s+)?Dependencies\s*\n(.*?)(?=\n## |\Z)",
+        re.DOTALL | re.IGNORECASE,
+    )
+    dependency_phrase_re = re.compile(
+        r"(depends on|blocked by|requires|after|prerequisite)",
+        re.IGNORECASE,
+    )
+
+    for slug in all_repo_slugs:
+        content = strategy_map.get(slug, "")
+        if not content:
+            continue
+
+        candidate_lines: list[str] = []
+        heading_match = heading_re.search(content)
+        if heading_match:
+            candidate_lines.extend(heading_match.group(1).splitlines())
+
+        for line in content.splitlines():
+            if dependency_phrase_re.search(line):
+                candidate_lines.append(line)
+
+        if not candidate_lines:
+            continue
+
+        current_aliases = aliases[slug]
+        for other_slug in all_repo_slugs:
+            if other_slug == slug:
+                continue
+            other_aliases = aliases[other_slug]
+            for raw_line in candidate_lines:
+                line = raw_line.lower()
+                if not any(alias in line for alias in other_aliases):
+                    continue
+
+                if line.lstrip("-* ").startswith((
+                    "depends on", "blocked by", "requires", "after", "prerequisite",
+                )):
+                    dependencies[slug].add(other_slug)
+                    break
+
+                matched = False
+                for current_alias in current_aliases:
+                    for other_alias in other_aliases:
+                        if re.search(
+                            rf"{re.escape(current_alias)}.*?(depends on|blocked by|requires|after|prerequisite).*?{re.escape(other_alias)}",
+                            line,
+                            re.IGNORECASE,
+                        ):
+                            dependencies[slug].add(other_slug)
+                            matched = True
+                            break
+                    if matched:
+                        break
+                if matched:
+                    break
+
+    return dependencies
+
+
+def _order_repos_by_dependencies(
+    all_repos: list[tuple[str, Path]],
+    dependencies: dict[str, set[str]],
+) -> list[tuple[str, Path]]:
+    """Plan prerequisite repos first when dependencies are known."""
+    repo_map = dict(all_repos)
+    indegree = {slug: 0 for slug, _ in all_repos}
+    dependents: dict[str, set[str]] = defaultdict(set)
+
+    for slug, deps in dependencies.items():
+        for dep in deps:
+            if dep not in indegree or dep == slug:
+                continue
+            indegree[slug] += 1
+            dependents[dep].add(slug)
+
+    ready = deque(sorted(slug for slug, degree in indegree.items() if degree == 0))
+    ordered_slugs: list[str] = []
+
+    while ready:
+        slug = ready.popleft()
+        ordered_slugs.append(slug)
+        for dependent in sorted(dependents.get(slug, set())):
+            indegree[dependent] -= 1
+            if indegree[dependent] == 0:
+                ready.append(dependent)
+
+    for slug, _ in all_repos:
+        if slug not in ordered_slugs:
+            ordered_slugs.append(slug)
+
+    return [(slug, repo_map[slug]) for slug in ordered_slugs]
+
+
+def _gather_cross_repo_context(
+    all_repos: list[tuple[str, Path]],
+    current_slug: str,
+    strategy_map: dict[str, str] | None = None,
+    dependencies: dict[str, set[str]] | None = None,
+) -> str:
+    """Build cross-repo context by reading STRATEGY.md from all other repos.
+
+    Returns a formatted string with summarized strategies from sibling repos,
+    suitable for injection into the planning prompt.
+    """
+    strategy_map = strategy_map or _load_strategy_map(all_repos)
+    dependencies = dependencies or _strategy_dependencies(
+        [slug for slug, _ in all_repos],
+        strategy_map,
+    )
+    prerequisite_repos = sorted(dependencies.get(current_slug, set()))
+    dependent_repos = sorted(
+        slug for slug, deps in dependencies.items()
+        if current_slug in deps and slug != current_slug
+    )
+
+    sections = []
+    relation_lines = []
+    if prerequisite_repos:
+        relation_lines.append(
+            "Prerequisites for this repo: " + ", ".join(prerequisite_repos)
+        )
+    if dependent_repos:
+        relation_lines.append(
+            "Repos waiting on this repo: " + ", ".join(dependent_repos)
+        )
+    if relation_lines:
+        sections.append("\n".join(relation_lines))
+
+    for slug, path in all_repos:
+        if slug == current_slug:
+            continue
+        strategy = strategy_map.get(slug)
+        if strategy is None:
+            strategy = _read_strategy(path)
+        summary = _summarize_strategy(strategy)
+        relation = []
+        if slug in prerequisite_repos:
+            relation.append("prerequisite for current repo")
+        if slug in dependent_repos:
+            relation.append("depends on current repo")
+        relation_text = f" ({'; '.join(relation)})" if relation else ""
+        sections.append(f"### {slug}{relation_text}\n{summary}")
+    if not sections:
+        return ""
+    return "\n\n".join(sections)
 
 
 def _read_codebase_md(repo_path: Path) -> str:
@@ -537,6 +747,9 @@ Open issues: {open_count} | Recently closed: {closed_count} | Blocked: {blocked_
 --- Currently open issues already in progress (do NOT select these) ---
 {open_issues}
 
+--- Sibling repositories (cross-repo context) ---
+{cross_repo_context}
+
 Rules:
 - Each task must be atomic and executable by an AI agent in a single session
 - Tasks must NOT be vague epics — they should have clear, testable success criteria
@@ -544,6 +757,7 @@ Rules:
 - Build on last sprint's outcomes — continue momentum, fix regressions, advance strategy
 - Include a mix of: feature work that advances the product vision, bug fixes, self-improvement, and infrastructure
 - At least 1-2 tasks should push toward the long-term vision, not just maintain the status quo
+- If sibling repos are listed above, consider cross-repo dependencies: sequence work so prerequisite changes (e.g. API changes in repo A that repo B depends on) are completed first. If a task depends on work in another repo, note the dependency in the goal (e.g. "Depends on owner/repo-a completing X")
 - For NEW issues: body must use ## Goal, ## Success Criteria, ## Constraints sections
 
 Return ONLY a JSON array (no markdown fences, no commentary) of exactly {plan_size} objects.
@@ -814,7 +1028,12 @@ def _repo_planner_config(cfg: dict, github_slug: str) -> tuple[int, float]:
 # Main
 # ---------------------------------------------------------------------------
 
-def plan_repo(cfg: dict, github_slug: str, repo_path: Path) -> tuple[list[dict] | None, str]:
+def plan_repo(
+    cfg: dict,
+    github_slug: str,
+    repo_path: Path,
+    cross_repo_context: str = "",
+) -> tuple[list[dict] | None, str]:
     """Generate a sprint plan for one repo. Returns (plan, retrospective) or (None, "")."""
     plan_size, sprint_cadence_days = _repo_planner_config(cfg, github_slug)
     print(f"\n--- Planning {github_slug} (plan_size={plan_size}, cadence={sprint_cadence_days}d) ---")
@@ -858,7 +1077,11 @@ def plan_repo(cfg: dict, github_slug: str, repo_path: Path) -> tuple[list[dict] 
     # 9. Open issues already in progress (for exclusion — trusted authors only)
     open_issues = _open_issues_summary(github_slug, cfg)
 
-    # 10. Build prompt with all context
+    # 10. Cross-repo context
+    if cross_repo_context:
+        print(f"  Cross-repo context: {len(cross_repo_context)} chars from sibling repos")
+
+    # 11. Build prompt with all context
     prompt = PLAN_PROMPT.format(
         plan_size=plan_size,
         strategy_context=strategy_context,
@@ -872,9 +1095,10 @@ def plan_repo(cfg: dict, github_slug: str, repo_path: Path) -> tuple[list[dict] 
         metrics_summary=metrics_summary,
         backlog_issues=backlog_text,
         open_issues=open_issues,
+        cross_repo_context=cross_repo_context or "(single-repo mode — no sibling repos configured)",
     )
 
-    # 10. Call Sonnet
+    # 12. Call Sonnet
     try:
         raw = _call_sonnet(prompt)
     except Exception as e:
@@ -1023,6 +1247,17 @@ def run():
 
         print(f"Strategic planner starting for {len(repos)} repo(s).")
 
+        # Pre-read all strategies for cross-repo context
+        strategy_map = _load_strategy_map(repos)
+        dependencies = _strategy_dependencies(
+            [github_slug for github_slug, _ in repos],
+            strategy_map,
+        )
+        if len(repos) > 1:
+            print(f"Multi-repo mode: reading strategies from {len(repos)} repos for cross-repo awareness.")
+            repos = _order_repos_by_dependencies(repos, dependencies)
+            print("Planning order: " + " -> ".join(github_slug for github_slug, _ in repos))
+
         for github_slug, repo_path in repos:
             _, sprint_cadence_days = _repo_planner_config(cfg, github_slug)
             due, reason = is_due(
@@ -1035,8 +1270,15 @@ def run():
                 print(f"  Skipping {github_slug}: {reason}")
                 continue
 
+            # Build cross-repo context from sibling repos
+            cross_repo_ctx = _gather_cross_repo_context(
+                repos,
+                github_slug,
+                strategy_map=strategy_map,
+                dependencies=dependencies,
+            )
             # Phase 1: Generate plan with retrospective
-            plan, retrospective = plan_repo(cfg, github_slug, repo_path)
+            plan, retrospective = plan_repo(cfg, github_slug, repo_path, cross_repo_ctx)
             if not plan:
                 print(f"  No plan generated for {github_slug}; skipping.")
                 continue
