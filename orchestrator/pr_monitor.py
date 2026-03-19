@@ -16,6 +16,7 @@ from orchestrator.gh_project import (
     gh,
     gh_json,
 )
+from orchestrator.privacy import redact_text
 
 MAX_MERGE_ATTEMPTS = 3
 STATE_FILE_NAME = "pr_monitor_state.json"
@@ -274,7 +275,6 @@ def _handle_ci_failure(cfg: dict, repo: str, pr: dict, checks: list[dict], attem
     check_lines = "\n".join(
         f"- **{c['name']}**: `{c.get('conclusion', 'unknown')}`" for c in failed_checks
     ) or "- (no details available)"
-
     comment = f"""## Auto-merge blocked: CI failure
 
 **PR:** {pr_url}
@@ -282,7 +282,7 @@ def _handle_ci_failure(cfg: dict, repo: str, pr: dict, checks: list[dict], attem
 {"**Status:** Escalated — max attempts reached, manual intervention required." if escalated else ""}
 
 ### Failed checks
-{check_lines}
+{redact_text(check_lines)}
 
 ### Next step
 {"This PR has exceeded the maximum auto-merge attempts. Please review and merge manually." if escalated else "The orchestrator will retry once CI passes."}
@@ -328,6 +328,33 @@ def _handle_ci_failure(cfg: dict, repo: str, pr: dict, checks: list[dict], attem
                 except Exception as e:
                     print(f"Warning: failed to update project status: {e}")
                 break
+
+    token = str(cfg.get("telegram_bot_token", "")).strip()
+    chat_id = str(cfg.get("telegram_chat_id", "")).strip()
+    if token and chat_id:
+        details = (
+            f"⚠️ CI failure\nRepo: {repo}\nPR: {pr_number}\nAttempt: {attempt}/{MAX_MERGE_ATTEMPTS}\n"
+            f"Escalated: {'yes' if escalated else 'no'}\nFailed checks:\n{check_lines}"
+        )
+        try:
+            subprocess.run(
+                [
+                    "curl",
+                    "-sS",
+                    "-X",
+                    "POST",
+                    f"https://api.telegram.org/bot{token}/sendMessage",
+                    "-d",
+                    f"chat_id={chat_id}",
+                    "--data-urlencode",
+                    f"text={details}",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+        except Exception as e:
+            print(f"Warning: failed to send CI failure telegram for PR #{pr_number}: {e}")
 
 
 def _try_merge(repo: str, pr_number: int) -> bool:

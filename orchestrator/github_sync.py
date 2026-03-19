@@ -9,6 +9,7 @@ from orchestrator.gh_project import (
     create_pr_for_branch,
     gh,
 )
+from orchestrator.privacy import redact_text
 
 
 def sync_result(meta: dict, result: dict, commit_hash: str | None):
@@ -30,10 +31,11 @@ def sync_result(meta: dict, result: dict, commit_hash: str | None):
     owner = cfg["github_owner"]
 
     status = result.get("status", "blocked")
-    summary = result.get("summary", "No summary.")
-    next_step = result.get("next_step", "None")
+    summary = redact_text(result.get("summary", "No summary."))
+    next_step = redact_text(result.get("next_step", "None"))
     manual_steps = result.get("manual_steps", "").strip()
     has_manual = bool(manual_steps and manual_steps.lower() not in ("- none", "none", ""))
+    public_manual_steps = redact_text(manual_steps)
 
     comment = f"""## Orchestrator update
 
@@ -48,8 +50,6 @@ def sync_result(meta: dict, result: dict, commit_hash: str | None):
 ### Next step
 {next_step}
 """
-    if has_manual:
-        comment += f"\n### 🔧 Manual steps required\n```\n{manual_steps}\n```\n"
 
     pr_url = None
     if status == "complete":
@@ -61,6 +61,9 @@ def sync_result(meta: dict, result: dict, commit_hash: str | None):
         )
         if pr_url:
             comment += f"\n### PR\n{pr_url}\n"
+
+    if has_manual:
+        comment += f"\n### 🔧 Manual steps required\n```\n{public_manual_steps}\n```\n"
 
     add_issue_comment(repo, issue_number, comment)
 
