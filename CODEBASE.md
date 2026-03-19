@@ -16,6 +16,16 @@
 
 ## Recent Changes
 
+### 2026-03-19 — [task-20260319-073206-task-structured-telegram-escalation-with-reply-but] (#7 kai-linux/agent-os)
+Implemented Telegram escalation notifications with inline reply buttons, persisted 48-hour callback actions, and a long-poll callback handler that can re-queue escalated work or close the original issue as won't-fix from Telegram.
+
+**Files:** `- orchestrator/queue.py`, `- orchestrator/supervisor.py`, `- orchestrator/paths.py`, `- tests/test_queue.py`
+
+**Decisions:**
+  - - Used Telegram long-polling inside the existing supervisor loop instead of adding a webhook service, which keeps the single-user bot setup minimal.
+  - - Stored callback action state under `runtime/telegram_actions` with an update offset file so button presses stay durable across process restarts and expire after 48 hours.
+
+
 ### 2026-03-19 — [task-20260319-073106-task-task-dependency-resolver] (#6 kai-linux/agent-os)
 Implemented dependency-aware dispatching in the GitHub dispatcher so issues declaring `Depends on #N` or `Blocked by #N` stay blocked until their dependency chain is resolved, then automatically return to `Ready` on later dispatcher runs.
 
