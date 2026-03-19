@@ -29,6 +29,9 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # Score per-agent success rates, flag underperformers (Monday 07:00)
 0 7 * * 1 /path/to/agent-os/bin/run_agent_scorer.sh >> /path/to/agent-os/runtime/logs/agent_scorer.log 2>&1
 
+# Daily digest to Telegram (every day at 08:00)
+0 8 * * * /path/to/agent-os/bin/run_daily_digest.sh >> /path/to/agent-os/runtime/logs/daily_digest.log 2>&1
+
 # Groom backlog: prune stale issues, generate improvement tasks (Saturday 20:00)
 0 20 * * 6 /path/to/agent-os/bin/run_backlog_groomer.sh >> /path/to/agent-os/runtime/logs/backlog_groomer.log 2>&1
 
@@ -45,5 +48,6 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 | `*/5 * * * *` | `run_pr_monitor.sh` | CI gate + auto-merge + auto-rebase for agent PRs |
 | `0 7 * * 1` | `run_log_analyzer.sh` | Reads failure logs, files fix tickets via Claude Haiku |
 | `0 7 * * 1` | `run_agent_scorer.sh` | Computes agent success rates, flags degradation |
+| `0 8 * * *` | `run_daily_digest.sh` | Summarizes the last 24h of completions, blockers, escalations, agent success, and PR activity to Telegram |
 | `0 20 * * 6` | `run_backlog_groomer.sh` | Surfaces stale issues, generates improvement tasks (→ Backlog) |
 | `0 20 * * 0` | `run_strategic_planner.sh` | Sprint planning, Telegram approval, auto-dispatch (→ Ready) |
