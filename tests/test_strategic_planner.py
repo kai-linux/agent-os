@@ -290,7 +290,28 @@ def test_format_plan_message_includes_real_cadence_and_buttons_copy():
     )
     assert "📋 Sprint Plan — owner/repo" in text
     assert "Cadence: every 14m" in text
-    assert "Tap Approve to create issues." in text
+    assert "Tap Approve to apply this plan: create issues and move them to Ready." in text
+
+
+def test_format_plan_message_for_promote_only_plan():
+    text = _format_plan_message(
+        [{"priority": "prio:high", "action": "promote", "issue_number": 12, "task_type": "implementation", "title": "Do thing", "rationale": "Because."}],
+        "owner/repo",
+        1,
+    )
+    assert "Tap Approve to apply this plan: move selected backlog issues to Ready." in text
+
+
+def test_format_plan_message_for_mixed_plan():
+    text = _format_plan_message(
+        [
+            {"priority": "prio:high", "action": "promote", "issue_number": 12, "task_type": "implementation", "title": "Promote thing", "rationale": "Because."},
+            {"priority": "prio:normal", "action": "create", "task_type": "docs", "title": "Create thing", "rationale": "Because too."},
+        ],
+        "owner/repo",
+        1,
+    )
+    assert "Tap Approve to apply this plan: create new issues and move selected backlog issues to Ready." in text
 
 
 # ---------------------------------------------------------------------------
