@@ -62,6 +62,23 @@ def _format_cadence(days: float) -> str:
     return f"every {days:g}d"
 
 
+def _approval_timeout_hours(cadence_days: float) -> float:
+    """Return an approval window shorter than the next expected planning cycle."""
+    cadence_hours = max(0.0, cadence_days * 24.0)
+    if cadence_hours <= 0:
+        return APPROVAL_TIMEOUT_HOURS
+    return min(APPROVAL_TIMEOUT_HOURS, max(10 / 60, cadence_hours * 0.8))
+
+
+def _format_duration_hours(hours: float) -> str:
+    if hours < 1:
+        minutes = max(1, round(hours * 60))
+        return f"{minutes}m"
+    if float(hours).is_integer():
+        return f"{int(hours)}h"
+    return f"{hours:g}h"
+
+
 # ---------------------------------------------------------------------------
 # Data gathering helpers
 # ---------------------------------------------------------------------------
@@ -877,6 +894,7 @@ def _format_plan_message(plan: list[dict], repo: str, cadence_days: float) -> st
     """Format the sprint plan for Telegram display."""
     create_count = sum(1 for task in plan if (task.get("action") or "create").lower() == "create")
     promote_count = sum(1 for task in plan if (task.get("action") or "create").lower() == "promote")
+    approval_timeout_hours = _approval_timeout_hours(cadence_days)
 
     lines = [
         f"📋 Sprint Plan — {repo}",
@@ -901,23 +919,25 @@ def _format_plan_message(plan: list[dict], repo: str, cadence_days: float) -> st
         lines.append("Tap Approve to apply this plan: move selected backlog issues to Ready.")
 
     lines.append("Tap Skip to leave the plan unapplied.")
-    lines.append(f"Auto-skip in {APPROVAL_TIMEOUT_HOURS}h if no action.")
+    lines.append(f"Auto-skip in {_format_duration_hours(approval_timeout_hours)} if no action.")
     return "\n".join(lines)
 
 
-def _create_plan_approval_action(cfg: dict, repo: str) -> dict:
+def _create_plan_approval_action(cfg: dict, repo: str, cadence_days: float) -> dict:
     now = datetime.now(timezone.utc)
     action_id = uuid4().hex[:12]
+    timeout_hours = _approval_timeout_hours(cadence_days)
     return {
         "action_id": action_id,
         "type": "plan_approval",
         "status": "pending",
         "created_at": now.isoformat(),
-        "expires_at": (now + timedelta(hours=APPROVAL_TIMEOUT_HOURS)).isoformat(),
+        "expires_at": (now + timedelta(hours=timeout_hours)).isoformat(),
         "chat_id": str(cfg.get("telegram_chat_id", "")).strip(),
         "message_id": None,
         "repo": repo,
         "approval": "pending",
+        "timeout_hours": timeout_hours,
     }
 
 
@@ -1320,7 +1340,7 @@ def run():
             plan_text = _format_plan_message(plan, github_slug, sprint_cadence_days)
             print(f"\n{plan_text}\n")
 
-            action = _create_plan_approval_action(cfg, github_slug)
+            action = _create_plan_approval_action(cfg, github_slug, sprint_cadence_days)
             save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
             msg_id = _send_telegram(cfg, plan_text, reply_markup=planner_reply_markup(action["action_id"]))
             if msg_id is None:
@@ -1334,7 +1354,7 @@ def run():
             record_run(cfg, "strategic_planner", github_slug)
 
             # Phase 3: Wait for human approval
-            approved = _poll_approval(paths, action["action_id"])
+            approved = _poll_approval(paths, action["action_id"], timeout_hours=action["timeout_hours"])
 
             if not approved:
                 skip_msg = f"⏭️ Sprint plan for {github_slug} was not approved. Skipping this cycle."

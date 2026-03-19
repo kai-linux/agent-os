@@ -14,8 +14,11 @@ from orchestrator.strategic_planner import (
     DEFAULT_SPRINT_CADENCE_DAYS,
     FOCUS_AREA_MARKER,
     _call_sonnet,
+    _approval_timeout_hours,
+    _create_plan_approval_action,
     _extract_sprint_entries,
     _format_cadence,
+    _format_duration_hours,
     _format_plan_message,
     _gather_cross_repo_context,
     _is_focus_areas_manually_edited,
@@ -282,6 +285,12 @@ def test_format_cadence_supports_fractional_days():
     assert _format_cadence(7) == "every 7d"
 
 
+def test_approval_timeout_scales_with_cadence():
+    assert _approval_timeout_hours(0.01) < 1
+    assert _format_duration_hours(_approval_timeout_hours(0.01)) == "12m"
+    assert _approval_timeout_hours(7) == 24
+
+
 def test_format_plan_message_includes_real_cadence_and_buttons_copy():
     text = _format_plan_message(
         [{"priority": "prio:high", "action": "create", "task_type": "implementation", "title": "Do thing", "rationale": "Because."}],
@@ -291,6 +300,7 @@ def test_format_plan_message_includes_real_cadence_and_buttons_copy():
     assert "📋 Sprint Plan — owner/repo" in text
     assert "Cadence: every 14m" in text
     assert "Tap Approve to apply this plan: create issues and move them to Ready." in text
+    assert "Auto-skip in 12m if no action." in text
 
 
 def test_format_plan_message_for_promote_only_plan():
@@ -312,6 +322,11 @@ def test_format_plan_message_for_mixed_plan():
         1,
     )
     assert "Tap Approve to apply this plan: create new issues and move selected backlog issues to Ready." in text
+
+
+def test_create_plan_approval_action_uses_dynamic_timeout():
+    action = _create_plan_approval_action({"telegram_chat_id": "1"}, "owner/repo", 0.01)
+    assert action["timeout_hours"] == _approval_timeout_hours(0.01)
 
 
 # ---------------------------------------------------------------------------
