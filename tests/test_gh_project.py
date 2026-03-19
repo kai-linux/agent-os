@@ -7,6 +7,7 @@ from unittest.mock import Mock
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from orchestrator import gh_project
+from orchestrator import pr_monitor as pm
 from orchestrator.pr_monitor import _checks_all_passed, _checks_any_failed, _extract_issue_number
 
 
@@ -63,6 +64,60 @@ def test_checks_any_failed_one_failure():
 
 def test_checks_any_failed_bucket_fail():
     assert _checks_any_failed([{"state": "ERROR", "bucket": "fail"}]) is True
+
+
+def test_format_failed_checks_uses_state_and_link():
+    checks = [
+        {"name": "test", "state": "FAILURE", "bucket": "fail", "link": "https://example.com/run/1"},
+        {"name": "lint", "state": "SUCCESS", "bucket": "pass"},
+    ]
+    lines = pm._format_failed_checks(checks)
+    assert "**test**" in lines
+    assert "`failure`" in lines
+    assert "https://example.com/run/1" in lines
+
+
+def test_ensure_ci_remediation_issue_creates_ready_debugging_issue(monkeypatch):
+    created = {}
+
+    def fake_find(repo, title):
+        return None
+
+    def fake_create(repo, title, body, labels):
+        created["repo"] = repo
+        created["title"] = title
+        created["body"] = body
+        created["labels"] = labels
+        return "https://github.com/owner/repo/issues/99"
+
+    ready_calls = []
+
+    monkeypatch.setattr(pm, "_find_open_issue_by_title", fake_find)
+    monkeypatch.setattr(pm, "_create_issue", fake_create)
+    monkeypatch.setattr(pm, "_set_issue_ready", lambda cfg, repo, url: ready_calls.append((repo, url)))
+
+    cfg = {
+        "github_owner": "owner",
+        "github_projects": {
+            "proj": {
+                "project_number": 1,
+                "ready_value": "Ready",
+                "repos": [{"github_repo": "owner/repo", "local_repo": "/tmp/repo"}],
+            }
+        },
+    }
+    pr = {"number": 34, "url": "https://github.com/owner/repo/pull/34", "headRefName": "agent/task-123"}
+    checks = [{"name": "test", "state": "FAILURE", "bucket": "fail"}]
+
+    url, created_new = pm._ensure_ci_remediation_issue(cfg, "owner/repo", pr, checks, 12)
+
+    assert created_new is True
+    assert url == "https://github.com/owner/repo/issues/99"
+    assert created["title"] == "Fix CI failure on PR #34"
+    assert "## Task Type\ndebugging" in created["body"]
+    assert "## Base Branch\nagent/task-123" in created["body"]
+    assert "## Branch\nagent/task-123" in created["body"]
+    assert ready_calls == [("owner/repo", "https://github.com/owner/repo/issues/99")]
 
 
 # ---------------------------------------------------------------------------

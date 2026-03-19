@@ -11,6 +11,7 @@ from orchestrator.gh_project import (
     add_issue_comment,
     create_pr_for_branch,
     edit_issue_labels,
+    ensure_labels,
     query_project,
     set_item_status,
     gh,
@@ -217,7 +218,7 @@ def _get_pr_checks(repo: str, pr_number: int) -> list[dict]:
     """Return CI check results for a PR."""
     try:
         result = subprocess.run(
-            ["gh", "pr", "checks", str(pr_number), "-R", repo, "--json", "name,state,bucket"],
+            ["gh", "pr", "checks", str(pr_number), "-R", repo, "--json", "name,state,bucket,link"],
             capture_output=True, text=True,
         )
         # gh pr checks may return non-zero when checks are failing but still output valid JSON
@@ -256,6 +257,132 @@ def _checks_any_failed(checks: list[dict]) -> bool:
     return False
 
 
+def _failed_checks(checks: list[dict]) -> list[dict]:
+    failed = []
+    for c in checks:
+        state = (c.get("state") or "").upper()
+        bucket = (c.get("bucket") or "").lower()
+        if bucket == "fail" or state in ("FAILURE", "ERROR", "TIMED_OUT", "ACTION_REQUIRED", "CANCELLED"):
+            failed.append(c)
+    return failed
+
+
+def _format_failed_checks(checks: list[dict]) -> str:
+    failed = _failed_checks(checks)
+    lines = []
+    for c in failed:
+        state = (c.get("state") or "unknown").lower()
+        link = (c.get("link") or "").strip()
+        suffix = f" ([link]({link}))" if link else ""
+        lines.append(f"- **{c.get('name', 'unknown')}**: `{state}`{suffix}")
+    return "\n".join(lines) or "- (no details available)"
+
+
+def _find_repo_project(cfg: dict, repo: str) -> tuple[str, dict, dict] | tuple[None, None, None]:
+    for project_key, project_cfg in cfg.get("github_projects", {}).items():
+        for repo_cfg in project_cfg.get("repos", []):
+            if repo_cfg.get("github_repo") == repo:
+                return project_key, project_cfg, repo_cfg
+    return None, None, None
+
+
+def _find_open_issue_by_title(repo: str, title: str) -> dict | None:
+    try:
+        issues = gh_json([
+            "issue", "list", "-R", repo, "--state", "open",
+            "--search", title, "--json", "number,title,url,labels",
+            "--limit", "20",
+        ]) or []
+    except Exception:
+        return None
+
+    for issue in issues:
+        if (issue.get("title") or "").strip() == title.strip():
+            return issue
+    return None
+
+
+def _create_issue(repo: str, title: str, body: str, labels: list[str]) -> str:
+    ensure_labels(repo, labels)
+    cmd = ["issue", "create", "-R", repo, "--title", title, "--body", body]
+    for label in labels:
+        cmd += ["--label", label]
+    return gh(cmd)
+
+
+def _set_issue_ready(cfg: dict, repo: str, issue_url: str):
+    owner = cfg.get("github_owner", "")
+    _project_key, project_cfg, _repo_cfg = _find_repo_project(cfg, repo)
+    if not owner or not project_cfg:
+        return
+
+    ready_value = project_cfg.get("ready_value", "Ready")
+    try:
+        raw = gh([
+            "project", "item-add", str(project_cfg["project_number"]),
+            "--owner", owner,
+            "--url", issue_url,
+            "--format", "json",
+        ], check=False)
+        if not raw:
+            return
+        item_data = json.loads(raw)
+        item_id = item_data.get("id")
+        if not item_id:
+            return
+
+        info = query_project(project_cfg["project_number"], owner)
+        option_id = info["status_options"].get(ready_value)
+        if info["status_field_id"] and option_id:
+            set_item_status(info["project_id"], item_id, info["status_field_id"], option_id)
+    except Exception as e:
+        print(f"Warning: failed to set remediation issue ready for {repo}: {e}")
+
+
+def _ensure_ci_remediation_issue(cfg: dict, repo: str, pr: dict, checks: list[dict], linked_issue_number: int | None) -> tuple[str | None, bool]:
+    pr_number = pr["number"]
+    branch = pr.get("headRefName", "").strip()
+    pr_url = pr["url"]
+    title = f"Fix CI failure on PR #{pr_number}"
+    existing = _find_open_issue_by_title(repo, title)
+    if existing:
+        return existing.get("url"), False
+
+    check_lines = _format_failed_checks(checks)
+    linked_issue_line = f"- Original issue: #{linked_issue_number}\n" if linked_issue_number else ""
+    body = f"""## Goal
+Repair the failing CI on PR #{pr_number} by updating its existing branch so the current pull request can merge cleanly.
+
+## Success Criteria
+- The failed checks on PR #{pr_number} are passing.
+- Any required fixes are pushed to branch `{branch}`.
+- Document the root cause and the fix in the task result.
+
+## Constraints
+- Work only inside this repository.
+- Reuse the existing PR branch `{branch}` instead of opening a new feature branch.
+- Prefer minimal diffs.
+
+## Task Type
+debugging
+
+## Base Branch
+{branch}
+
+## Branch
+{branch}
+
+## Context
+- PR: {pr_url}
+{linked_issue_line}- Failed checks:
+{check_lines}
+"""
+    labels = ["bug", "prio:high", "ready"]
+    issue_url = _create_issue(repo, title, body, labels)
+    _set_issue_ready(cfg, repo, issue_url)
+    return issue_url, True
+
+
 def _extract_issue_number(pr_body: str) -> int | None:
     m = re.search(r"#(\d+)", pr_body or "")
     return int(m.group(1)) if m else None
@@ -267,25 +394,26 @@ def _handle_ci_failure(cfg: dict, repo: str, pr: dict, checks: list[dict], attem
     pr_url = pr["url"]
     escalated = attempt >= MAX_MERGE_ATTEMPTS
 
-    failed_checks = [
-        c for c in checks
-        if (c.get("conclusion") or "").lower()
-        in ("failure", "error", "timed_out", "action_required", "cancelled")
-    ]
-    check_lines = "\n".join(
-        f"- **{c['name']}**: `{c.get('conclusion', 'unknown')}`" for c in failed_checks
-    ) or "- (no details available)"
+    check_lines = _format_failed_checks(checks)
+    remediation_url = None
+    remediation_created = False
+    try:
+        remediation_url, remediation_created = _ensure_ci_remediation_issue(cfg, repo, pr, checks, issue_number)
+    except Exception as e:
+        print(f"Warning: failed to create CI remediation issue for PR #{pr_number}: {e}")
+
     comment = f"""## Auto-merge blocked: CI failure
 
 **PR:** {pr_url}
 **Attempt:** {attempt}/{MAX_MERGE_ATTEMPTS}
 {"**Status:** Escalated — max attempts reached, manual intervention required." if escalated else ""}
+{f"**Remediation issue:** {remediation_url}" if remediation_url else ""}
 
 ### Failed checks
 {redact_text(check_lines)}
 
 ### Next step
-{"This PR has exceeded the maximum auto-merge attempts. Please review and merge manually." if escalated else "The orchestrator will retry once CI passes."}
+{"This PR has exceeded the maximum auto-merge attempts. Please review and merge manually." if escalated else "A debugging remediation task has been queued to repair this PR branch automatically."}
 """
 
     if issue_number:
@@ -334,7 +462,10 @@ def _handle_ci_failure(cfg: dict, repo: str, pr: dict, checks: list[dict], attem
     if token and chat_id:
         details = (
             f"⚠️ CI failure\nRepo: {repo}\nPR: {pr_number}\nAttempt: {attempt}/{MAX_MERGE_ATTEMPTS}\n"
-            f"Escalated: {'yes' if escalated else 'no'}\nFailed checks:\n{check_lines}"
+            f"Escalated: {'yes' if escalated else 'no'}\n"
+            f"Remediation issue: {remediation_url or 'not created'}"
+            f"{' (created)' if remediation_created else ''}\n"
+            f"Failed checks:\n{check_lines}"
         )
         try:
             subprocess.run(
