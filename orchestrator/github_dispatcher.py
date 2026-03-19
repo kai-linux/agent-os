@@ -72,10 +72,19 @@ def build_mailbox_task(cfg: dict, project_key: str, repo_cfg: dict, issue: dict)
             priority = lbl
             break
 
+    # Determine agent from issue labels (claude, codex, gemini, deepseek)
+    # Takes precedence over agent_preference in issue body
+    agent = parsed["agent_preference"] or "auto"
+    valid_agents = {"claude", "codex", "gemini", "deepseek"}
+    for lbl in label_names:
+        if lbl in valid_agents:
+            agent = lbl
+            break
+
     frontmatter = {
         "task_id": task_id,
         "repo": repo_cfg["local_repo"],
-        "agent": parsed["agent_preference"] or "auto",
+        "agent": agent,
         "task_type": parsed["task_type"] or cfg["default_task_type"],
         "branch": f"agent/{task_id}",
         "base_branch": cfg["default_base_branch"],
