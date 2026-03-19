@@ -17,8 +17,8 @@ max_parallel_workers: 1
 test_timeout_minutes: 5             # Timeout for test commands (default: 5)
 
 plan_size: 5                         # Number of tasks per sprint plan (default: 5)
-sprint_cadence_days: 7               # Planner cadence + retrospective window in days; supports fractions, 0=dormant
-groomer_cadence_days: 7              # Backlog grooming cadence in days; supports fractions, 0=dormant
+sprint_cadence_days: 7               # Planner cadence + retrospective window in days; supports fractions, 0=dormant; actual run frequency is still capped by cron frequency
+groomer_cadence_days: 7              # Backlog grooming cadence in days; supports fractions, 0=dormant; actual run frequency is still capped by cron frequency
 
 priority_weights:                   # Score added per priority label (default: prio:normal=10)
   prio:high: 30
@@ -63,7 +63,7 @@ github_projects:
         path: "/path/to/repo1"
         plan_size: 3
         sprint_cadence_days: 1      # Daily planning for this repo
-        groomer_cadence_days: 0.5   # Groom every 12 hours for this repo
+        groomer_cadence_days: 0.5   # Groom every 12 hours for this repo; requires cron to run at least every 12 hours
 
 telegram_bot_token: "YOUR_TELEGRAM_BOT_TOKEN"
 telegram_chat_id: "YOUR_CHAT_ID"

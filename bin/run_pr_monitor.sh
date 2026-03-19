@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="${ORCH_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-export ORCH_ROOT="$ROOT"
+# shellcheck source=bin/common_env.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common_env.sh"
 
 cd "$ROOT"
 

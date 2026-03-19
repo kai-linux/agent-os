@@ -86,7 +86,9 @@ Every Saturday at 20:00:
 
 3. **`backlog_groomer.py`** scans every repo for stale issues (>30 days), Known Issues in `CODEBASE.md` that don't have linked tickets, and risk flags from recent agent results. It generates 3-5 new improvement tasks. Semantic deduplication (0.75 similarity threshold) prevents duplicate issues from piling up.
 
-The planner and groomer are safe to invoke frequently from cron. Each repo has its own cadence in config (`sprint_cadence_days`, `groomer_cadence_days`), fractional days are supported, and `0` means dormant.
+The planner and groomer are safe to invoke frequently from cron. Each repo has its own cadence in config (`sprint_cadence_days`, `groomer_cadence_days`), fractional days are supported, and `0` means dormant. The configured cadence is a minimum interval, not a scheduler by itself: the job only runs when cron invokes it, so cron must run at least as often as your shortest desired cadence.
+
+The `bin/` entrypoints bootstrap common user-local CLI install paths themselves, so cron usually does not need per-provider `PATH` or `CLAUDE_BIN` overrides.
 
 These generated issues are indistinguishable from human-written ones. They enter the same queue, get dispatched to the same agents, go through the same CI → merge pipeline. The system literally engineers itself.
 
