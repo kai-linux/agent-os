@@ -25,6 +25,13 @@ Added a bounded planning-signals path to the strategic planner so repos can opt 
   - - Kept the first version bounded to one opt-in `planning_signals` artifact and three explicit input types instead of adding a general ingestion framework
   - - Reused the existing safe web/file source model and required trust/privacy notes in the normalized artifact so public repos can use external evidence without assuming private raw analytics access
 
+Added bounded planning signals to the strategic planner. Repos can now opt into explicit analytics, user feedback, and market inputs that normalize into a local `PLANNING_SIGNALS.md` artifact with timestamps, provenance, freshness, trust/privacy notes, extracted metrics, and planning implications; that artifact is injected into strategic planning and evidence-heavy worker prompts.
+
+**Files:** `- .gitignore`, `- README.md`, `- example.config.yaml`, `- orchestrator/strategic_planner.py`, `- orchestrator/repo_context.py`, `- tests/test_strategic_planner.py`, `- tests/test_queue.py`
+
+**Decisions:**
+  - - Kept the first version bounded to three explicit input types (`analytics`, `user_feedback`, `market_signal`) instead of introducing a generic ingestion layer
+  - - Reused the existing safe web/file source model and required trust/privacy metadata in the normalized artifact so public repos can consume external signals without assuming private raw analytics access
 
 ### 2026-03-19 — [task-20260319-205609-add-pre-planning-research-inputs-to-strategic-plan] (#39 kai-linux/agent-os)
 Added an opt-in pre-planning research phase to the strategic planner. It now refreshes a bounded `PLANNING_RESEARCH.md` artifact from explicitly configured trusted web and local sources before sprint selection, then injects that structured research context into the planning prompt.
@@ -235,4 +242,3 @@ Implemented parallel queue worker execution by creating a thin `orchestrator/sup
   - - Locked-repo workers return task to inbox and exit; supervisor respawns workers, so tasks eventually run when repo is free
   - - Global flock in run_queue.sh kept on supervisor to prevent duplicate supervisor instances
   - - Worker IDs (w0, w1, ...) are sequential integers from supervisor lifetime counter
-
