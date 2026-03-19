@@ -32,11 +32,11 @@ repo_configs:
 
 agent_fallbacks:
   implementation: [codex, claude, gemini, deepseek]
-  debugging: [claude, gemini, codex, deepseek]
-  architecture: [claude, gemini, codex, deepseek]
+  debugging: [claude, codex, gemini, deepseek]
+  architecture: [claude, codex, gemini, deepseek]
   research: [claude, gemini, codex, deepseek]
   docs: [claude, gemini, codex, deepseek]
-  browser_automation: [claude, gemini, codex, deepseek]
+  browser_automation: [claude, codex, gemini, deepseek]
 
 agent_timeout_minutes:
   codex: 40

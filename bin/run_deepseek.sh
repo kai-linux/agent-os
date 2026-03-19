@@ -10,21 +10,21 @@ CLINE_TIMEOUT_SECONDS="${CLINE_TIMEOUT_SECONDS:-1800}"
 # Provider fallback order: openrouter -> nanogpt -> chutes
 # Each provider needs its own Cline config dir with the correct API key/base URL set.
 # Set these env vars to enable each provider:
-#   DEEPSEEK_OPENROUTER_CONFIG  e.g. /home/kai/.config/cline-openrouter
+#   DEEPSEEK_OPENROUTER_CONFIG  e.g. /home/kai/.config/openrouter
 #   DEEPSEEK_OPENROUTER_MODEL   e.g. deepseek/deepseek-chat
 #   DEEPSEEK_NANOGPT_CONFIG     e.g. /home/kai/.config/cline-nanogpt
 #   DEEPSEEK_NANOGPT_MODEL      e.g. deepseek-chat
 #   DEEPSEEK_CHUTES_CONFIG      e.g. /home/kai/.config/cline-chutes
 #   DEEPSEEK_CHUTES_MODEL       e.g. deepseek-ai/DeepSeek-V3-0324
 #
-# Example config dir layout for /home/kai/.config/cline-openrouter:
-#   /home/kai/.config/cline-openrouter/
+# Example config dir layout for /home/kai/.config/openrouter:
+#   /home/kai/.config/openrouter/
 #   ├── globalState.json
 #   ├── secrets.json
 #   └── settings/
 #       └── cline_mcp_settings.json
 #
-# Example /home/kai/.config/cline-openrouter/globalState.json:
+# Example /home/kai/.config/openrouter/globalState.json:
 #   {
 #     "actModeApiProvider": "openrouter",
 #     "actModeOpenRouterModelId": "deepseek/deepseek-chat",
@@ -32,12 +32,12 @@ CLINE_TIMEOUT_SECONDS="${CLINE_TIMEOUT_SECONDS:-1800}"
 #     "planModeOpenRouterModelId": "deepseek/deepseek-chat"
 #   }
 #
-# Example /home/kai/.config/cline-openrouter/secrets.json:
+# Example /home/kai/.config/openrouter/secrets.json:
 #   {
 #     "openRouterApiKey": "YOUR_OPENROUTER_API_KEY"
 #   }
 #
-# Example /home/kai/.config/cline-openrouter/settings/cline_mcp_settings.json:
+# Example /home/kai/.config/openrouter/settings/cline_mcp_settings.json:
 #   {
 #     "mcpServers": {}
 #   }
