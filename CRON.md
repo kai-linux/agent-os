@@ -32,10 +32,16 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # Daily digest to Telegram (every day at 08:00)
 0 8 * * * /path/to/agent-os/bin/run_daily_digest.sh >> /path/to/agent-os/runtime/logs/daily_digest.log 2>&1
 
-# Groom backlog: safe to run hourly; per-repo cadence comes from config
+# Groom backlog: safe to run frequently; per-repo cadence comes from config.
+# Important: cron frequency is the upper bound. If you want ~15 min cadence,
+# cron must also run at least every 15 min. The bin/ scripts bootstrap PATH
+# for common local CLI installs, so cron entries do not need provider-specific
+# PATH overrides in normal setups.
 0 * * * * /path/to/agent-os/bin/run_backlog_groomer.sh >> /path/to/agent-os/runtime/logs/backlog_groomer.log 2>&1
 
-# Strategic planner: safe to run hourly; per-repo cadence comes from config
+# Strategic planner: safe to run frequently; per-repo cadence comes from config.
+# Important: cron frequency is the upper bound. If you want ~15 min cadence,
+# cron must also run at least every 15 min.
 0 * * * * /path/to/agent-os/bin/run_strategic_planner.sh >> /path/to/agent-os/runtime/logs/strategic_planner.log 2>&1
 ```
 

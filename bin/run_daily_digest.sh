@@ -5,8 +5,8 @@
 #   0 8 * * * /path/to/agent-os/bin/run_daily_digest.sh >> /path/to/agent-os/runtime/logs/daily_digest.log 2>&1
 set -euo pipefail
 
-ROOT="${ORCH_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-export ORCH_ROOT="$ROOT"
+# shellcheck source=bin/common_env.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common_env.sh"
 
 cd "$ROOT"
 "$ROOT/.venv/bin/python3" -m orchestrator.daily_digest
