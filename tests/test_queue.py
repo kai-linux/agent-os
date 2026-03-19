@@ -92,7 +92,9 @@ def test_get_agent_chain_requested_first():
 
 
 def test_get_agent_chain_unknown_type_falls_back_to_default():
-    chain = get_agent_chain({"task_type": "unknown"}, _cfg())
+    from unittest.mock import patch
+    with patch("orchestrator.queue.agent_available", return_value=(True, None)):
+        chain = get_agent_chain({"task_type": "unknown"}, _cfg())
     assert "codex" in chain
 
 
