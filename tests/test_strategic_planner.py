@@ -444,6 +444,7 @@ def test_build_plan_prompt_includes_research_context():
         plan_size=3,
         strategy_context="strategy",
         readme_goal="goal",
+        north_star="north star",
         planning_principles="north-star rubric",
         codebase_context="codebase",
         research_context="# Planning Research\n\nEvidence",
@@ -464,6 +465,7 @@ def test_build_plan_prompt_includes_planning_principles():
         plan_size=3,
         strategy_context="strategy",
         readme_goal="goal",
+        north_star="north star",
         planning_principles="Prefer autonomy and evidence.",
         codebase_context="codebase",
         research_context="research",
@@ -477,6 +479,27 @@ def test_build_plan_prompt_includes_planning_principles():
     )
     assert "--- Stable Planning Principles (PLANNING_PRINCIPLES.md) ---" in prompt
     assert "Prefer autonomy and evidence." in prompt
+
+
+def test_build_plan_prompt_includes_north_star():
+    prompt = _build_plan_prompt(
+        plan_size=3,
+        strategy_context="strategy",
+        readme_goal="goal",
+        north_star="Closed-loop self-improvement.",
+        planning_principles="Prefer autonomy and evidence.",
+        codebase_context="codebase",
+        research_context="research",
+        retrospective="retro",
+        git_log="abc123 commit",
+        counts={"open": 1, "closed": 2, "blocked": 0},
+        metrics_summary="metrics",
+        backlog_text="- #1: Task",
+        open_issues="(none)",
+        cross_repo_context="(single repo)",
+    )
+    assert "--- North Star (NORTH_STAR.md) ---" in prompt
+    assert "Closed-loop self-improvement." in prompt
 
 
 # ---------------------------------------------------------------------------

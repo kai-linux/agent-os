@@ -116,6 +116,7 @@ def test_write_prompt_includes_layered_repo_context(tmp_path):
     root.mkdir()
     worktree.mkdir()
     (worktree / "README.md").write_text("## Goal\n\nShip autonomous improvements.\n", encoding="utf-8")
+    (worktree / "NORTH_STAR.md").write_text("Closed-loop self-improvement.\n", encoding="utf-8")
     (worktree / "STRATEGY.md").write_text("## Product Vision\n\nClosed-loop optimization.\n", encoding="utf-8")
     (worktree / "PLANNING_PRINCIPLES.md").write_text("Prefer autonomy gains.\n", encoding="utf-8")
     (worktree / "CODEBASE.md").write_text("# Codebase Memory\n\nKnown gotcha.\n", encoding="utf-8")
@@ -133,6 +134,7 @@ def test_write_prompt_includes_layered_repo_context(tmp_path):
 
     text = prompt_file.read_text(encoding="utf-8")
     assert "Product Goal (README.md)" in text
+    assert "North Star (NORTH_STAR.md)" in text
     assert "Strategy Context (STRATEGY.md)" in text
     assert "Planning Principles (PLANNING_PRINCIPLES.md)" in text
     assert "Planning Research (PLANNING_RESEARCH.md)" in text
@@ -145,6 +147,7 @@ def test_write_prompt_skips_research_for_plain_implementation(tmp_path):
     root.mkdir()
     worktree.mkdir()
     (worktree / "README.md").write_text("## Goal\n\nShip autonomous improvements.\n", encoding="utf-8")
+    (worktree / "NORTH_STAR.md").write_text("Closed-loop self-improvement.\n", encoding="utf-8")
     (worktree / "STRATEGY.md").write_text("## Product Vision\n\nClosed-loop optimization.\n", encoding="utf-8")
     (worktree / "PLANNING_PRINCIPLES.md").write_text("Prefer autonomy gains.\n", encoding="utf-8")
     (worktree / "CODEBASE.md").write_text("# Codebase Memory\n\nKnown gotcha.\n", encoding="utf-8")

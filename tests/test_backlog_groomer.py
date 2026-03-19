@@ -48,6 +48,7 @@ def test_groom_repo_no_data_status(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / "README.md").write_text("## Goal\n\nKeep the repo healthy.\n", encoding="utf-8")
+    (repo / "NORTH_STAR.md").write_text("# North Star\n", encoding="utf-8")
     (repo / "STRATEGY.md").write_text("# Strategy\n", encoding="utf-8")
     (repo / "PLANNING_PRINCIPLES.md").write_text("# Planning Principles\n", encoding="utf-8")
     (repo / "CODEBASE.md").write_text("# Codebase\n", encoding="utf-8")
@@ -188,6 +189,7 @@ def test_bootstrap_doc_issues_for_missing_core_context(tmp_path):
     assert "Bootstrap README.md with repo goal and operator context" in titles
     assert "Bootstrap STRATEGY.md from repo state" in titles
     assert "Bootstrap PLANNING_PRINCIPLES.md for stable planning rules" in titles
+    assert "Bootstrap NORTH_STAR.md for long-term direction" in titles
     assert "Bootstrap CODEBASE.md for execution memory" in titles
 
 
@@ -217,10 +219,11 @@ def test_groom_repo_creates_bootstrap_issues_before_llm(tmp_path, monkeypatch):
     result = bg.groom_repo(cfg, "owner/repo", repo)
 
     assert result["status"] == "created"
-    assert created_titles[:4] == [
+    assert created_titles[:5] == [
         "Bootstrap README.md with repo goal and operator context",
         "Bootstrap STRATEGY.md from repo state",
         "Bootstrap PLANNING_PRINCIPLES.md for stable planning rules",
+        "Bootstrap NORTH_STAR.md for long-term direction",
         "Bootstrap CODEBASE.md for execution memory",
     ]
 
@@ -233,6 +236,7 @@ def test_groom_repo_prompt_includes_repo_documents(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / "README.md").write_text("## Goal\n\nImprove closed-loop planning.\n", encoding="utf-8")
+    (repo / "NORTH_STAR.md").write_text("# North Star\n\nClosed-loop self-improvement.\n", encoding="utf-8")
     (repo / "STRATEGY.md").write_text("## Product Vision\n\nBuild an autonomous agent OS.\n", encoding="utf-8")
     (repo / "PLANNING_PRINCIPLES.md").write_text("Prefer autonomy gains.\n", encoding="utf-8")
     (repo / "CODEBASE.md").write_text("# Codebase\n", encoding="utf-8")
@@ -254,6 +258,7 @@ def test_groom_repo_prompt_includes_repo_documents(tmp_path, monkeypatch):
     assert result["status"] == "error"
     prompt = captured["prompt"]
     assert "Improve closed-loop planning." in prompt
+    assert "Closed-loop self-improvement." in prompt
     assert "Build an autonomous agent OS." in prompt
     assert "Prefer autonomy gains." in prompt
     assert "Evidence." in prompt

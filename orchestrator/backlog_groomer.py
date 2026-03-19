@@ -23,6 +23,7 @@ from orchestrator.paths import load_config, runtime_paths
 from orchestrator.agent_scorer import load_recent_metrics
 from orchestrator.gh_project import ensure_labels, query_project, set_item_status, gh
 from orchestrator.repo_context import (
+    read_north_star,
     read_planning_principles,
     read_planning_research_artifact,
     read_readme_goal,
@@ -390,6 +391,17 @@ def _bootstrap_doc_issues(repo_path: Path, open_issues: list[dict]) -> list[dict
             ],
         )
 
+    if not (repo_path / "NORTH_STAR.md").exists():
+        add_issue(
+            "Bootstrap NORTH_STAR.md for long-term direction",
+            "Create a stable long-term north-star document that defines the repo's capability ladder and enduring destination separately from sprint strategy.",
+            [
+                "NORTH_STAR.md exists",
+                "It describes the long-term destination and capability ladder",
+                "It stays higher level and more stable than STRATEGY.md",
+            ],
+        )
+
     if not (repo_path / "CODEBASE.md").exists():
         add_issue(
             "Bootstrap CODEBASE.md for execution memory",
@@ -493,6 +505,9 @@ Each object must have:
 
 --- Product goal (README.md) ---
 {readme_goal}
+
+--- North star (NORTH_STAR.md) ---
+{north_star}
 
 --- Strategy context (STRATEGY.md) ---
 {strategy_context}
@@ -707,6 +722,7 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
     repo_gaps = _repo_gap_signals(repo_path, open_issues)
     bootstrap_issues = _bootstrap_doc_issues(repo_path, open_issues)
     readme_goal = read_readme_goal(repo_path)
+    north_star = read_north_star(repo_path, max_chars=1400)
     strategy_context = read_strategy_context(repo_path, max_chars=1600)
     planning_principles = read_planning_principles(repo_path, max_chars=1400)
     research_context = read_planning_research_artifact(repo_path, max_chars=1600)
@@ -770,6 +786,7 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
         repo_gaps=repo_gaps_text,
         blocked_issues=blocked_issues_text,
         readme_goal=readme_goal,
+        north_star=north_star,
         strategy_context=strategy_context,
         planning_principles=planning_principles,
         research_context=research_context,
