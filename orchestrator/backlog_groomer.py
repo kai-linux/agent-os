@@ -22,6 +22,12 @@ from pathlib import Path
 from orchestrator.paths import load_config, runtime_paths
 from orchestrator.agent_scorer import load_recent_metrics
 from orchestrator.gh_project import ensure_labels, query_project, set_item_status, gh
+from orchestrator.repo_context import (
+    read_planning_principles,
+    read_planning_research_artifact,
+    read_readme_goal,
+    read_strategy_context,
+)
 from orchestrator.scheduler_state import is_due, record_run, job_lock
 from orchestrator.trust import is_trusted
 
@@ -316,6 +322,89 @@ def _blocked_issue_signals(open_issues: list[dict]) -> list[dict]:
     return blocked
 
 
+def _bootstrap_doc_issues(repo_path: Path, open_issues: list[dict]) -> list[dict]:
+    """Return deterministic bootstrap issues for missing core context docs."""
+    open_titles = [i.get("title", "") for i in open_issues]
+    bootstrap: list[dict] = []
+
+    def add_issue(title: str, goal: str, success: list[str], labels: list[str] | None = None):
+        if _is_duplicate(title, open_titles):
+            return
+        bootstrap.append({
+            "title": title,
+            "body": (
+                f"## Goal\n{goal}\n\n"
+                "## Success Criteria\n"
+                + "\n".join(f"- {item}" for item in success)
+                + "\n\n## Constraints\n- Prefer minimal diffs\n- Create the initial scaffold only; avoid overfitting early details"
+            ),
+            "task_type": "docs",
+            "priority": "prio:high",
+            "labels": labels or ["enhancement"],
+        })
+        open_titles.append(title)
+
+    readme = repo_path / "README.md"
+    if not readme.exists():
+        add_issue(
+            "Bootstrap README.md with repo goal and operator context",
+            "Create an initial README.md that explains the repo goal, operating model, and what good looks like for future planning and execution.",
+            [
+                "README.md exists with a clear Goal section",
+                "README.md explains the repo purpose in terms an agent can use for planning",
+                "The document is concise and avoids speculative detail",
+            ],
+        )
+    else:
+        content = readme.read_text(encoding="utf-8", errors="replace")
+        if "## goal" not in content.lower():
+            add_issue(
+                "Add a Goal section to README.md",
+                "Add a concise Goal section to README.md so planners and workers have an explicit product objective.",
+                [
+                    "README.md contains a Goal section",
+                    "The goal is concrete enough to guide backlog prioritization",
+                    "Existing README content remains intact aside from focused edits",
+                ],
+            )
+
+    if not (repo_path / "STRATEGY.md").exists():
+        add_issue(
+            "Bootstrap STRATEGY.md from repo state",
+            "Create the initial STRATEGY.md so the repo has durable strategy memory across sprint cycles.",
+            [
+                "STRATEGY.md exists with an initial product vision",
+                "The file includes at least Product Vision, Current Focus Areas, and Sprint History scaffolding",
+                "The strategy reflects current repo state rather than generic boilerplate",
+            ],
+        )
+
+    if not (repo_path / "PLANNING_PRINCIPLES.md").exists():
+        add_issue(
+            "Bootstrap PLANNING_PRINCIPLES.md for stable planning rules",
+            "Create a stable planner rubric that defines how this repo should choose backlog work over time.",
+            [
+                "PLANNING_PRINCIPLES.md exists",
+                "It defines selection priorities, tie-breakers, and what to avoid",
+                "The rubric is stable and higher level than sprint-specific strategy",
+            ],
+        )
+
+    if not (repo_path / "CODEBASE.md").exists():
+        add_issue(
+            "Bootstrap CODEBASE.md for execution memory",
+            "Create the initial CODEBASE.md scaffold so agents have a place to accumulate architecture notes, key files, and known gotchas.",
+            [
+                "CODEBASE.md exists",
+                "It includes sections for architecture, key files, known issues, and recent changes",
+                "The initial scaffold is lightweight and ready for later agent updates",
+            ],
+            labels=["tech-debt"],
+        )
+
+    return bootstrap
+
+
 # ---------------------------------------------------------------------------
 # Deduplication
 # ---------------------------------------------------------------------------
@@ -401,6 +490,18 @@ Each object must have:
 
 --- Open blocked issues that may need unblockers ---
 {blocked_issues}
+
+--- Product goal (README.md) ---
+{readme_goal}
+
+--- Strategy context (STRATEGY.md) ---
+{strategy_context}
+
+--- Planning principles (PLANNING_PRINCIPLES.md) ---
+{planning_principles}
+
+--- Planning research artifact (PLANNING_RESEARCH.md) ---
+{research_context}
 
 --- Recent task completions (last 30 days) ---
 {completions}
@@ -604,11 +705,17 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
     blocked_tasks = _recent_blocked_tasks(records)
     blocked_issues = _blocked_issue_signals(open_issues)
     repo_gaps = _repo_gap_signals(repo_path, open_issues)
+    bootstrap_issues = _bootstrap_doc_issues(repo_path, open_issues)
+    readme_goal = read_readme_goal(repo_path)
+    strategy_context = read_strategy_context(repo_path, max_chars=1600)
+    planning_principles = read_planning_principles(repo_path, max_chars=1400)
+    research_context = read_planning_research_artifact(repo_path, max_chars=1600)
     print(f"  Blocked/partial task outcomes: {len(blocked_tasks)}")
     print(f"  Repo gaps: {len(repo_gaps)}, blocked issues: {len(blocked_issues)}")
+    print(f"  Bootstrap doc issues: {len(bootstrap_issues)}")
 
     # Skip if no data to analyze
-    if not stale and not known_issues and not risk_flags and not blocked_tasks and not blocked_issues and not repo_gaps and not records:
+    if not stale and not known_issues and not risk_flags and not blocked_tasks and not blocked_issues and not repo_gaps and not bootstrap_issues and not records:
         print("  No data to analyze, skipping.")
         return {"status": "no-data", "created": 0, "skipped": 0, "cleaned": len(cleaned)}
 
@@ -620,6 +727,7 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
         + len(blocked_tasks)
         + len(blocked_issues)
         + len(repo_gaps)
+        + len(bootstrap_issues)
     )
     num_issues = min(MAX_ISSUES_PER_REPO, max(3, data_signals))
 
@@ -661,26 +769,45 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
         blocked_tasks=blocked_tasks_text,
         repo_gaps=repo_gaps_text,
         blocked_issues=blocked_issues_text,
+        readme_goal=readme_goal,
+        strategy_context=strategy_context,
+        planning_principles=planning_principles,
+        research_context=research_context,
         completions=completions_text,
         open_issues=open_text,
     )
 
-    # 7. Call LLM
-    try:
-        raw = _call_haiku(prompt)
-    except Exception as e:
-        print(f"  Analysis failed: {e}")
-        return {"status": "error", "created": 0, "skipped": 0, "error": str(e)}
+    proposed: list[dict] = list(bootstrap_issues[:MAX_ISSUES_PER_REPO])
 
-    try:
-        proposed = _parse_issues(raw)
-    except Exception as e:
-        print(f"  Failed to parse response: {e}\n  Raw: {raw[:300]}")
-        return {"status": "error", "created": 0, "skipped": 0, "error": str(e)}
-
-    if not isinstance(proposed, list):
-        print(f"  Unexpected response format:\n  {raw[:300]}")
-        return {"status": "error", "created": 0, "skipped": 0, "error": "unexpected LLM response format"}
+    remaining_slots = 0 if bootstrap_issues else max(MAX_ISSUES_PER_REPO - len(proposed), 0)
+    if remaining_slots > 0:
+        # 7. Call LLM for the remaining slots
+        try:
+            raw = _call_haiku(prompt)
+        except Exception as e:
+            if proposed:
+                print(f"  Analysis failed after bootstrap issue synthesis: {e}")
+            else:
+                print(f"  Analysis failed: {e}")
+                return {"status": "error", "created": 0, "skipped": 0, "error": str(e)}
+        else:
+            try:
+                llm_proposed = _parse_issues(raw)
+            except Exception as e:
+                if proposed:
+                    print(f"  Failed to parse LLM response after bootstrap issue synthesis: {e}\n  Raw: {raw[:300]}")
+                else:
+                    print(f"  Failed to parse response: {e}\n  Raw: {raw[:300]}")
+                    return {"status": "error", "created": 0, "skipped": 0, "error": str(e)}
+            else:
+                if not isinstance(llm_proposed, list):
+                    if proposed:
+                        print(f"  Unexpected LLM response format after bootstrap issue synthesis:\n  {raw[:300]}")
+                    else:
+                        print(f"  Unexpected response format:\n  {raw[:300]}")
+                        return {"status": "error", "created": 0, "skipped": 0, "error": "unexpected LLM response format"}
+                else:
+                    proposed.extend(llm_proposed[:remaining_slots])
 
     # 8. Dedup and create issues
     created_urls: list[str] = []
