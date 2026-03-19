@@ -21,6 +21,8 @@ from orchestrator.trust import is_trusted
 
 
 SECTION_RE = re.compile(r"^##\s+(.+?)\n(.*?)(?=^##\s+|\Z)", re.MULTILINE | re.DOTALL)
+DEPENDENCY_RE = re.compile(r"(?im)^\s*(?:depends on|blocked by)\s+#(\d+)\b")
+MAX_DEPENDENCY_DEPTH = 3
 
 
 def slugify(text: str) -> str:
@@ -46,6 +48,15 @@ def parse_issue_body(body: str) -> dict:
         "constraints": sections.get("constraints", "").strip(),
         "context": sections.get("context", "").strip(),
     }
+
+
+def parse_issue_dependencies(body: str) -> list[int]:
+    deps = []
+    for match in DEPENDENCY_RE.findall(body or ""):
+        number = int(match)
+        if number not in deps:
+            deps.append(number)
+    return deps
 
 
 def build_mailbox_task(cfg: dict, project_key: str, repo_cfg: dict, issue: dict) -> tuple[str, str]:
@@ -136,7 +147,133 @@ def _item_priority(item: dict) -> int:
     return _PRIO_ORDER["prio:normal"]
 
 
-def _dispatch_item(cfg, paths, owner, repo_to_project, info, ready_items) -> bool:
+def _fetch_issue_dependency(repo_full: str, number: int) -> dict | None:
+    raw = gh([
+        "issue", "view", str(number), "-R", repo_full,
+        "--json", "number,title,body,state,url,labels",
+    ], check=False)
+    if not raw:
+        return None
+    data = json.loads(raw)
+    data["labels"] = {lbl["name"].lower() for lbl in data.get("labels", [])}
+    return data
+
+
+def _build_issue_lookup(queried: dict[int, tuple[dict, list[dict]]]) -> dict[tuple[str, int], dict]:
+    lookup = {}
+    for info, _ready_items in queried.values():
+        for item in info.get("items", []):
+            repo_full = item.get("repo")
+            number = item.get("number")
+            if repo_full and number:
+                lookup[(repo_full, number)] = item
+    return lookup
+
+
+def _resolve_issue_dependencies(
+    repo_full: str,
+    issue: dict,
+    issue_lookup: dict[tuple[str, int], dict],
+    fetched_cache: dict[tuple[str, int], dict | None] | None = None,
+    *,
+    depth: int = 0,
+    trail: tuple[int, ...] | None = None,
+    remote_budget: list[int] | None = None,
+) -> dict:
+    fetched_cache = fetched_cache if fetched_cache is not None else {}
+    trail = trail or (issue["number"],)
+    remote_budget = remote_budget if remote_budget is not None else [1]
+
+    deps = parse_issue_dependencies(issue.get("body", ""))
+    if not deps:
+        return {"status": "clear"}
+    if depth >= MAX_DEPENDENCY_DEPTH:
+        return {"status": "depth-limit", "dependency": deps[0]}
+
+    for dep_number in deps:
+        if dep_number in trail:
+            return {"status": "circular", "dependency": dep_number, "trail": [*trail, dep_number]}
+
+        key = (repo_full, dep_number)
+        dep_issue = issue_lookup.get(key)
+        if dep_issue is None:
+            if key in fetched_cache:
+                dep_issue = fetched_cache[key]
+            elif remote_budget[0] > 0:
+                remote_budget[0] -= 1
+                dep_issue = _fetch_issue_dependency(repo_full, dep_number)
+                fetched_cache[key] = dep_issue
+
+        if dep_issue is None:
+            return {"status": "unknown", "dependency": dep_number}
+
+        if dep_issue.get("state") != "CLOSED":
+            return {"status": "blocked", "dependency": dep_number}
+
+        nested = _resolve_issue_dependencies(
+            repo_full,
+            dep_issue,
+            issue_lookup,
+            fetched_cache,
+            depth=depth + 1,
+            trail=(*trail, dep_number),
+            remote_budget=remote_budget,
+        )
+        if nested["status"] != "clear":
+            return nested
+
+    return {"status": "clear"}
+
+
+def _set_project_status(info: dict, item_id: str, status_value: str):
+    option_id = info["status_options"].get(status_value)
+    if info["status_field_id"] and option_id:
+        set_item_status(
+            info["project_id"],
+            item_id,
+            info["status_field_id"],
+            option_id,
+        )
+
+
+def _mark_issue_blocked(repo_full: str, item: dict, info: dict, project_cfg: dict, dependency_number: int):
+    blocked_value = project_cfg.get("blocked_value", "Blocked")
+    try:
+        _set_project_status(info, item["item_id"], blocked_value)
+    except Exception as e:
+        print(f"Warning: failed to set project status: {e}")
+    add_issue_comment(repo_full, item["number"], f"Waiting for #{dependency_number}")
+
+
+def _requeue_unblocked_items(queried, repo_to_project, issue_lookup):
+    for info, _ready_items in queried.values():
+        for item in info.get("items", []):
+            if item.get("state") != "OPEN":
+                continue
+
+            repo_full = item.get("repo")
+            if repo_full not in repo_to_project:
+                continue
+
+            _project_key, project_cfg, _repo_cfg = repo_to_project[repo_full]
+            blocked_value = project_cfg.get("blocked_value", "Blocked")
+            if item.get("status") != blocked_value:
+                continue
+
+            if not parse_issue_dependencies(item.get("body", "")):
+                continue
+
+            resolution = _resolve_issue_dependencies(repo_full, item, issue_lookup, {})
+            if resolution["status"] == "clear":
+                ready_value = project_cfg.get("ready_value", "Ready")
+                try:
+                    _set_project_status(info, item["item_id"], ready_value)
+                    print(f"Dependency cleared for {repo_full}#{item['number']} -> {ready_value}")
+                except Exception as e:
+                    print(f"Warning: failed to set project status: {e}")
+
+
+def _dispatch_item(cfg, paths, owner, repo_to_project, info, ready_items, issue_lookup) -> bool:
     """Try to dispatch one ready item (highest priority first). Returns True if dispatched."""
     ready_items = sorted(ready_items, key=_item_priority)
     for item in ready_items:
@@ -154,6 +291,21 @@ def _dispatch_item(cfg, paths, owner, repo_to_project, info, ready_items) -> boo
         # Skip items with excluded labels
         excluded = {x.lower() for x in pcfg.get("excluded_labels", [])}
         if item["labels"].intersection(excluded):
+            continue
+
+        resolution = _resolve_issue_dependencies(repo_full, item, issue_lookup, {})
+        if resolution["status"] == "blocked":
+            _mark_issue_blocked(repo_full, item, info, pcfg, resolution["dependency"])
+            print(f"Skipped {repo_full}#{item['number']} — waiting for #{resolution['dependency']}")
+            continue
+        if resolution["status"] == "circular":
+            print(f"Warning: circular dependency detected for {repo_full}#{item['number']}: {resolution['trail']}")
+            continue
+        if resolution["status"] == "depth-limit":
+            print(f"Warning: dependency depth limit reached for {repo_full}#{item['number']}")
+            continue
+        if resolution["status"] == "unknown":
+            print(f"Warning: could not resolve dependency #{resolution['dependency']} for {repo_full}#{item['number']}")
             continue
 
         # Build issue dict for build_mailbox_task
@@ -185,17 +337,10 @@ def _dispatch_item(cfg, paths, owner, repo_to_project, info, ready_items) -> boo
 
         # Set project Status to In Progress
         in_progress_value = pcfg.get("in_progress_value", "In Progress")
-        option_id = info["status_options"].get(in_progress_value)
-        if info["status_field_id"] and option_id:
-            try:
-                set_item_status(
-                    info["project_id"],
-                    item["item_id"],
-                    info["status_field_id"],
-                    option_id,
-                )
-            except Exception as e:
-                print(f"Warning: failed to set project status: {e}")
+        try:
+            _set_project_status(info, item["item_id"], in_progress_value)
+        except Exception as e:
+            print(f"Warning: failed to set project status: {e}")
 
         print(f"Dispatched {repo_full}#{item['number']} -> {task_path}")
         return True
@@ -280,9 +425,12 @@ def dispatch_one():
             graphql_ok = False
             continue
 
+    issue_lookup = _build_issue_lookup(queried)
+    _requeue_unblocked_items(queried, repo_to_project, issue_lookup)
+
     # Dispatch first matching ready item (Status-based)
     for pn, (info, ready_items) in queried.items():
-        dispatched = _dispatch_item(cfg, paths, owner, repo_to_project, info, ready_items)
+        dispatched = _dispatch_item(cfg, paths, owner, repo_to_project, info, ready_items, issue_lookup)
         if dispatched:
             return
 
@@ -301,6 +449,18 @@ def dispatch_one():
                     labels = {lbl["name"].lower() for lbl in issue.get("labels", [])}
                     excluded = {x.lower() for x in project_cfg.get("excluded_labels", [])}
                     if labels.intersection(excluded):
+                        continue
+                    issue_with_label_set = {**issue, "labels": labels}
+                    resolution = _resolve_issue_dependencies(repo_full, issue_with_label_set, {}, {})
+                    if resolution["status"] == "blocked":
+                        add_issue_comment(repo_full, issue["number"], f"Waiting for #{resolution['dependency']}")
+                        print(f"Skipped {repo_full}#{issue['number']} — waiting for #{resolution['dependency']}")
+                        continue
+                    if resolution["status"] == "circular":
+                        print(f"Warning: circular dependency detected for {repo_full}#{issue['number']}: {resolution['trail']}")
+                        continue
+                    if resolution["status"] in {"depth-limit", "unknown"}:
+                        print(f"Warning: dependency check skipped dispatch for {repo_full}#{issue['number']}: {resolution}")
                         continue
                     task_id, task_md = build_mailbox_task(cfg, project_key, repo_cfg, issue)
                     task_path = paths["INBOX"] / f"{task_id}.md"
