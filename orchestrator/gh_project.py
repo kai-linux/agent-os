@@ -175,10 +175,13 @@ def list_ready_issues(repo: str, limit: int = 20):
     ]) or []
 
 
-def get_issue(repo: str, number: int):
+def get_issue(repo: str, number: int, *, include_comments: bool = False):
+    fields = "number,title,body,labels,url,updatedAt"
+    if include_comments:
+        fields += ",comments"
     return gh_json([
         "issue", "view", str(number), "-R", repo,
-        "--json", "number,title,body,labels,url,updatedAt,comments",
+        "--json", fields,
     ])
 
 
