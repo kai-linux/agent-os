@@ -30,7 +30,8 @@ from orchestrator.agent_scorer import load_recent_metrics
 from orchestrator.gh_project import query_project, set_item_status, edit_issue_labels, ensure_labels
 from orchestrator.trust import is_trusted
 
-PLAN_SIZE = 5
+DEFAULT_PLAN_SIZE = 5
+DEFAULT_SPRINT_CADENCE_DAYS = 7
 ANALYSIS_MODEL = "opus"
 FOCUS_AREA_MODEL = "haiku"
 METRICS_WINDOW_DAYS = 30
@@ -453,17 +454,17 @@ def _update_strategy(
         print(f"  Warning: failed to push STRATEGY.md for {repo_name}: {e}")
 
 
-def _build_retrospective(repo: str) -> str:
+def _build_retrospective(repo: str, days: int = DEFAULT_SPRINT_CADENCE_DAYS) -> str:
     """Build a retrospective summary of the last sprint's outcomes."""
-    closed = _recently_closed_issues(repo, days=7)
-    merged = _recent_merged_prs(repo, days=7)
+    closed = _recently_closed_issues(repo, days=days)
+    merged = _recent_merged_prs(repo, days=days)
     parts = []
     if closed and not closed.startswith("(no"):
         parts.append(f"Issues completed:\n{closed}")
     if merged and not merged.startswith("(no"):
         parts.append(f"PRs merged:\n{merged}")
     if not parts:
-        return "(no activity in the last week)"
+        return f"(no activity in the last {days} days)"
     return "\n\n".join(parts)
 
 
@@ -789,13 +790,32 @@ def _resolve_repos(cfg: dict) -> list[tuple[str, Path]]:
     return unique
 
 
+def _repo_planner_config(cfg: dict, github_slug: str) -> tuple[int, int]:
+    """Return (plan_size, sprint_cadence_days) for a repo, checking per-repo overrides."""
+    plan_size = cfg.get("plan_size", DEFAULT_PLAN_SIZE)
+    cadence = cfg.get("sprint_cadence_days", DEFAULT_SPRINT_CADENCE_DAYS)
+
+    # Check github_projects for per-repo overrides
+    for pv in cfg.get("github_projects", {}).values():
+        if not isinstance(pv, dict):
+            continue
+        for rc in pv.get("repos", []):
+            if rc.get("github_repo") == github_slug:
+                plan_size = rc.get("plan_size", plan_size)
+                cadence = rc.get("sprint_cadence_days", cadence)
+                return int(plan_size), int(cadence)
+
+    return int(plan_size), int(cadence)
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 def plan_repo(cfg: dict, github_slug: str, repo_path: Path) -> tuple[list[dict] | None, str]:
     """Generate a sprint plan for one repo. Returns (plan, retrospective) or (None, "")."""
-    print(f"\n--- Planning {github_slug} ---")
+    plan_size, sprint_cadence_days = _repo_planner_config(cfg, github_slug)
+    print(f"\n--- Planning {github_slug} (plan_size={plan_size}, cadence={sprint_cadence_days}d) ---")
 
     # 1. Read product context
     readme_goal = _read_readme_goal(repo_path)
@@ -813,8 +833,8 @@ def plan_repo(cfg: dict, github_slug: str, repo_path: Path) -> tuple[list[dict] 
     codebase_context = _read_codebase_md(repo_path)
     print(f"  CODEBASE.md: {len(codebase_context)} chars")
 
-    # 4. Sprint retrospective — what shipped last week
-    retrospective = _build_retrospective(github_slug)
+    # 4. Sprint retrospective — what shipped last sprint
+    retrospective = _build_retrospective(github_slug, days=sprint_cadence_days)
     print(f"  Retrospective: {len(retrospective)} chars")
 
     # 5. Last 30 git commits
@@ -838,7 +858,7 @@ def plan_repo(cfg: dict, github_slug: str, repo_path: Path) -> tuple[list[dict] 
 
     # 10. Build prompt with all context
     prompt = PLAN_PROMPT.format(
-        plan_size=PLAN_SIZE,
+        plan_size=plan_size,
         strategy_context=strategy_context,
         readme_goal=readme_goal,
         codebase_context=codebase_context,
@@ -870,7 +890,7 @@ def plan_repo(cfg: dict, github_slug: str, repo_path: Path) -> tuple[list[dict] 
         return None, ""
 
     print(f"  Generated {len(plan)} tasks")
-    return plan[:PLAN_SIZE], retrospective
+    return plan[:plan_size], retrospective
 
 
 def _set_issues_ready(cfg: dict, github_slug: str, issue_urls: list[str]):
