@@ -8,6 +8,7 @@ import subprocess
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from orchestrator.backlog_groomer import (
+    _bootstrap_doc_issues,
     _filter_records_for_repo,
     _repo_gap_signals,
     _repo_groomer_cadence_days,
@@ -48,6 +49,7 @@ def test_groom_repo_no_data_status(tmp_path, monkeypatch):
     repo.mkdir()
     (repo / "README.md").write_text("## Goal\n\nKeep the repo healthy.\n", encoding="utf-8")
     (repo / "STRATEGY.md").write_text("# Strategy\n", encoding="utf-8")
+    (repo / "PLANNING_PRINCIPLES.md").write_text("# Planning Principles\n", encoding="utf-8")
     (repo / "CODEBASE.md").write_text("# Codebase\n", encoding="utf-8")
     monkeypatch.setattr(bg, "_list_open_issues", lambda repo, cfg: [])
     monkeypatch.setattr(bg, "load_recent_metrics", lambda *args, **kwargs: [])
@@ -76,9 +78,13 @@ def test_groom_repo_adds_created_issue_to_backlog(tmp_path, monkeypatch):
     }
     repo = tmp_path / "repo"
     repo.mkdir()
+    (repo / "README.md").write_text("## Goal\n\nKeep the repo healthy.\n", encoding="utf-8")
+    (repo / "STRATEGY.md").write_text("# Strategy\n", encoding="utf-8")
+    (repo / "PLANNING_PRINCIPLES.md").write_text("# Planning Principles\n", encoding="utf-8")
+    (repo / "CODEBASE.md").write_text("# Codebase\n", encoding="utf-8")
 
     monkeypatch.setattr(bg, "_list_open_issues", lambda repo, cfg: [])
-    monkeypatch.setattr(bg, "load_recent_metrics", lambda *args, **kwargs: [{"task_id": "t1"}])
+    monkeypatch.setattr(bg, "load_recent_metrics", lambda *args, **kwargs: [{"task_id": "t1", "repo": "owner/repo"}])
     monkeypatch.setattr(bg, "_parse_known_issues", lambda repo_path: [])
     monkeypatch.setattr(bg, "_find_risk_flags", lambda cfg: [])
     monkeypatch.setattr(bg, "_call_haiku", lambda prompt: '[{"title":"Fix thing","body":"## Goal\\nX\\n## Success Criteria\\nY\\n## Constraints\\n- Prefer minimal diffs","priority":"prio:high","labels":["bug"]}]')
@@ -170,6 +176,87 @@ def test_repo_gap_signals_detects_missing_strategy(tmp_path):
     gaps = _repo_gap_signals(repo, [])
 
     assert any("STRATEGY.md is missing" in gap for gap in gaps)
+
+
+def test_bootstrap_doc_issues_for_missing_core_context(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    issues = _bootstrap_doc_issues(repo, [])
+    titles = [issue["title"] for issue in issues]
+
+    assert "Bootstrap README.md with repo goal and operator context" in titles
+    assert "Bootstrap STRATEGY.md from repo state" in titles
+    assert "Bootstrap PLANNING_PRINCIPLES.md for stable planning rules" in titles
+    assert "Bootstrap CODEBASE.md for execution memory" in titles
+
+
+def test_groom_repo_creates_bootstrap_issues_before_llm(tmp_path, monkeypatch):
+    cfg = {
+        "root_dir": str(tmp_path),
+        "worktrees_dir": str(tmp_path / "worktrees"),
+    }
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    monkeypatch.setattr(bg, "_list_open_issues", lambda repo, cfg: [])
+    monkeypatch.setattr(bg, "load_recent_metrics", lambda *args, **kwargs: [])
+    monkeypatch.setattr(bg, "_parse_known_issues", lambda repo_path: [])
+    monkeypatch.setattr(bg, "_find_risk_flags", lambda cfg: [])
+    monkeypatch.setattr(bg, "_call_haiku", lambda prompt: (_ for _ in ()).throw(AssertionError("LLM should not be required for bootstrap issues")))
+    monkeypatch.setattr(bg, "_open_issue_exists", lambda repo, title: False)
+
+    created_titles = []
+    monkeypatch.setattr(
+        bg,
+        "_create_issue",
+        lambda repo, title, body, labels: created_titles.append(title) or f"https://github.com/owner/repo/issues/{len(created_titles)}",
+    )
+    monkeypatch.setattr(bg, "_set_issue_backlog", lambda cfg, github_slug, issue_url: None)
+
+    result = bg.groom_repo(cfg, "owner/repo", repo)
+
+    assert result["status"] == "created"
+    assert created_titles[:4] == [
+        "Bootstrap README.md with repo goal and operator context",
+        "Bootstrap STRATEGY.md from repo state",
+        "Bootstrap PLANNING_PRINCIPLES.md for stable planning rules",
+        "Bootstrap CODEBASE.md for execution memory",
+    ]
+
+
+def test_groom_repo_prompt_includes_repo_documents(tmp_path, monkeypatch):
+    cfg = {
+        "root_dir": str(tmp_path),
+        "worktrees_dir": str(tmp_path / "worktrees"),
+    }
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "README.md").write_text("## Goal\n\nImprove closed-loop planning.\n", encoding="utf-8")
+    (repo / "STRATEGY.md").write_text("## Product Vision\n\nBuild an autonomous agent OS.\n", encoding="utf-8")
+    (repo / "PLANNING_PRINCIPLES.md").write_text("Prefer autonomy gains.\n", encoding="utf-8")
+    (repo / "CODEBASE.md").write_text("# Codebase\n", encoding="utf-8")
+    (repo / "PLANNING_RESEARCH.md").write_text("# Planning Research\n\nEvidence.\n", encoding="utf-8")
+
+    monkeypatch.setattr(bg, "_list_open_issues", lambda repo, cfg: [])
+    monkeypatch.setattr(bg, "load_recent_metrics", lambda *args, **kwargs: [{"task_id": "t1", "repo": "owner/repo"}])
+    monkeypatch.setattr(bg, "_parse_known_issues", lambda repo_path: [])
+    monkeypatch.setattr(bg, "_find_risk_flags", lambda cfg: [])
+    captured = {}
+    def fake_call(prompt):
+        captured["prompt"] = prompt
+        return "[]"
+    monkeypatch.setattr(bg, "_call_haiku", fake_call)
+    monkeypatch.setattr(bg, "_open_issue_exists", lambda repo, title: False)
+
+    result = bg.groom_repo(cfg, "owner/repo", repo)
+
+    assert result["status"] == "error"
+    prompt = captured["prompt"]
+    assert "Improve closed-loop planning." in prompt
+    assert "Build an autonomous agent OS." in prompt
+    assert "Prefer autonomy gains." in prompt
+    assert "Evidence." in prompt
 
 
 def test_call_haiku_falls_back_to_codex_when_claude_fails(monkeypatch):
