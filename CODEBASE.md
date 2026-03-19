@@ -16,6 +16,16 @@
 
 ## Recent Changes
 
+### 2026-03-19 — [task-20260319-205609-add-pre-planning-research-inputs-to-strategic-plan] (#39 kai-linux/agent-os)
+Added an opt-in pre-planning research phase to the strategic planner. It now refreshes a bounded `PLANNING_RESEARCH.md` artifact from explicitly configured trusted web and local sources before sprint selection, then injects that structured research context into the planning prompt.
+
+**Files:** `- .gitignore`, `- README.md`, `- example.config.yaml`, `- orchestrator/strategic_planner.py`, `- tests/test_strategic_planner.py`
+
+**Decisions:**
+  - - Kept research opt-in and tightly bounded to configured `https` URLs plus relative repo or repo-adjacent files; no search or uncontrolled browsing path was added
+  - - Wrote research into a local `PLANNING_RESEARCH.md` artifact and ignored it in git so planning can reuse fresh evidence without adding commit churn
+
+
 ### 2026-03-19 — [task-20260319-155323-multi-repo-strategic-planning-cross-repo-dependenc] (#24 kai-linux/agent-os)
 Implemented multi-repo strategy preloading, conservative cross-repo dependency inference, dependency-aware planning order, and prompt context injection so sprint planning can sequence prerequisite repository work before dependent repository work.
 
