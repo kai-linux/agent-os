@@ -260,6 +260,7 @@ def test_agent_available_deepseek_requires_provider_config(monkeypatch):
     monkeypatch.delenv("DEEPSEEK_NANOGPT_CONFIG", raising=False)
     monkeypatch.delenv("DEEPSEEK_CHUTES_CONFIG", raising=False)
     monkeypatch.setattr("orchestrator.queue._command_available", lambda cmd: True)
+    monkeypatch.setattr("orchestrator.queue.Path.home", lambda: Path("/tmp/no-home-config"))
 
     available, reason = agent_available("deepseek")
     assert available is False
