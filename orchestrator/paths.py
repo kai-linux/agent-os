@@ -23,7 +23,6 @@ def load_config():
     cfg.setdefault("default_max_attempts", 4)
     cfg.setdefault("github_owner", "")
     cfg.setdefault("github_projects", {})
-
     return cfg
 
 
