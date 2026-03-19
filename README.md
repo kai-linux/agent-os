@@ -90,6 +90,11 @@ The planner and groomer are safe to invoke frequently from cron. Each repo has i
 
 The `bin/` entrypoints bootstrap common user-local CLI install paths themselves, so cron usually does not need per-provider `PATH` or `CLAUDE_BIN` overrides.
 
+Sprint selection is guided by three layers of context:
+- `README.md` for the public product goal
+- `STRATEGY.md` for sprint-to-sprint strategy memory
+- `PLANNING_PRINCIPLES.md` for the stable north-star rubric the planner should optimize toward over time
+
 These generated issues are indistinguishable from human-written ones. They enter the same queue, get dispatched to the same agents, go through the same CI → merge pipeline. The system literally engineers itself.
 
 ---
