@@ -7,12 +7,10 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from orchestrator.paths import runtime_paths
-
 
 def _state_path(cfg: dict) -> Path:
-    paths = runtime_paths(cfg)
-    state_dir = paths["ROOT"] / "runtime" / "state"
+    root = Path(cfg.get("root_dir", ".")).expanduser()
+    state_dir = root / "runtime" / "state"
     state_dir.mkdir(parents=True, exist_ok=True)
     return state_dir / "scheduler_state.json"
 
@@ -78,8 +76,8 @@ def is_due(
 @contextmanager
 def job_lock(cfg: dict, job_name: str):
     """Prevent overlapping cron runs of the same scheduled job."""
-    paths = runtime_paths(cfg)
-    state_dir = paths["ROOT"] / "runtime" / "state"
+    root = Path(cfg.get("root_dir", ".")).expanduser()
+    state_dir = root / "runtime" / "state"
     state_dir.mkdir(parents=True, exist_ok=True)
     lock_path = state_dir / f"{job_name}.lock"
     fh = lock_path.open("w")

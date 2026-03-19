@@ -406,7 +406,7 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
     # Skip if no data to analyze
     if not stale and not known_issues and not risk_flags and not records:
         print("  No data to analyze, skipping.")
-        return {"created": 0, "skipped": 0}
+        return {"status": "no-data", "created": 0, "skipped": 0}
 
     # 5. Determine how many issues to propose (3-5, based on data richness)
     data_signals = len(stale) + len(known_issues) + len(risk_flags)
@@ -444,17 +444,17 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
         raw = _call_haiku(prompt)
     except Exception as e:
         print(f"  Analysis failed: {e}")
-        return {"created": 0, "skipped": 0, "error": str(e)}
+        return {"status": "error", "created": 0, "skipped": 0, "error": str(e)}
 
     try:
         proposed = _parse_issues(raw)
     except Exception as e:
         print(f"  Failed to parse response: {e}\n  Raw: {raw[:300]}")
-        return {"created": 0, "skipped": 0, "error": str(e)}
+        return {"status": "error", "created": 0, "skipped": 0, "error": str(e)}
 
     if not isinstance(proposed, list):
         print(f"  Unexpected response format:\n  {raw[:300]}")
-        return {"created": 0, "skipped": 0}
+        return {"status": "error", "created": 0, "skipped": 0, "error": "unexpected LLM response format"}
 
     # 8. Dedup and create issues
     created_urls: list[str] = []
@@ -494,7 +494,22 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
             print(f"  Failed to create {title!r}: {e}")
             skipped.append(title)
 
-    return {"created": len(created_urls), "skipped": len(skipped), "urls": created_urls}
+    if created_urls:
+        status = "created"
+    elif skipped:
+        status = "skipped"
+    else:
+        status = "error"
+
+    result = {
+        "status": status,
+        "created": len(created_urls),
+        "skipped": len(skipped),
+        "urls": created_urls,
+    }
+    if status == "error":
+        result["error"] = "LLM returned no usable issues"
+    return result
 
 
 def run():
@@ -514,6 +529,7 @@ def run():
 
         all_created = 0
         all_skipped = 0
+        status_counts = {"created": 0, "skipped": 0, "no-data": 0, "error": 0, "dormant": 0}
         summaries = []
 
         for github_slug, repo_path in repos:
@@ -526,18 +542,33 @@ def run():
             )
             if not due:
                 print(f"  Skipping {github_slug}: {reason}")
+                status_key = "dormant" if reason == "dormant" else "skipped"
+                status_counts[status_key] = status_counts.get(status_key, 0) + 1
                 summaries.append(f"{github_slug}: skipped ({reason})")
                 continue
 
-            record_run(cfg, "backlog_groomer", github_slug)
             result = groom_repo(cfg, github_slug, repo_path)
+            status = result.get("status", "error")
+            status_counts[status] = status_counts.get(status, 0) + 1
             all_created += result.get("created", 0)
             all_skipped += result.get("skipped", 0)
-            summaries.append(f"{github_slug}: {result.get('created', 0)} created, {result.get('skipped', 0)} skipped")
+            if status in {"created", "skipped"}:
+                record_run(cfg, "backlog_groomer", github_slug)
+
+            if status == "created":
+                summaries.append(f"{github_slug}: {result.get('created', 0)} created, {result.get('skipped', 0)} skipped")
+            elif status == "skipped":
+                summaries.append(f"{github_slug}: skipped ({result.get('skipped', 0)} duplicate/failed creates)")
+            elif status == "no-data":
+                summaries.append(f"{github_slug}: no-data")
+            else:
+                summaries.append(f"{github_slug}: error ({result.get('error', 'unknown error')})")
 
         summary = (
             f"Backlog Groomer complete\n"
             f"Issues created: {all_created} | Skipped: {all_skipped}\n"
+            f"Repo statuses: created={status_counts['created']} skipped={status_counts['skipped']} "
+            f"no-data={status_counts['no-data']} error={status_counts['error']} dormant={status_counts['dormant']}\n"
             + "\n".join(summaries)
         )
         print(f"\n{summary}")
