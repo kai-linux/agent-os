@@ -1,6 +1,7 @@
 """Tests for strategic_planner focus area analysis and configuration."""
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import textwrap
@@ -28,6 +29,7 @@ from orchestrator.strategic_planner import (
     _repo_planner_config,
     _resolve_repos,
     _set_issues_ready,
+    _open_issues_summary,
     _strategy_dependencies,
     _summarize_strategy,
     _update_focus_areas_section,
@@ -421,6 +423,27 @@ def test_resolve_repos_prefers_explicit_github_projects_local_repo():
     }
     repos = dict(_resolve_repos(cfg))
     assert repos["kai-linux/bookgenerator"] == Path("/home/kai/bookgenerator")
+
+
+def test_open_issues_summary_only_includes_active_issues(monkeypatch):
+    raw_issues = [
+        {
+            "number": 37,
+            "title": "Backlog item",
+            "labels": [{"name": "prio:high"}],
+            "author": {"login": "kai-linux"},
+        },
+        {
+            "number": 38,
+            "title": "Active item",
+            "labels": [{"name": "in-progress"}],
+            "author": {"login": "kai-linux"},
+        },
+    ]
+    monkeypatch.setattr("orchestrator.strategic_planner._gh", lambda *args, **kwargs: json.dumps(raw_issues))
+    summary = _open_issues_summary("owner/repo", {"trusted_authors": ["kai-linux"]})
+    assert "#38" in summary
+    assert "#37" not in summary
 
 
 def test_set_issues_ready_adds_new_issue_to_project(monkeypatch):
