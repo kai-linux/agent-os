@@ -16,6 +16,16 @@
 
 ## Recent Changes
 
+### 2026-03-19 — [task-20260319-073106-task-task-dependency-resolver] (#6 kai-linux/agent-os)
+Implemented dependency-aware dispatching in the GitHub dispatcher so issues declaring `Depends on #N` or `Blocked by #N` stay blocked until their dependency chain is resolved, then automatically return to `Ready` on later dispatcher runs.
+
+**Files:** `- orchestrator/github_dispatcher.py`, `- tests/test_github_dispatcher.py`, `- CODEBASE.md`, `- .agent_result.md`
+
+**Decisions:**
+  - - Reused project query results as the primary dependency cache to avoid unnecessary extra `gh` calls
+  - - Capped dependency traversal at 3 levels and limited uncached remote lookups to one `gh issue view` per candidate
+
+
 ### 2026-03-18 — [task-20260318-224806-task-task-decomposer-agent] (#2 kai-linux/agent-os)
 Added a fast Claude Haiku decomposition step to the dispatcher so atomic issues still dispatch unchanged while epic issues are split into ordered sub-issues, linked back to the parent, and the first child is dispatched immediately.
 
