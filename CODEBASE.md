@@ -16,6 +16,17 @@
 
 ## Recent Changes
 
+### 2026-03-19 — [task-20260319-133023-strategic-planner-configurable-plan-size-and-sprin] (#25 kai-linux/agent-os)
+Made plan size and sprint cadence configurable per-repository. Added `plan_size` and `sprint_cadence_days` as top-level config fields with per-repo overrides via `github_projects` repos entries. The retrospective window automatically adjusts to match the configured sprint cadence. Defaults to current behavior (5 tasks, 7 days) when not configured.
+
+**Files:** `- orchestrator/strategic_planner.py`, `- tests/test_strategic_planner.py`, `- example.config.yaml`
+
+**Decisions:**
+  - - Used top-level `plan_size` and `sprint_cadence_days` as global defaults, with per-repo overrides in `github_projects.*.repos[].plan_size` and `github_projects.*.repos[].sprint_cadence_days` — matches existing per-repo config patterns
+  - - Renamed `PLAN_SIZE` to `DEFAULT_PLAN_SIZE` to clarify it's a fallback, not a fixed value
+  - - Made `_build_retrospective()` accept a `days` parameter rather than reading config itself — keeps the function pure and testable
+
+
 ### 2026-03-19 — [task-20260319-103913-strategy-md-auto-update-focus-areas-from-sprint-pa] (#23 kai-linux/agent-os)
 Added automatic focus area extraction to the strategic planner. When STRATEGY.md has 3+ sprint entries, a Haiku LLM call analyzes sprint history to identify 3-5 recurring work themes and updates the 'Current Focus Areas' section. User-edited content is preserved via an HTML comment marker (`<!-- auto-focus-areas -->`); if the marker is absent and the section contains non-placeholder content, the update is skipped.
 
