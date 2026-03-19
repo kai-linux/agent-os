@@ -22,7 +22,7 @@ Every startup needs roles. Agent OS fills them all:
 | **Code Reviewer** | `pr_monitor.py` | Watches CI, approves merges, resolves conflicts | Every 5 min |
 | **Analyst** | `log_analyzer.py` | Reviews last week's failures, files bugs against the system itself | Monday 07:00 |
 | **Performance Lead** | `agent_scorer.py` | Scores each engineer's success rate, flags underperformers | Monday 07:00 |
-| **Backlog Groomer** | `backlog_groomer.py` | Prunes stale work, surfaces risks, generates new tasks | Saturday 20:00 |
+| **Backlog Groomer** | `backlog_groomer.py` | Prunes stale work, surfaces risks, generates new tasks | Config-driven cadence |
 | **Institutional Memory** | `CODEBASE.md` | Records what was done, why, and what broke — readable by all agents | After every task |
 
 The backlog is GitHub Issues. The sprint board is GitHub Projects. The standup is Telegram. The office is a $5/month VPS.
@@ -85,6 +85,8 @@ Every Monday at 07:00, two things happen automatically:
 Every Saturday at 20:00:
 
 3. **`backlog_groomer.py`** scans every repo for stale issues (>30 days), Known Issues in `CODEBASE.md` that don't have linked tickets, and risk flags from recent agent results. It generates 3-5 new improvement tasks. Semantic deduplication (0.75 similarity threshold) prevents duplicate issues from piling up.
+
+The planner and groomer are safe to invoke frequently from cron. Each repo has its own cadence in config (`sprint_cadence_days`, `groomer_cadence_days`), fractional days are supported, and `0` means dormant.
 
 These generated issues are indistinguishable from human-written ones. They enter the same queue, get dispatched to the same agents, go through the same CI → merge pipeline. The system literally engineers itself.
 
@@ -259,9 +261,10 @@ crontab -e
 * * * * *   /path/to/agent-os/bin/run_dispatcher.sh  >> runtime/logs/dispatcher.log 2>&1
 * * * * *   /path/to/agent-os/bin/run_queue.sh        >> runtime/logs/cron.log 2>&1
 */5 * * * * /path/to/agent-os/bin/run_pr_monitor.sh   >> runtime/logs/pr_monitor.log 2>&1
+0 * * * *   /path/to/agent-os/bin/run_strategic_planner.sh >> runtime/logs/strategic_planner.log 2>&1
+0 * * * *   /path/to/agent-os/bin/run_backlog_groomer.sh >> runtime/logs/backlog_groomer.log 2>&1
 0 7 * * 1   /path/to/agent-os/bin/run_log_analyzer.sh >> runtime/logs/log_analyzer.log 2>&1
 0 7 * * 1   /path/to/agent-os/bin/run_agent_scorer.sh >> runtime/logs/agent_scorer.log 2>&1
-0 20 * * 6  /path/to/agent-os/bin/run_backlog_groomer.sh >> runtime/logs/backlog_groomer.log 2>&1
 ```
 
 Create your first issue. Set it to Ready. Watch the system work.
