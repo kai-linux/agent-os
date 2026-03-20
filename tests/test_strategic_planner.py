@@ -40,11 +40,8 @@ from orchestrator.strategic_planner import (
     _planning_research_context,
     _production_feedback_context,
     _planning_signals_context,
-<<<<<<< HEAD
     _repo_production_feedback_config,
-=======
     _recent_outcome_summary,
->>>>>>> 2280b51 (agent task-20260320-101116-add-post-merge-outcome-attribution-for-issue-pr-an)
     _repo_signals_config,
     _read_planning_principles,
     _repo_planner_config,
@@ -458,12 +455,8 @@ def test_build_plan_prompt_includes_research_context():
         north_star="north star",
         planning_principles="north-star rubric",
         codebase_context="codebase",
-<<<<<<< HEAD
         production_feedback_context="signals",
-=======
-        signals_context="signals",
         outcome_context="outcomes",
->>>>>>> 2280b51 (agent task-20260320-101116-add-post-merge-outcome-attribution-for-issue-pr-an)
         research_context="# Planning Research\n\nEvidence",
         retrospective="retro",
         git_log="abc123 commit",
@@ -485,12 +478,8 @@ def test_build_plan_prompt_includes_planning_principles():
         north_star="north star",
         planning_principles="Prefer autonomy and evidence.",
         codebase_context="codebase",
-<<<<<<< HEAD
         production_feedback_context="signals",
-=======
-        signals_context="signals",
         outcome_context="outcomes",
->>>>>>> 2280b51 (agent task-20260320-101116-add-post-merge-outcome-attribution-for-issue-pr-an)
         research_context="research",
         retrospective="retro",
         git_log="abc123 commit",
@@ -512,12 +501,8 @@ def test_build_plan_prompt_includes_north_star():
         north_star="Closed-loop self-improvement.",
         planning_principles="Prefer autonomy and evidence.",
         codebase_context="codebase",
-<<<<<<< HEAD
         production_feedback_context="signals",
-=======
-        signals_context="signals",
         outcome_context="outcomes",
->>>>>>> 2280b51 (agent task-20260320-101116-add-post-merge-outcome-attribution-for-issue-pr-an)
         research_context="research",
         retrospective="retro",
         git_log="abc123 commit",
@@ -630,12 +615,8 @@ def test_build_plan_prompt_includes_production_feedback():
         north_star="north star",
         planning_principles="Prefer autonomy and evidence.",
         codebase_context="codebase",
-<<<<<<< HEAD
         production_feedback_context="# Production Feedback\n\nActivation dropped 20%.",
-=======
-        signals_context="# Planning Signals\n\nActivation dropped 20%.",
         outcome_context="Outcome evidence here.",
->>>>>>> 2280b51 (agent task-20260320-101116-add-post-merge-outcome-attribution-for-issue-pr-an)
         research_context="research",
         retrospective="retro",
         git_log="abc123 commit",
@@ -645,8 +626,8 @@ def test_build_plan_prompt_includes_production_feedback():
         open_issues="(none)",
         cross_repo_context="(single repo)",
     )
-<<<<<<< HEAD
     assert "--- Production Feedback (PRODUCTION_FEEDBACK.md) ---" in prompt
+    assert "--- Recent Outcome Evidence ---" in prompt
     assert "Activation dropped 20%." in prompt
 
 
@@ -687,10 +668,6 @@ def test_production_feedback_context_guards_stale_low_trust_private_inputs(tmp_p
     assert "Guarded:" in context
     assert "trust below minimum" in context
     assert "privacy level restricted not allowed" in context
-=======
-    assert "--- Planning Signals (PLANNING_SIGNALS.md) ---" in prompt
-    assert "--- Recent Outcome Evidence ---" in prompt
-    assert "Activation dropped 20%." in prompt
 
 
 def test_recent_outcome_summary_refreshes_snapshot(tmp_path, monkeypatch):
@@ -774,7 +751,6 @@ def test_recent_outcome_summary_marks_missing_checks_inconclusive(tmp_path):
     summary = _recent_outcome_summary(cfg, "owner/repo", repo, days=30)
 
     assert "inconclusive" in summary
->>>>>>> 2280b51 (agent task-20260320-101116-add-post-merge-outcome-attribution-for-issue-pr-an)
 
 
 # ---------------------------------------------------------------------------

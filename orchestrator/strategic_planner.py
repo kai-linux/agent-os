@@ -84,7 +84,6 @@ RESEARCH_MAX_SOURCES = 4
 RESEARCH_MAX_SOURCE_CHARS = 4000
 RESEARCH_CONTEXT_MAX_CHARS = 4000
 RESEARCH_FETCH_TIMEOUT_SECONDS = 20
-<<<<<<< HEAD
 FEEDBACK_MAX_INPUTS = 6
 FEEDBACK_MAX_SOURCE_CHARS = 4000
 FEEDBACK_CONTEXT_MAX_CHARS = 6000
@@ -92,13 +91,8 @@ SIGNAL_INPUT_TYPES = FEEDBACK_SIGNAL_CLASSES
 SIGNALS_MAX_INPUTS = FEEDBACK_MAX_INPUTS
 SIGNALS_MAX_SOURCE_CHARS = FEEDBACK_MAX_SOURCE_CHARS
 SIGNALS_CONTEXT_MAX_CHARS = FEEDBACK_CONTEXT_MAX_CHARS
-=======
-SIGNALS_MAX_INPUTS = 6
-SIGNALS_MAX_SOURCE_CHARS = 4000
-SIGNALS_CONTEXT_MAX_CHARS = 5000
 OUTCOME_CONTEXT_MAX_CHARS = 4000
 OUTCOME_MAX_CHECKS = 12
->>>>>>> 2280b51 (agent task-20260320-101116-add-post-merge-outcome-attribution-for-issue-pr-an)
 
 
 def _format_cadence(days: float) -> str:
@@ -1798,13 +1792,9 @@ Rules:
 - Order by priority (most impactful first)
 - Build on last sprint's outcomes — continue momentum, fix regressions, advance strategy
 - Treat the planning principles as the stable north-star rubric when strategy and backlog quality are ambiguous
-<<<<<<< HEAD
 - When production feedback is present, prioritize measurable analytics, user feedback, product inspection, and incident/SLO outcomes over narrative summaries alone
 - Treat entries marked `Planning Use: guarded` as audit context only, not as drivers for roadmap or prioritization decisions
-=======
-- When planning signals are present, prioritize measurable user, market, and analytics outcomes over narrative summaries alone
 - Use recent outcome evidence to reinforce work that improved results, repair regressions, and close measurement gaps
->>>>>>> 2280b51 (agent task-20260320-101116-add-post-merge-outcome-attribution-for-issue-pr-an)
 - When fresh research is present, use it to inform prioritization and rationale. Prefer work that is supported by repo-local strategy plus bounded external evidence.
 - Prefer unblockers, autonomy gains, planning-quality gains, and evidence-driven improvements over local churn
 - Include a mix of: feature work that advances the product vision, bug fixes, self-improvement, and infrastructure
@@ -1906,12 +1896,8 @@ def _build_plan_prompt(
     north_star: str,
     planning_principles: str,
     codebase_context: str,
-<<<<<<< HEAD
     production_feedback_context: str,
-=======
-    signals_context: str,
     outcome_context: str,
->>>>>>> 2280b51 (agent task-20260320-101116-add-post-merge-outcome-attribution-for-issue-pr-an)
     research_context: str,
     retrospective: str,
     git_log: str,
@@ -1927,12 +1913,8 @@ def _build_plan_prompt(
         readme_goal=readme_goal,
         north_star=north_star,
         planning_principles=planning_principles,
-<<<<<<< HEAD
         production_feedback_context=production_feedback_context,
-=======
-        signals_context=signals_context,
         outcome_context=outcome_context,
->>>>>>> 2280b51 (agent task-20260320-101116-add-post-merge-outcome-attribution-for-issue-pr-an)
         codebase_context=codebase_context,
         research_context=research_context,
         retrospective=retrospective,
@@ -2319,12 +2301,8 @@ def plan_repo(
         north_star=north_star,
         planning_principles=planning_principles,
         codebase_context=codebase_context,
-<<<<<<< HEAD
         production_feedback_context=production_feedback_context,
-=======
-        signals_context=signals_context,
         outcome_context=outcome_context,
->>>>>>> 2280b51 (agent task-20260320-101116-add-post-merge-outcome-attribution-for-issue-pr-an)
         research_context=research_context,
         retrospective=retrospective,
         git_log=git_log,

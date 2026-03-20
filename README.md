@@ -235,7 +235,6 @@ production_feedback:
       privacy_note: Summary only; no raw user identifiers
     - name: Signup flow inspection
       type: web
-<<<<<<< HEAD
       signal_class: product_inspection
       url: https://app.example.com/signup
       observed_at: 2026-03-19T09:30:00Z
@@ -254,7 +253,6 @@ production_feedback:
       trust_note: Operational summary reviewed by maintainer
       privacy: public
       privacy_note: Service-level summary only; no customer-identifying logs
-=======
       input_type: market_signal
       url: https://competitor.example.com/pricing
       observed_at: 2026-03-18T10:00:00Z
@@ -279,7 +277,6 @@ outcome_attribution:
       path: ../shared/community-feedback-after-release.md
       measurement_window_days: 3
       comparison_window: Compare the post-release comment volume against the prior 3 days
->>>>>>> 2280b51 (agent task-20260320-101116-add-post-merge-outcome-attribution-for-issue-pr-an)
 ```
 
 DeepSeek has its own provider fallback: `openrouter → nanogpt → chutes`. It is kept last in the chain by default because it depends on extra provider configuration and should not consume retries when those providers are unavailable.
