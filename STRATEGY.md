@@ -17,14 +17,43 @@ You give it a backlog. It ships pr
 ## Current Focus Areas
 
 
+
 <!-- auto-focus-areas -->
-- Strengthen the execution control plane with better failure gating, blocker handling, and recovery follow-through
-- Improve observability and auditability of autonomous work through prompt snapshots, outcome attribution, and richer retrospectives
-- Advance evidence-driven strategic planning with research, analytics, feedback inputs, and auto-derived planning signals
-- Expand orchestration capabilities for autonomous task execution, including decomposition, dependency management, and bounded follow-up creation
-- Improve cross-repo and delivery workflow reliability through dependency-aware planning, CI fixes, and safer git/publish operations
+- Strengthen execution control-plane reliability by preventing repeat CI, git/publish, and task-dispatch failures
+- Close the loop on blocked or partial work with structured blocker data, bounded follow-ups, and recovery automation
+- Improve observability and auditability of agent work through prompt snapshots, outcome attribution, and normalized production feedback
+- Advance evidence-driven strategic planning with richer research inputs, sprint-pattern analysis, and auto-generated planning artifacts
+- Expand autonomous orchestration across tasks and repos with dependency-aware planning, adaptive routing, and decomposed execution
 
 ## Sprint History
+
+### Sprint 2026-03-20
+
+**Retrospective:**
+Issues completed:
+- #73: Fix CI failure on PR #71 [bug, prio:high, done] — COMPLETED
+- #64: Add post-merge outcome attribution for issue, PR, and task IDs [enhancement, prio:high, done] — COMPLETED
+- #62: Build a normalized production feedback substrate for repos [enhancement, prio:high, done] — COMPLETED
+- #60: Auto-file bounded follow-ups for partial debug outcomes [enhancement, prio:normal, done] — COMPLETED
+- #58: Gate git/publish tasks on writable remote capabilities [bug, prio:high, done] — COMPLETED
+- #54: Require structured blocker codes on blocked task outcomes [bug, prio:high, done] — COMPLETED
+- #51: Persist worker prompt snapshots for each dispatched task [enhancement, prio:high, done] — COMPLETED
+
+PRs merged:
+- PR #72: Agent: task-20260320-101212-auto-file-bounded-follow-ups-for-partial-debug-out (branch: agent/task-20260320-101212-auto-file-bounded-follow-ups-for-partial-debug-out)
+- PR #71: Agent: task-20260320-101116-add-post-merge-outcome-attribution-for-issue-pr-an (branch: agent/task-20260320-101116-add-post-merge-outcome-attribution-for-issue-pr-an)
+- PR #68: Agent: task-20260320-101013-build-a-normalized-production-feedback-substrate-f (branch: agent/task-20260320-101013-build-a-normalized-production-feedback-substrate-f)
+- PR #67: Agent: task-20260320-100911-require-structured-blocker-codes-on-blocked-task-o (branch: agent/task-20260320-100911-require-structured-blocker-codes-on-blocked-task-o)
+- PR #66: Agent: task-20260320-100812-persist-worker-prompt-snapshots-for-each-dispatche (branch: agent/task-20260320-100812-persist-worker-prompt-snapshots-for-each-dispatche)
+- PR #61: Agent: task-20260320-081208-gate-git-publish-tasks-on-writable-remote-capabili (branch: agent/task-20260320-081208-gate-git-publish-tasks-on-writable-remote-capabili)
+
+**Plan:**
+- [prio:high] Consume escalation-note retry decisions in task dispatch: This is the strongest immediate follow-through on the new blocker-code and bounded-follow-up work because the strategy prioritizes turning failures into actionable, closed-loop recovery.
+- [prio:high] Quarantine tasks that block repeatedly within one day: This directly removes a repeated operational failure mode, which the planning principles rank above local feature churn and aligns with the current focus on stronger execution control and blocker handling.
+- [prio:high] Replace static fallback chains with adaptive agent routing: This pushes beyond maintenance toward the long-term North Star by compounding execution data into better autonomous routing and recovery decisions.
+- [prio:normal] Auto-generate PLANNING_RESEARCH.md each sprint cycle: This best advances the strategy’s evidence-driven planning track by converting a currently missing input into a repeatable planning artifact.
+- [prio:high] Add regression test for PR CI failure recovery flow: Recent CI recovery incidents make this the right reliability hardening task this week because the strategy favors preventing repeated control-plane regressions after a fix lands.
+
 
 ### Sprint 2026-03-20
 
