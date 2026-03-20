@@ -16,6 +16,16 @@
 
 ## Recent Changes
 
+### 2026-03-20 — [task-20260320-134213-auto-rerun-blocked-tasks-after-prompt-inspection-c] (#78 kai-linux/agent-os)
+Added a bounded queue-side recovery path that requeues a previously blocked task once after a linked prompt-inspection task completes successfully, and records recovery linkage on both the blocked attempt and the rerun task.
+
+**Files:** `- orchestrator/queue.py`, `- tests/test_queue.py`, `- .agent_result.md`
+
+**Decisions:**
+  - - Kept the recovery logic inside the queue so it can requeue mailbox tasks without adding a separate dispatcher flow
+  - - Limited automatic recovery to prompt-related blocked attempts by gating on `invalid_result_contract` and one-time requeue markers
+
+
 ### 2026-03-20 — [task-20260320-134110-auto-generate-production-feedback-md-each-sprint-c] (#76 kai-linux/agent-os)
 Strategic planning now auto-generates `PRODUCTION_FEEDBACK.md` from repo-local runtime feedback data each sprint cycle, including explicit no-signal summaries when no substrate data exists.
 
