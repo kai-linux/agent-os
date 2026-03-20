@@ -16,6 +16,16 @@
 
 ## Recent Changes
 
+### 2026-03-20 — [task-20260320-101212-auto-file-bounded-follow-ups-for-partial-debug-out] (#60 kai-linux/agent-os)
+Implemented deduped GitHub follow-up creation for partial debugging outcomes and suppressed the local mailbox stub when that GitHub follow-up exists, with a focused regression test covering create-once behavior.
+
+**Files:** `- orchestrator/github_sync.py`, `- orchestrator/queue.py`, `- tests/test_github_sync.py`
+
+**Decisions:**
+  - - Reused the existing GitHub sync path for issue-backed tasks so partial debugging follow-ups become real GitHub issues without introducing a second orchestration flow
+  - - Kept mailbox follow-up creation unchanged for non-debugging or non-GitHub-backed tasks to minimize diff and behavioral risk
+
+
 ### 2026-03-20 — [task-20260320-101116-add-post-merge-outcome-attribution-for-issue-pr-an] (#64 kai-linux/agent-os)
 Added bounded post-merge outcome attribution by carrying issue-defined outcome check IDs through dispatch, recording task/issue/PR attribution events and timestamped outcome snapshots in a durable JSONL log, and surfacing that evidence in planner retrospectives and sprint-planning prompts with explicit inconclusive handling when no measurable external metric exists.
 
