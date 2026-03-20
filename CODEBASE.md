@@ -16,6 +16,16 @@
 
 ## Recent Changes
 
+### 2026-03-20 — [task-20260320-161013-gate-ci-debug-task-closure-on-a-verified-green-rer] (#85 kai-linux/agent-os)
+Added a queue-side PR CI remediation completion gate so debugging tasks only stay complete when GitHub records a post-attempt workflow rerun and the previously failing job is green.
+
+**Files:** `- orchestrator/queue.py`, `- orchestrator/github_dispatcher.py`, `- tests/test_queue.py`, `- .agent_result.md`
+
+**Decisions:**
+  - - Kept the enforcement in `orchestrator/queue.py` so task closure is blocked before the queue moves a remediation task to `DONE`.
+  - - Reused GitHub Actions run/job metadata instead of adding new persistence or PR-monitor state to verify rerun timing and job outcomes.
+
+
 ### 2026-03-20 — [task-20260320-134213-auto-rerun-blocked-tasks-after-prompt-inspection-c] (#78 kai-linux/agent-os)
 Added a bounded queue-side recovery path that requeues a previously blocked task once after a linked prompt-inspection task completes successfully, and records recovery linkage on both the blocked attempt and the rerun task.
 
