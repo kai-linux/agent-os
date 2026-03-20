@@ -1645,6 +1645,15 @@ def _repo_pending_plan_action(actions_dir: Path, repo: str) -> dict | None:
     return repo_actions[-1]
 
 
+def _invalidate_pending_action_for_dormant_repo(paths: dict, action: dict, github_slug: str) -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    print(f"  Skipping {github_slug}: dormant (discarding pending approval {action.get('action_id', '?')})")
+    action["status"] = "invalid"
+    action["completed_at"] = now
+    action["invalid_reason"] = "repo is dormant"
+    save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
+
+
 def _complete_plan_action(
     cfg: dict,
     paths: dict,
@@ -2087,12 +2096,18 @@ def run():
             print("Planning order: " + " -> ".join(github_slug for github_slug, _ in repos))
 
         for github_slug, repo_path in repos:
+            _, sprint_cadence_days = _repo_planner_config(cfg, github_slug)
             pending_action = _repo_pending_plan_action(paths["TELEGRAM_ACTIONS"], github_slug)
+            if sprint_cadence_days <= 0:
+                if pending_action:
+                    _invalidate_pending_action_for_dormant_repo(paths, pending_action, github_slug)
+                else:
+                    print(f"  Skipping {github_slug}: dormant")
+                continue
             if pending_action:
                 _complete_plan_action(cfg, paths, pending_action, repo_path)
                 continue
 
-            _, sprint_cadence_days = _repo_planner_config(cfg, github_slug)
             due, reason = is_due(
                 cfg,
                 "strategic_planner",
