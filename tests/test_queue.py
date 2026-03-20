@@ -434,10 +434,55 @@ def test_rescue_git_progress_marks_result_complete(tmp_path, monkeypatch):
     monkeypatch.setattr("orchestrator.queue.has_unpushed_commits", lambda worktree, branch: False)
     monkeypatch.setattr("orchestrator.queue.commit_and_push", lambda *args, **kwargs: True)
 
-    rescued = rescue_git_progress(result, tmp_path, "agent/task-1", "task-1", True, tmp_path / "x.log", tmp_path / "y.log")
+    rescued, pushed = rescue_git_progress({}, result, tmp_path, "agent/task-1", "task-1", True, tmp_path / "x.log", tmp_path / "y.log")
     assert rescued is not None
+    assert pushed is True
     assert rescued["status"] == "complete"
     assert "rescued and pushed" in rescued["summary"]
+
+
+def test_rescue_git_progress_withholds_push_when_validation_fails(tmp_path, monkeypatch):
+    result = {
+        "status": "blocked",
+        "summary": "Need someone else to commit and push.",
+        "done": ["- Updated files."],
+        "decisions": ["- Could not push from agent environment."],
+    }
+    monkeypatch.setattr("orchestrator.queue.has_changes", lambda worktree: True)
+    monkeypatch.setattr("orchestrator.queue.has_unpushed_commits", lambda worktree, branch: False)
+    run_tests_calls = []
+    monkeypatch.setattr(
+        "orchestrator.queue.run_tests",
+        lambda cfg, repo, worktree, logfile, queue_summary_log: run_tests_calls.append((cfg, worktree)),
+    )
+    monkeypatch.setattr(
+        "orchestrator.queue.parse_agent_result",
+        lambda worktree: {
+            "status": "partial",
+            "summary": "Tests failed during rescue validation.",
+            "next_step": "Fix the failing tests.",
+            "decisions": ["- Rescue validation found failing tests."],
+        },
+    )
+    commit_calls = []
+    monkeypatch.setattr("orchestrator.queue.commit_and_push", lambda *args, **kwargs: commit_calls.append(args) or True)
+
+    rescued, pushed = rescue_git_progress(
+        {"test_command": "pytest"},
+        result,
+        tmp_path,
+        "agent/task-1",
+        "task-1",
+        True,
+        tmp_path / "x.log",
+        tmp_path / "y.log",
+    )
+    assert rescued is not None
+    assert pushed is False
+    assert rescued["status"] == "partial"
+    assert "not pushed" in rescued["summary"]
+    assert run_tests_calls
+    assert commit_calls == []
 
 
 def test_handle_telegram_callback_requeue(monkeypatch):

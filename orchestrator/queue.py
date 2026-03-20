@@ -941,17 +941,38 @@ def should_attempt_git_rescue(result: dict, worktree: Path, branch: str) -> bool
     return has_changes(worktree) or has_unpushed_commits(worktree, branch)
 
 
-def rescue_git_progress(result: dict, worktree: Path, branch: str, task_id: str, allow_push: bool, logfile: Path, queue_summary_log: Path) -> dict | None:
+def rescue_git_progress(
+    cfg: dict,
+    result: dict,
+    worktree: Path,
+    branch: str,
+    task_id: str,
+    allow_push: bool,
+    logfile: Path,
+    queue_summary_log: Path,
+) -> tuple[dict | None, bool]:
     if not should_attempt_git_rescue(result, worktree, branch):
-        return None
+        return None, False
+    if cfg.get("test_command"):
+        run_tests(cfg, worktree, worktree, logfile, queue_summary_log)
+        validated = parse_agent_result(worktree)
+        if validated.get("status") != "complete":
+            summary = validated.get("summary", result.get("summary", "Recovered worktree changes failed validation."))
+            validated["summary"] = f"{summary} Orchestrator rescue validation failed, so changes were not pushed."
+            next_step = validated.get("next_step", "Inspect the failing tests and rerun the task.")
+            validated["next_step"] = next_step or "Inspect the failing tests and rerun the task."
+            decisions = list(validated.get("decisions", ["- None"]))
+            decisions.append("- Queue attempted git rescue but withheld push because rescue validation did not finish cleanly.")
+            validated["decisions"] = decisions
+            return validated, False
     try:
         committed = commit_and_push(worktree, branch, task_id, allow_push, logfile, queue_summary_log)
     except Exception as e:
         log(f"Git rescue failed: {e}", logfile, also_summary=True, queue_summary_log=queue_summary_log)
-        return None
+        return None, False
 
     if not committed:
-        return None
+        return None, False
 
     rescued = dict(result)
     rescued["status"] = "complete"
@@ -964,7 +985,7 @@ def rescue_git_progress(result: dict, worktree: Path, branch: str, task_id: str,
     decisions = list(result.get("decisions", ["- None"]))
     decisions.append("- Queue performed git rescue after the agent left valid changes behind.")
     rescued["decisions"] = decisions
-    return rescued
+    return rescued, True
 
 
 def parse_agent_result(worktree: Path):
@@ -1675,12 +1696,20 @@ def main():
 
         meta["model_attempts"] = model_attempts
 
-        rescued_result = rescue_git_progress(final_result, worktree, branch, task_id, allow_push, logfile, QUEUE_SUMMARY_LOG)
-        rescued_push = rescued_result is not None
+        rescued_result, rescued_push = rescue_git_progress(
+            cfg,
+            final_result,
+            worktree,
+            branch,
+            task_id,
+            allow_push,
+            logfile,
+            QUEUE_SUMMARY_LOG,
+        )
         if rescued_result is not None:
             final_result = rescued_result
 
-        pushed = False if rescued_push else commit_and_push(worktree, branch, task_id, allow_push, logfile, QUEUE_SUMMARY_LOG)
+        pushed = False if rescued_result is not None else commit_and_push(worktree, branch, task_id, allow_push, logfile, QUEUE_SUMMARY_LOG)
 
         commit_hash = None
         if pushed or rescued_push:
