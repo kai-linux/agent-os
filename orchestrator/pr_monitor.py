@@ -284,6 +284,15 @@ def _format_failed_checks(checks: list[dict]) -> str:
     return "\n".join(lines) or "- (no details available)"
 
 
+def _missing_checks_stub() -> list[dict]:
+    return [{
+        "name": "required checks missing",
+        "state": "ERROR",
+        "bucket": "fail",
+        "link": "",
+    }]
+
+
 def _find_repo_project(cfg: dict, repo: str) -> tuple[str, dict, dict] | tuple[None, None, None]:
     for project_key, project_cfg in cfg.get("github_projects", {}).items():
         for repo_cfg in project_cfg.get("repos", []):
@@ -774,7 +783,8 @@ def monitor_prs():
             pr_url = pr["url"]
             pr_number = pr["number"]
             pr_title = pr["title"]
-            attempts = state.get(pr_url, {}).get("attempts", 0)
+            pr_state = state.setdefault(pr_url, {})
+            attempts = pr_state.get("attempts", 0)
 
             if pr.get("isDraft"):
                 print(f"  PR #{pr_number}: draft, skipping")
@@ -782,8 +792,31 @@ def monitor_prs():
 
             checks = _get_pr_checks(repo, pr_number)
             print(f"  PR #{pr_number} '{pr_title}': {len(checks)} check(s)")
+            if checks:
+                if pr_state.pop("no_checks_polls", None) is not None:
+                    _save_state(paths, state)
             if _reconcile_open_pr_state(cfg, repo, pr, checks, state):
                 _save_state(paths, state)
+
+            if not checks:
+                no_checks_polls = pr_state.get("no_checks_polls", 0) + 1
+                pr_state["no_checks_polls"] = no_checks_polls
+                _save_state(paths, state)
+                if no_checks_polls < 2:
+                    print(f"  PR #{pr_number}: no checks reported yet, will retry next poll")
+                    continue
+
+                remediation_issue = _find_open_issue_by_title(repo, f"Fix CI failure on PR #{pr_number}")
+                if remediation_issue:
+                    print(f"  PR #{pr_number}: missing checks and remediation issue #{remediation_issue['number']} is active")
+                    continue
+
+                new_attempts = min(attempts + 1, MAX_MERGE_ATTEMPTS)
+                pr_state["attempts"] = new_attempts
+                _save_state(paths, state)
+                print(f"  PR #{pr_number}: no checks reported after {no_checks_polls} polls (attempt {new_attempts}/{MAX_MERGE_ATTEMPTS})")
+                _handle_ci_failure(cfg, repo, pr, _missing_checks_stub(), new_attempts)
+                continue
 
             if _checks_any_failed(checks):
                 remediation_issue = _find_open_issue_by_title(repo, f"Fix CI failure on PR #{pr_number}")

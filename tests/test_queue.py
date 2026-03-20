@@ -5,12 +5,15 @@ import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 # Ensure orchestrator package is importable
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from orchestrator.queue import (
     CommandExecutionError,
     _format_runner_failure,
+    _validate_workflow_files,
     agent_available,
     build_escalation_message,
     get_agent_chain,
@@ -24,6 +27,7 @@ from orchestrator.queue import (
     save_telegram_action,
     split_section,
     telegram_action_expired,
+    WorkflowValidationError,
     write_prompt,
 )
 
@@ -518,6 +522,59 @@ def test_format_runner_failure_classifies_usage_limit():
     assert "usage limit / rate limit" in summary
     assert "usage limit reached" in detail
     assert any("stderr tail" in item for item in blockers)
+
+
+def test_validate_workflow_files_rejects_runner_context_in_job_env(tmp_path):
+    workflow_dir = tmp_path / ".github" / "workflows"
+    workflow_dir.mkdir(parents=True)
+    workflow = workflow_dir / "ci.yml"
+    workflow.write_text(textwrap.dedent("""\
+        name: CI
+        on:
+          push:
+            branches: ["**"]
+        jobs:
+          test:
+            runs-on: ubuntu-latest
+            env:
+              CI_ARTIFACT_DIR: ${{ runner.temp }}/ci-artifacts
+            steps:
+              - run: echo ok
+    """), encoding="utf-8")
+
+    import subprocess
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+
+    with pytest.raises(WorkflowValidationError) as exc:
+        _validate_workflow_files(tmp_path)
+
+    assert "runner.*" in str(exc.value)
+    assert "ci.yml" in str(exc.value)
+
+
+def test_validate_workflow_files_allows_runner_temp_via_step_env(tmp_path):
+    workflow_dir = tmp_path / ".github" / "workflows"
+    workflow_dir.mkdir(parents=True)
+    workflow = workflow_dir / "ci.yml"
+    workflow.write_text(textwrap.dedent("""\
+        name: CI
+        on:
+          push:
+            branches: ["**"]
+        jobs:
+          test:
+            runs-on: ubuntu-latest
+            steps:
+              - name: Prepare artifact dir
+                run: |
+                  echo "CI_ARTIFACT_DIR=$RUNNER_TEMP/ci-artifacts" >> "$GITHUB_ENV"
+                  mkdir -p "$RUNNER_TEMP/ci-artifacts"
+    """), encoding="utf-8")
+
+    import subprocess
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+
+    _validate_workflow_files(tmp_path)
 
 
 def test_agent_available_deepseek_requires_provider_config(monkeypatch):

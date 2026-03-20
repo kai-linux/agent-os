@@ -33,6 +33,7 @@ BLOCKER_CODE_DESCRIPTIONS = {
     "runner_failure": "The agent runner failed before the task could complete normally.",
     "timeout": "Execution exceeded the allowed time budget.",
     "test_failure": "Implementation landed, but verification failed and follow-up work is still required.",
+    "workflow_validation_failed": "A modified GitHub Actions workflow failed local validation before push.",
     "manual_intervention_required": "A human or out-of-band action is required before automation can continue.",
     "fallback_exhausted": "All configured automated fallback attempts were exhausted.",
     "invalid_result_contract": "The worker produced an invalid or missing task outcome contract.",
@@ -75,6 +76,10 @@ class CommandExecutionError(RuntimeError):
         super().__init__(" | ".join(details))
 
 
+class WorkflowValidationError(RuntimeError):
+    """Raised when a modified GitHub Actions workflow is invalid before push."""
+
+
 def _tail_text(text: str, max_lines: int = 12, max_chars: int = 1200) -> str:
     cleaned = (text or "").strip()
     if not cleaned:
@@ -84,6 +89,72 @@ def _tail_text(text: str, max_lines: int = 12, max_chars: int = 1200) -> str:
     if len(tail) > max_chars:
         tail = tail[-max_chars:]
     return tail
+
+
+def _changed_workflow_files(worktree: Path) -> list[Path]:
+    commands = [
+        ["git", "diff", "--name-only", "--", ".github/workflows"],
+        ["git", "diff", "--name-only", "--cached", "--", ".github/workflows"],
+        ["git", "ls-files", "--others", "--exclude-standard", "--", ".github/workflows"],
+    ]
+    seen: set[Path] = set()
+    changed: list[Path] = []
+    for cmd in commands:
+        result = subprocess.run(
+            cmd,
+            cwd=worktree,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            continue
+        for raw_line in result.stdout.splitlines():
+            rel_path = Path(raw_line.strip())
+            if rel_path.suffix.lower() not in {".yml", ".yaml"}:
+                continue
+            abs_path = worktree / rel_path
+            if abs_path in seen:
+                continue
+            seen.add(abs_path)
+            changed.append(abs_path)
+    return changed
+
+
+def _validate_workflow_files(worktree: Path) -> None:
+    changed = _changed_workflow_files(worktree)
+    for workflow_path in changed:
+        if not workflow_path.exists():
+            continue
+        rel_path = workflow_path.relative_to(worktree)
+        try:
+            data = yaml.safe_load(workflow_path.read_text(encoding="utf-8")) or {}
+        except Exception as exc:
+            raise WorkflowValidationError(
+                f"Workflow validation failed for {rel_path}: invalid YAML ({exc})."
+            ) from exc
+
+        violations: list[str] = []
+
+        def inspect_env(scope: str, env_map: object) -> None:
+            if not isinstance(env_map, dict):
+                return
+            for key, value in env_map.items():
+                if isinstance(value, str) and re.search(r"\${{\s*runner\.", value, re.IGNORECASE):
+                    violations.append(
+                        f"{scope} env `{key}` references `runner.*`, which is not available until a runner starts; set it in a step via `$GITHUB_ENV` instead."
+                    )
+
+        inspect_env("workflow-level", data.get("env"))
+        jobs = data.get("jobs")
+        if isinstance(jobs, dict):
+            for job_name, job_cfg in jobs.items():
+                if isinstance(job_cfg, dict):
+                    inspect_env(f"job `{job_name}`", job_cfg.get("env"))
+
+        if violations:
+            raise WorkflowValidationError(
+                f"Workflow validation failed for {rel_path}: " + " ".join(violations)
+            )
 
 
 def _classify_runner_failure(text: str) -> str | None:
@@ -1074,6 +1145,8 @@ def commit_and_push(worktree: Path, branch: str, task_id: str, allow_push: bool,
         log("No file changes detected. Skipping commit/push.", logfile, queue_summary_log=queue_summary_log)
         return False
 
+    _validate_workflow_files(worktree)
+
     if uncommitted:
         run(["git", "add", "-A"], cwd=worktree, logfile=logfile, queue_summary_log=queue_summary_log)
         run(["git", "commit", "-m", f"agent {task_id}"], cwd=worktree, logfile=logfile, queue_summary_log=queue_summary_log)
@@ -1122,6 +1195,8 @@ def rescue_git_progress(
             return validated, False
     try:
         committed = commit_and_push(worktree, branch, task_id, allow_push, logfile, queue_summary_log)
+    except WorkflowValidationError:
+        raise
     except Exception as e:
         log(f"Git rescue failed: {e}", logfile, also_summary=True, queue_summary_log=queue_summary_log)
         return None, False
@@ -1852,27 +1927,50 @@ def main():
 
         meta["model_attempts"] = model_attempts
 
-        rescued_result, rescued_push = rescue_git_progress(
-            cfg,
-            final_result,
-            worktree,
-            branch,
-            task_id,
-            allow_push,
-            logfile,
-            QUEUE_SUMMARY_LOG,
-        )
-        if rescued_result is not None:
-            final_result = rescued_result
-
-        pushed = False if rescued_result is not None else commit_and_push(worktree, branch, task_id, allow_push, logfile, QUEUE_SUMMARY_LOG)
-
+        rescued_result = None
+        rescued_push = False
+        pushed = False
         commit_hash = None
-        if pushed or rescued_push:
-            commit_hash = run(["git", "rev-parse", "HEAD"], cwd=worktree, logfile=logfile, queue_summary_log=QUEUE_SUMMARY_LOG).stdout.strip()
-            log(f"Final commit hash: {commit_hash}", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
-        else:
-            log("Task completed but nothing changed, so no commit/push happened.", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
+
+        try:
+            rescued_result, rescued_push = rescue_git_progress(
+                cfg,
+                final_result,
+                worktree,
+                branch,
+                task_id,
+                allow_push,
+                logfile,
+                QUEUE_SUMMARY_LOG,
+            )
+            if rescued_result is not None:
+                final_result = rescued_result
+
+            pushed = False if rescued_result is not None else commit_and_push(worktree, branch, task_id, allow_push, logfile, QUEUE_SUMMARY_LOG)
+
+            if pushed or rescued_push:
+                commit_hash = run(["git", "rev-parse", "HEAD"], cwd=worktree, logfile=logfile, queue_summary_log=QUEUE_SUMMARY_LOG).stdout.strip()
+                log(f"Final commit hash: {commit_hash}", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
+            else:
+                log("Task completed but nothing changed, so no commit/push happened.", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
+        except WorkflowValidationError as e:
+            push_validation_error = str(e)
+            final_result = {
+                "status": "blocked",
+                "blocker_code": "workflow_validation_failed",
+                "summary": push_validation_error,
+                "done": list((final_result or {}).get("done", ["- Agent work completed locally."])),
+                "blockers": [f"- {push_validation_error}"],
+                "next_step": "Update the workflow file to satisfy local validation, then rerun the task.",
+                "files_changed": list((final_result or {}).get("files_changed", ["- Inspect workflow diff in the worktree."])),
+                "tests_run": list((final_result or {}).get("tests_run", ["- None"])),
+                "decisions": list((final_result or {}).get("decisions", ["- None"])) + ["- Queue blocked push because a modified GitHub Actions workflow failed local validation."],
+                "risks": list((final_result or {}).get("risks", ["- None"])) + ["- Pushing this branch would strand the PR without the required CI status."],
+                "attempted_approaches": list((final_result or {}).get("attempted_approaches", ["- None"])) + ["- Queue validated modified workflow files before push and rejected the invalid configuration."],
+                "manual_steps": "",
+                "raw": (final_result or {}).get("raw", ""),
+            }
+            log(push_validation_error, logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
 
         if final_result is None:
             final_result = synthesize_exhausted_result(model_attempts)
