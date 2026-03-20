@@ -232,19 +232,28 @@ def sync_result(meta: dict, result: dict, commit_hash: str | None):
         print(f"Warning: failed to comment on issue #{issue_number}: {e}")
 
     if status == "complete":
-        edit_issue_labels(
-            repo,
-            issue_number,
-            add=["done"],
-            remove=["in-progress", "ready", "blocked", "agent-dispatched"],
-        )
-        status_value = project_cfg["done_value"]
+        if pr_url:
+            edit_issue_labels(
+                repo,
+                issue_number,
+                add=["in-progress", "agent-dispatched"],
+                remove=["ready", "blocked", "done"],
+            )
+            status_value = project_cfg["in_progress_value"]
+        else:
+            edit_issue_labels(
+                repo,
+                issue_number,
+                add=["done"],
+                remove=["in-progress", "ready", "blocked", "agent-dispatched"],
+            )
+            status_value = project_cfg["done_value"]
 
-        # Close the GitHub issue
-        try:
-            gh(["issue", "close", str(issue_number), "-R", repo])
-        except Exception as e:
-            print(f"Warning: failed to close issue #{issue_number}: {e}")
+            # Close the GitHub issue only when there is no PR left to validate/merge.
+            try:
+                gh(["issue", "close", str(issue_number), "-R", repo])
+            except Exception as e:
+                print(f"Warning: failed to close issue #{issue_number}: {e}")
 
     elif status in ("partial", "blocked"):
         edit_issue_labels(

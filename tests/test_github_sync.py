@@ -1,4 +1,7 @@
-"""Unit tests for follow-up creation in orchestrator/github_sync.py."""
+from __future__ import annotations
+
+"""Unit tests for follow-up creation and issue lifecycle in orchestrator/github_sync.py."""
+
 import sys
 from pathlib import Path
 
@@ -91,3 +94,109 @@ def test_sync_result_partial_debug_creates_single_deduped_followup(monkeypatch):
     assert "## Goal\nReproduce the parser failure with fixture B enabled" in created[0][2]
     assert created[0][3] == ["ready", "prio:high"]
     assert any("Follow-up issue" in body for _, _, body in comments)
+
+
+def _cfg() -> dict:
+    return {
+        "github_owner": "kai-linux",
+        "github_projects": {
+            "agent-os": {
+                "project_number": 6,
+                "in_progress_value": "In Progress",
+                "blocked_value": "Blocked",
+                "done_value": "Done",
+            }
+        },
+    }
+
+
+def _meta() -> dict:
+    return {
+        "github_project_key": "agent-os",
+        "github_repo": "kai-linux/agent-os",
+        "github_issue_number": 64,
+        "github_issue_url": "https://github.com/kai-linux/agent-os/issues/64",
+        "branch": "agent/test-branch",
+        "task_id": "task-123",
+    }
+
+
+def test_sync_result_complete_with_pr_keeps_issue_in_progress(monkeypatch):
+    monkeypatch.setattr("orchestrator.github_sync.load_config", lambda: _cfg())
+    comments = []
+    monkeypatch.setattr("orchestrator.github_sync.add_issue_comment", lambda repo, issue, body: comments.append(body))
+    label_calls = []
+    monkeypatch.setattr(
+        "orchestrator.github_sync.edit_issue_labels",
+        lambda repo, issue, add=None, remove=None: label_calls.append({"add": add, "remove": remove}),
+    )
+    monkeypatch.setattr(
+        "orchestrator.github_sync.create_pr_for_branch",
+        lambda repo, branch, title, body: "https://github.com/kai-linux/agent-os/pull/71",
+    )
+    gh_calls = []
+    monkeypatch.setattr("orchestrator.github_sync.gh", lambda args: gh_calls.append(args))
+    monkeypatch.setattr(
+        "orchestrator.github_sync.query_project",
+        lambda project_number, owner: {
+            "project_id": "proj",
+            "status_field_id": "field",
+            "status_options": {"In Progress": "opt-in-progress", "Done": "opt-done", "Blocked": "opt-blocked"},
+            "items": [{"url": "https://github.com/kai-linux/agent-os/issues/64", "item_id": "item-64"}],
+        },
+    )
+    project_status_calls = []
+    monkeypatch.setattr(
+        "orchestrator.github_sync.set_item_status",
+        lambda project_id, item_id, field_id, option_id: project_status_calls.append(option_id),
+    )
+
+    github_sync.sync_result(_meta(), {"status": "complete", "summary": "ok", "next_step": "none"}, "abc123")
+
+    assert comments and "https://github.com/kai-linux/agent-os/pull/71" in comments[0]
+    assert label_calls == [
+        {
+            "add": ["in-progress", "agent-dispatched"],
+            "remove": ["ready", "blocked", "done"],
+        }
+    ]
+    assert gh_calls == []
+    assert project_status_calls == ["opt-in-progress"]
+
+
+def test_sync_result_complete_without_pr_closes_issue(monkeypatch):
+    monkeypatch.setattr("orchestrator.github_sync.load_config", lambda: _cfg())
+    monkeypatch.setattr("orchestrator.github_sync.add_issue_comment", lambda repo, issue, body: None)
+    label_calls = []
+    monkeypatch.setattr(
+        "orchestrator.github_sync.edit_issue_labels",
+        lambda repo, issue, add=None, remove=None: label_calls.append({"add": add, "remove": remove}),
+    )
+    monkeypatch.setattr("orchestrator.github_sync.create_pr_for_branch", lambda repo, branch, title, body: None)
+    gh_calls = []
+    monkeypatch.setattr("orchestrator.github_sync.gh", lambda args: gh_calls.append(args))
+    monkeypatch.setattr(
+        "orchestrator.github_sync.query_project",
+        lambda project_number, owner: {
+            "project_id": "proj",
+            "status_field_id": "field",
+            "status_options": {"In Progress": "opt-in-progress", "Done": "opt-done", "Blocked": "opt-blocked"},
+            "items": [{"url": "https://github.com/kai-linux/agent-os/issues/64", "item_id": "item-64"}],
+        },
+    )
+    project_status_calls = []
+    monkeypatch.setattr(
+        "orchestrator.github_sync.set_item_status",
+        lambda project_id, item_id, field_id, option_id: project_status_calls.append(option_id),
+    )
+
+    github_sync.sync_result(_meta(), {"status": "complete", "summary": "ok", "next_step": "none"}, "abc123")
+
+    assert label_calls == [
+        {
+            "add": ["done"],
+            "remove": ["in-progress", "ready", "blocked", "agent-dispatched"],
+        }
+    ]
+    assert gh_calls == [["issue", "close", "64", "-R", "kai-linux/agent-os"]]
+    assert project_status_calls == ["opt-done"]
