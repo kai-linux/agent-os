@@ -16,6 +16,16 @@
 
 ## Recent Changes
 
+### 2026-03-20 — [task-20260320-081208-gate-git-publish-tasks-on-writable-remote-capabili] (#58 kai-linux/agent-os)
+Added a dispatch-time publish capability gate so tasks that explicitly require commit/push or PR publication are blocked before entering the worker inbox when `default_allow_push` is disabled, with a machine-readable skip reason recorded on the issue.
+
+**Files:** `- orchestrator/github_dispatcher.py`, `- tests/test_github_dispatcher.py`, `- .agent_result.md`
+
+**Decisions:**
+  - - Recorded the skip reason both as a dedicated issue label (`dispatch:missing-publish-capability`) and as structured JSON in an issue comment so downstream automation can route on either signal.
+  - - Kept detection conservative and text-based in the dispatcher instead of adding a broader capability framework, which preserves the minimal diff requested.
+
+
 ### 2026-03-19 — [task-20260319-215808-integrate-analytics-and-user-signal-inputs-into-pl] (#41 kai-linux/agent-os)
 Added a bounded planning-signals path to the strategic planner so repos can opt into analytics, user-feedback, and market inputs, normalize them into `PLANNING_SIGNALS.md` with freshness/provenance/trust/privacy metadata, and use that evidence during sprint selection and evidence-heavy execution work.
 
