@@ -16,10 +16,32 @@ You give it a backlog. It ships pr
 
 ## Current Focus Areas
 
+
 <!-- auto-focus-areas -->
-(Updated each sprint with the key themes being pursued.)
+- Strengthen the execution control plane with better failure gating, blocker handling, and recovery follow-through
+- Improve observability and auditability of autonomous work through prompt snapshots, outcome attribution, and richer retrospectives
+- Advance evidence-driven strategic planning with research, analytics, feedback inputs, and auto-derived planning signals
+- Expand orchestration capabilities for autonomous task execution, including decomposition, dependency management, and bounded follow-up creation
+- Improve cross-repo and delivery workflow reliability through dependency-aware planning, CI fixes, and safer git/publish operations
 
 ## Sprint History
+
+### Sprint 2026-03-20
+
+**Retrospective:**
+Issues completed:
+- #58: Gate git/publish tasks on writable remote capabilities [bug, prio:high, done] — COMPLETED
+
+PRs merged:
+- PR #61: Agent: task-20260320-081208-gate-git-publish-tasks-on-writable-remote-capabili (branch: agent/task-20260320-081208-gate-git-publish-tasks-on-writable-remote-capabili)
+
+**Plan:**
+- [prio:high] Require structured blocker codes on blocked task outcomes: This is the strongest next control-plane improvement because the strategy prioritizes turning failures into actionable loops, and structured blocker data is the prerequisite for reliable recovery automation.
+- [prio:normal] Auto-file bounded follow-ups for partial debug outcomes: Last sprint exposed partial debug handoff gaps, and this promotion directly advances the North Star by converting incomplete recovery work into durable autonomous execution instead of operator-dependent cleanup.
+- [prio:high] Persist worker prompt snapshots for each dispatched task: This matters this week because the strategy favors auditability and self-healing, and prompt snapshots remove a repeated debugging blind spot in the execution control plane.
+- [prio:high] Add post-merge outcome attribution for issue, PR, and task IDs: This is a direct move from Level 3 planning toward Level 4 closed-loop optimization because the strategy explicitly favors measurable outcome loops over prompt-only reasoning.
+- [prio:high] Build a normalized production feedback substrate for repos: This promotion compounds the recent planning-signals work and best matches the strategy's push toward evidence-driven planning with auditable, reusable product inputs.
+
 
 ### Sprint 2026-03-20
 
