@@ -77,11 +77,16 @@ def build_mailbox_task(cfg: dict, project_key: str, repo_cfg: dict, issue: dict)
     slug = slugify(title)
     task_id = f"task-{now_ts()}-{slug}"
 
-    # Try LLM formatting first, fall back to raw section parsing
+    raw_parsed = parse_issue_body(body_text)
+    # Try LLM formatting first, then fill any missing control fields from the raw issue body.
     formatter_model = cfg.get("formatter_model")
     parsed = format_task(title, body_text, model=formatter_model)
     if parsed is None:
-        parsed = parse_issue_body(body_text)
+        parsed = raw_parsed
+    else:
+        for key, value in raw_parsed.items():
+            if value and not parsed.get(key):
+                parsed[key] = value
 
     criteria = parsed["success_criteria"] or "- Match the issue goal\n- Keep the diff minimal\n- Leave a valid .agent_result.md"
     constraints = parsed["constraints"] or "- Work only inside the repo\n- Prefer minimal diffs"

@@ -148,6 +148,59 @@ agent/task-123
     assert f"prompt_snapshot_path: {Path.cwd() / 'runtime' / 'prompts' / f'{task_id}.txt'}" in task_md
 
 
+def test_build_mailbox_task_preserves_branch_when_formatter_omits_it(monkeypatch):
+    cfg = {
+        "default_agent": "auto",
+        "default_task_type": "implementation",
+        "default_base_branch": "main",
+        "default_allow_push": True,
+        "default_max_attempts": 4,
+        "max_runtime_minutes": 40,
+        "formatter_model": "haiku",
+    }
+    repo_cfg = {"local_repo": "/tmp/repo", "github_repo": "owner/repo"}
+    issue = {
+        "number": 42,
+        "title": "Fix CI failure on PR #34",
+        "url": "https://github.com/owner/repo/issues/42",
+        "labels": [{"name": "prio:high"}],
+        "body": """
+## Goal
+Repair CI.
+
+## Success Criteria
+- Tests pass
+
+## Task Type
+debugging
+
+## Base Branch
+agent/task-123
+
+## Branch
+agent/task-123
+""",
+    }
+
+    monkeypatch.setattr(
+        gd,
+        "format_task",
+        lambda title, body, model=None: {
+            "goal": "Repair CI.",
+            "success_criteria": "- Tests pass",
+            "task_type": "debugging",
+            "agent_preference": "auto",
+            "constraints": "- Prefer minimal diffs",
+            "context": "None",
+            "base_branch": "",
+            "branch": "",
+        },
+    )
+    _task_id, task_md = gd.build_mailbox_task(cfg, "proj", repo_cfg, issue)
+    assert "base_branch: agent/task-123" in task_md
+    assert "branch: agent/task-123" in task_md
+
+
 def test_dispatch_item_blocks_publish_task_without_push_capability(tmp_path, monkeypatch):
     cfg = {
         "default_allow_push": False,
