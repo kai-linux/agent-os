@@ -33,6 +33,7 @@ from orchestrator.strategic_planner import (
     _format_plan_message,
     _gather_cross_repo_context,
     _is_focus_areas_manually_edited,
+    _invalidate_pending_action_for_dormant_repo,
     _load_strategy_map,
     _order_repos_by_dependencies,
     _planning_research_context,
@@ -808,6 +809,27 @@ def test_maybe_refresh_backlog_for_early_cycle_uses_existing_backlog(monkeypatch
     assert should_plan is True
     assert reason == "early-complete with existing backlog (2 candidates)"
     assert groom_calls == []
+
+
+def test_invalidate_pending_action_for_dormant_repo(monkeypatch, tmp_path, capsys):
+    actions_dir = tmp_path / "actions"
+    actions_dir.mkdir()
+    saved = []
+    monkeypatch.setattr(
+        "orchestrator.strategic_planner.save_telegram_action",
+        lambda path, action: saved.append((path, dict(action))),
+    )
+    action = {"action_id": "abc123", "status": "pending", "repo": "owner/repo"}
+
+    _invalidate_pending_action_for_dormant_repo({"TELEGRAM_ACTIONS": actions_dir}, action, "owner/repo")
+
+    out = capsys.readouterr().out
+    assert "Skipping owner/repo: dormant" in out
+    assert saved
+    saved_path, saved_action = saved[0]
+    assert saved_path == actions_dir
+    assert saved_action["status"] == "invalid"
+    assert saved_action["invalid_reason"] == "repo is dormant"
 
 
 def test_read_planning_principles_falls_back_to_default(tmp_path):
