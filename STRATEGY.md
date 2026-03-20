@@ -23,6 +23,15 @@ You give it a backlog. It ships pr
 
 ### Sprint 2026-03-20
 
+**Retrospective:**
+(no activity in the last 0.1 days)
+
+**Plan:**
+- [prio:high] Gate git/publish tasks on writable remote capabilities: This is the highest-leverage task this week because it removes a repeated execution failure mode, improves control-plane reliability, and strengthens the North Star path from reliable execution toward closed-loop autonomy.
+
+
+### Sprint 2026-03-20
+
 **Plan:**
 
 
