@@ -16,6 +16,16 @@
 
 ## Recent Changes
 
+### 2026-03-20 — [task-20260320-101116-add-post-merge-outcome-attribution-for-issue-pr-an] (#64 kai-linux/agent-os)
+Added bounded post-merge outcome attribution by carrying issue-defined outcome check IDs through dispatch, recording task/issue/PR attribution events and timestamped outcome snapshots in a durable JSONL log, and surfacing that evidence in planner retrospectives and sprint-planning prompts with explicit inconclusive handling when no measurable external metric exists.
+
+**Files:** `- README.md`, `- example.config.yaml`, `- orchestrator/github_dispatcher.py`, `- orchestrator/github_sync.py`, `- orchestrator/outcome_attribution.py`, `- orchestrator/pr_monitor.py`, `- orchestrator/strategic_planner.py`, `- tests/test_github_dispatcher.py`
+
+**Decisions:**
+  - - Reused existing task, issue, branch, and PR identifiers and logged attribution alongside the existing runtime metrics directory instead of creating a separate identity or storage system.
+  - - Kept the first version bounded to configured file/web outcome sources and one delayed snapshot per merged check, with `inconclusive` as the explicit fallback for missing, unreadable, or non-measurable outcomes.
+
+
 ### 2026-03-20 — [task-20260320-101013-build-a-normalized-production-feedback-substrate-f] (#62 kai-linux/agent-os)
 Added a first-class file-based production feedback substrate that refreshes bounded repo-local evidence into `PRODUCTION_FEEDBACK.md`, guards stale/low-trust/privacy-sensitive inputs, and injects the resulting artifact into planning, backlog grooming, and evidence-heavy execution context while keeping legacy `planning_signals` config working.
 
