@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -32,8 +35,8 @@ PUBLISH_ACTION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("publish_changes", re.compile(r"\bpublish(?:ing|ed)?\b", re.IGNORECASE)),
 )
 MAX_DEPENDENCY_DEPTH = 3
-MISSING_PUBLISH_CAPABILITY_LABEL = "dispatch:missing-publish-capability"
-MISSING_PUBLISH_CAPABILITY_CODE = "missing_publish_capability"
+PUSH_NOT_READY_LABEL = "dispatch:push-not-ready"
+PUSH_NOT_READY_CODE = "push_not_ready"
 RETRY_DECISION_SECTION = "retry decision"
 RETRY_DECISION_APPLIED_MARKER = "<!-- agent-os-retry-decision-applied -->"
 VALID_RETRY_ACTIONS = {"retry", "reroute", "stop"}
@@ -521,13 +524,96 @@ def _detect_publish_requirements(issue: dict, parsed: dict | None = None) -> lis
     return matches
 
 
-def _skip_missing_publish_capability(
+def _run_git_readiness(repo_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(repo_path), *args],
+        capture_output=True,
+        text=True,
+    )
+
+
+def _check_push_readiness(cfg: dict, repo_cfg: dict) -> dict:
+    failures: list[dict[str, str]] = []
+
+    if not bool(cfg.get("default_allow_push", True)):
+        failures.append({
+            "code": "allow_push_disabled",
+            "detail": "default_allow_push is false",
+        })
+
+    if shutil.which("git") is None:
+        failures.append({
+            "code": "git_unavailable",
+            "detail": "git executable is not available on PATH",
+        })
+
+    local_repo = str(repo_cfg.get("local_repo", "")).strip()
+    if not local_repo:
+        failures.append({
+            "code": "missing_local_repo",
+            "detail": "repo config does not define local_repo",
+        })
+        return {"ready": not failures, "failures": failures}
+
+    repo_path = Path(local_repo)
+    if not repo_path.is_dir():
+        failures.append({
+            "code": "missing_local_repo",
+            "detail": f"local_repo does not exist: {repo_path}",
+        })
+        return {"ready": not failures, "failures": failures}
+
+    if shutil.which("git") is None:
+        return {"ready": not failures, "failures": failures}
+
+    work_tree = _run_git_readiness(repo_path, "rev-parse", "--is-inside-work-tree")
+    if work_tree.returncode != 0 or work_tree.stdout.strip() != "true":
+        failures.append({
+            "code": "not_git_repo",
+            "detail": (work_tree.stderr or work_tree.stdout or "git rev-parse failed").strip(),
+        })
+        return {"ready": False, "failures": failures}
+
+    common_dir = _run_git_readiness(repo_path, "rev-parse", "--git-common-dir")
+    common_dir_text = common_dir.stdout.strip()
+    if common_dir.returncode != 0 or not common_dir_text:
+        failures.append({
+            "code": "git_metadata_unavailable",
+            "detail": (common_dir.stderr or common_dir.stdout or "git common dir lookup failed").strip(),
+        })
+    else:
+        common_dir_path = Path(common_dir_text)
+        if not common_dir_path.is_absolute():
+            common_dir_path = (repo_path / common_dir_path).resolve()
+        if not common_dir_path.exists():
+            failures.append({
+                "code": "git_metadata_unavailable",
+                "detail": f"git common dir does not exist: {common_dir_path}",
+            })
+        elif not os.access(common_dir_path, os.W_OK):
+            failures.append({
+                "code": "git_metadata_not_writable",
+                "detail": f"git common dir is not writable: {common_dir_path}",
+            })
+
+    remote = _run_git_readiness(repo_path, "remote", "get-url", "origin")
+    if remote.returncode != 0 or not remote.stdout.strip():
+        failures.append({
+            "code": "missing_origin_remote",
+            "detail": (remote.stderr or remote.stdout or "origin remote is not configured").strip(),
+        })
+
+    return {"ready": not failures, "failures": failures}
+
+
+def _skip_push_not_ready(
     cfg: dict,
     repo_full: str,
     item: dict,
     info: dict | None,
     project_cfg: dict,
     requirements: list[str],
+    readiness: dict,
 ):
     blocked_value = project_cfg.get("blocked_value", "Blocked")
     if info is not None and item.get("item_id"):
@@ -539,14 +625,15 @@ def _skip_missing_publish_capability(
     edit_issue_labels(
         repo_full,
         item["number"],
-        add=["blocked", MISSING_PUBLISH_CAPABILITY_LABEL],
+        add=["blocked", PUSH_NOT_READY_LABEL],
         remove=["ready", "in-progress", "agent-dispatched"],
     )
 
     payload = json.dumps(
         {
-            "code": MISSING_PUBLISH_CAPABILITY_CODE,
+            "code": PUSH_NOT_READY_CODE,
             "requirements": requirements,
+            "push_readiness": readiness.get("failures", []),
             "runtime_allow_push": bool(cfg.get("default_allow_push", True)),
         },
         sort_keys=True,
@@ -558,7 +645,7 @@ def _skip_missing_publish_capability(
             "<!-- agent-os-dispatch-skip",
             payload,
             "-->",
-            "Blocked automatically: task requires publish capability but this runtime cannot push.",
+            "Blocked automatically: task requires publish capability but push-readiness checks failed.",
         ]),
     )
 
@@ -737,13 +824,15 @@ def _dispatch_item(cfg, paths, owner, repo_to_project, info, ready_items, issue_
             print(f"Warning: could not resolve dependency #{resolution['dependency']} for {repo_full}#{item['number']}")
             continue
 
-        if not cfg.get("default_allow_push", True):
-            requirements = _detect_publish_requirements(item)
-            if requirements:
-                _skip_missing_publish_capability(cfg, repo_full, item, info, pcfg, requirements)
+        requirements = _detect_publish_requirements(item)
+        if requirements:
+            readiness = _check_push_readiness(cfg, rcfg)
+            if not readiness["ready"]:
+                _skip_push_not_ready(cfg, repo_full, item, info, pcfg, requirements, readiness)
+                reason_codes = ", ".join(failure["code"] for failure in readiness["failures"])
                 print(
                     f"Skipped {repo_full}#{item['number']} — "
-                    f"{MISSING_PUBLISH_CAPABILITY_CODE}: {', '.join(requirements)}"
+                    f"{PUSH_NOT_READY_CODE}: {reason_codes}"
                 )
                 continue
 
@@ -930,13 +1019,15 @@ def dispatch_one():
                     if resolution["status"] in {"depth-limit", "unknown"}:
                         print(f"Warning: dependency check skipped dispatch for {repo_full}#{issue['number']}: {resolution}")
                         continue
-                    if not cfg.get("default_allow_push", True):
-                        requirements = _detect_publish_requirements(issue)
-                        if requirements:
-                            _skip_missing_publish_capability(cfg, repo_full, issue, None, project_cfg, requirements)
+                    requirements = _detect_publish_requirements(issue)
+                    if requirements:
+                        readiness = _check_push_readiness(cfg, repo_cfg)
+                        if not readiness["ready"]:
+                            _skip_push_not_ready(cfg, repo_full, issue, None, project_cfg, requirements, readiness)
+                            reason_codes = ", ".join(failure["code"] for failure in readiness["failures"])
                             print(
                                 f"Skipped {repo_full}#{issue['number']} — "
-                                f"{MISSING_PUBLISH_CAPABILITY_CODE}: {', '.join(requirements)}"
+                                f"{PUSH_NOT_READY_CODE}: {reason_codes}"
                             )
                             continue
                     task_id, task_md = build_mailbox_task(cfg, project_key, repo_cfg, issue)

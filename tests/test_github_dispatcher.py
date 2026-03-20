@@ -250,7 +250,51 @@ Improve activation.
     assert "- activation_rate" in task_md
 
 
-def test_dispatch_item_blocks_publish_task_without_push_capability(tmp_path, monkeypatch):
+def test_check_push_readiness_reports_missing_origin_remote(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".git").mkdir()
+
+    cfg = {"default_allow_push": True}
+    repo_cfg = {"local_repo": str(repo)}
+
+    calls = []
+
+    class Result:
+        def __init__(self, returncode, stdout="", stderr=""):
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
+
+    def fake_run(repo_path, *args):
+        calls.append((repo_path, args))
+        if args == ("rev-parse", "--is-inside-work-tree"):
+            return Result(0, "true\n")
+        if args == ("rev-parse", "--git-common-dir"):
+            return Result(0, ".git\n")
+        if args == ("remote", "get-url", "origin"):
+            return Result(2, "", "error: No such remote 'origin'\n")
+        raise AssertionError(args)
+
+    monkeypatch.setattr(gd.shutil, "which", lambda cmd: "/usr/bin/git")
+    monkeypatch.setattr(gd, "_run_git_readiness", fake_run)
+    monkeypatch.setattr(gd.os, "access", lambda path, mode: True)
+
+    readiness = gd._check_push_readiness(cfg, repo_cfg)
+
+    assert readiness["ready"] is False
+    assert readiness["failures"] == [{
+        "code": "missing_origin_remote",
+        "detail": "error: No such remote 'origin'",
+    }]
+    assert calls == [
+        (repo, ("rev-parse", "--is-inside-work-tree")),
+        (repo, ("rev-parse", "--git-common-dir")),
+        (repo, ("remote", "get-url", "origin")),
+    ]
+
+
+def test_dispatch_item_blocks_publish_task_when_push_not_ready(tmp_path, monkeypatch):
     cfg = {
         "default_allow_push": False,
         "github_owner": "owner",
@@ -285,6 +329,14 @@ def test_dispatch_item_blocks_publish_task_without_push_capability(tmp_path, mon
 
     monkeypatch.setattr(gd, "is_trusted", lambda author, _cfg: True)
     monkeypatch.setattr(gd, "_resolve_issue_dependencies", lambda *args, **kwargs: {"status": "clear"})
+    monkeypatch.setattr(
+        gd,
+        "_check_push_readiness",
+        lambda cfg, repo_cfg: {
+            "ready": False,
+            "failures": [{"code": "allow_push_disabled", "detail": "default_allow_push is false"}],
+        },
+    )
     monkeypatch.setattr(gd, "add_issue_comment", lambda repo, number, body: comments.append((repo, number, body)))
     monkeypatch.setattr(
         gd,
@@ -305,14 +357,15 @@ def test_dispatch_item_blocks_publish_task_without_push_capability(tmp_path, mon
     assert label_edits == [(
         "owner/repo",
         42,
-        ["blocked", gd.MISSING_PUBLISH_CAPABILITY_LABEL],
+        ["blocked", gd.PUSH_NOT_READY_LABEL],
         ["ready", "in-progress", "agent-dispatched"],
     )]
     assert len(comments) == 1
-    assert gd.MISSING_PUBLISH_CAPABILITY_CODE in comments[0][2]
+    assert gd.PUSH_NOT_READY_CODE in comments[0][2]
     payload = comments[0][2].splitlines()[1]
     assert json.loads(payload) == {
-        "code": gd.MISSING_PUBLISH_CAPABILITY_CODE,
+        "code": gd.PUSH_NOT_READY_CODE,
+        "push_readiness": [{"code": "allow_push_disabled", "detail": "default_allow_push is false"}],
         "requirements": ["git_commit", "git_push", "push_branch", "open_pr", "publish_changes"],
         "runtime_allow_push": False,
     }
