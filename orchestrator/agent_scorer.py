@@ -1,12 +1,12 @@
 """Weekly agent performance scorer.
 
 Reads runtime/metrics/agent_stats.jsonl, computes per-agent success rates
-over the past 7 days, and creates a GitHub issue for any agent below 60%.
+over the past 7 days, and emits structured degradation findings for the
+log analyzer's evidence-synthesis flow.
 """
 from __future__ import annotations
 
 import json
-import subprocess
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -16,13 +16,8 @@ from orchestrator.paths import load_config
 
 DEGRADED_THRESHOLD = 0.60
 WINDOW_DAYS = 7
-
-
-def _gh(cmd: list[str], *, check: bool = True) -> str:
-    result = subprocess.run(["gh", *cmd], capture_output=True, text=True)
-    if check and result.returncode != 0:
-        raise RuntimeError(f"gh {' '.join(cmd[:3])}... exit {result.returncode}: {result.stderr.strip()}")
-    return result.stdout.strip()
+MIN_TASKS_FOR_DEGRADED_FINDING = 4
+FINDINGS_FILENAME = "agent_scorer_findings.json"
 
 
 def load_recent_metrics(metrics_file: Path, window_days: int = WINDOW_DAYS) -> list[dict]:
@@ -79,19 +74,56 @@ def issue_title(agent: str, rate: float) -> str:
     return f"Agent {agent} degraded ({pct}% success rate)"
 
 
-def create_degradation_issue(github_repo: str, agent: str, rate: float, total: int, successes: int) -> str:
-    """Create a GitHub issue and return its URL."""
-    title = issue_title(agent, rate)
-    pct = round(rate * 100)
-    body = (
-        f"## Agent performance alert\n\n"
-        f"**Agent:** `{agent}`\n"
-        f"**Success rate (last {WINDOW_DAYS} days):** {pct}% ({successes}/{total} tasks)\n"
-        f"**Threshold:** {round(DEGRADED_THRESHOLD * 100)}%\n\n"
-        f"Please investigate agent `{agent}` for configuration, credential, or quota issues."
-    )
-    url = _gh(["issue", "create", "--repo", github_repo, "--title", title, "--body", body])
-    return url
+def build_degradation_findings(
+    records: list[dict],
+    *,
+    threshold: float = DEGRADED_THRESHOLD,
+    min_total: int = MIN_TASKS_FOR_DEGRADED_FINDING,
+) -> list[dict]:
+    rates = compute_success_rates(records)
+    findings: list[dict] = []
+    for agent, rate, total in degraded_agents(rates, threshold):
+        if total < min_total:
+            continue
+        successes = rates[agent]["successes"]
+        findings.append({
+            "id": f"agent_degraded:{agent}",
+            "source": "agent_scorer",
+            "kind": "agent_degraded",
+            "title_hint": issue_title(agent, rate),
+            "summary": (
+                f"{agent} completed {successes} of {total} tasks in the last "
+                f"{WINDOW_DAYS} days, below the {round(threshold * 100)}% threshold."
+            ),
+            "agent": agent,
+            "window_days": WINDOW_DAYS,
+            "threshold": threshold,
+            "metrics": {
+                "total": total,
+                "successes": successes,
+                "rate": rate,
+            },
+            "evidence": [
+                f"runtime/metrics/agent_stats.jsonl last {WINDOW_DAYS} days",
+                f"success_rate={round(rate * 100)}% ({successes}/{total})",
+            ],
+        })
+    return findings
+
+
+def findings_path(root: Path) -> Path:
+    return root / "runtime" / "analysis" / FINDINGS_FILENAME
+
+
+def write_findings(path: Path, findings: list[dict]):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "generated_at": datetime.now(tz=timezone.utc).isoformat(),
+        "window_days": WINDOW_DAYS,
+        "threshold": DEGRADED_THRESHOLD,
+        "findings": findings,
+    }
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def run():
@@ -110,33 +142,16 @@ def run():
         pct = round(stats["rate"] * 100)
         print(f"  {agent}: {pct}% ({stats['successes']}/{stats['total']})")
 
-    bad = degraded_agents(rates)
-    if not bad:
-        print("All agents above threshold. No issues created.")
+    findings = build_degradation_findings(records)
+    artifact = findings_path(root)
+    write_findings(artifact, findings)
+
+    if not findings:
+        print(f"All agents above threshold. Wrote empty findings artifact to {artifact}.")
         return
 
-    github_repo = cfg.get("github_repo") or cfg.get("github_owner", "")
-    if not github_repo:
-        # Try to derive from github_projects
-        projects = cfg.get("github_projects", {})
-        for pk, pv in projects.items():
-            if isinstance(pv, dict) and pv.get("repo"):
-                github_repo = pv["repo"]
-                break
-
-    if not github_repo:
-        print("Warning: github_repo not configured; skipping issue creation.")
-        for agent, rate, total in bad:
-            print(f"  DEGRADED: {agent} at {round(rate*100)}%")
-        return
-
-    for agent, rate, total in bad:
-        successes = rates[agent]["successes"]
-        try:
-            url = create_degradation_issue(github_repo, agent, rate, total, successes)
-            print(f"Created issue for {agent}: {url}")
-        except Exception as e:
-            print(f"Failed to create issue for {agent}: {e}")
+    print(f"Wrote {len(findings)} degradation finding(s) to {artifact}.")
+    print("Issue creation is owned by orchestrator.log_analyzer.")
 
 
 if __name__ == "__main__":

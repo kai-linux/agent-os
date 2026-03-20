@@ -17,7 +17,6 @@ from uuid import uuid4
 import yaml
 
 from orchestrator.paths import load_config, runtime_paths
-from orchestrator.agent_scorer import compute_success_rates, load_recent_metrics, issue_title as scorer_issue_title
 from orchestrator.github_sync import sync_result
 from orchestrator.codebase_memory import read_codebase_context, update_codebase_memory
 from orchestrator.gh_project import add_issue_comment, gh, query_project, set_item_status
@@ -39,9 +38,6 @@ BLOCKER_CODE_DESCRIPTIONS = {
     "invalid_result_contract": "The worker produced an invalid or missing task outcome contract.",
 }
 VALID_BLOCKER_CODES = set(BLOCKER_CODE_DESCRIPTIONS)
-SELF_IMPROVEMENT_BLOCKER_WINDOW_DAYS = 1
-SELF_IMPROVEMENT_BLOCKER_THRESHOLD = 3
-SELF_IMPROVEMENT_DEGRADED_MIN_TOTAL = 4
 
 
 def now_ts():
@@ -494,148 +490,6 @@ def ensure_issue_project_status(cfg: dict, project_key: str, issue_url: str, sta
     raise RuntimeError(f"Issue not found on project board: {issue_url}")
 
 
-def _open_issue_exists(repo: str, title: str) -> bool:
-    try:
-        raw = gh([
-            "issue", "list", "-R", repo,
-            "--state", "open",
-            "--search", title,
-            "--json", "title",
-            "--limit", "20",
-        ])
-        issues = json.loads(raw or "[]")
-    except Exception:
-        return False
-    return any((issue.get("title") or "").strip() == title.strip() for issue in issues)
-
-
-def _create_issue(repo: str, title: str, body: str, labels: list[str]) -> str:
-    cmd = ["issue", "create", "-R", repo, "--title", title, "--body", body]
-    for label in labels:
-        cmd += ["--label", label]
-    return gh(cmd)
-
-
-def _create_ready_self_improvement_issue(
-    cfg: dict,
-    meta: dict,
-    title: str,
-    body: str,
-    labels: list[str],
-    logfile: Path | None,
-    queue_summary_log: Path | None,
-) -> str | None:
-    repo = meta.get("github_repo")
-    project_key = meta.get("github_project_key")
-    if not repo or not project_key:
-        return None
-    if _open_issue_exists(repo, title):
-        log(f"Self-improvement issue already open: {title}", logfile, queue_summary_log=queue_summary_log)
-        return None
-    try:
-        url = _create_issue(repo, title, body, labels)
-        ensure_issue_project_status(cfg, project_key, url, _project_cfg(cfg, project_key).get("ready_value", "Ready"))
-        log(f"Created event-driven self-improvement issue: {url}", logfile, also_summary=True, queue_summary_log=queue_summary_log)
-        return url
-    except Exception as e:
-        log(f"Failed to create self-improvement issue {title!r}: {e}", logfile, queue_summary_log=queue_summary_log)
-        return None
-
-
-def _maybe_emit_blocker_spike_issue(
-    cfg: dict,
-    meta: dict,
-    final_result: dict,
-    metrics_file: Path,
-    logfile: Path | None,
-    queue_summary_log: Path | None,
-) -> str | None:
-    status = str(final_result.get("status", "")).lower()
-    blocker_code = str(final_result.get("blocker_code", "")).strip().lower()
-    if status not in {"partial", "blocked"} or not blocker_code or blocker_code == "none":
-        return None
-
-    repo_value = str(meta.get("repo", "")).strip().lower()
-    github_repo = str(meta.get("github_repo", "")).strip()
-    repo_name = Path(repo_value).name or github_repo.rsplit("/", 1)[-1]
-    recent = load_recent_metrics(metrics_file, window_days=SELF_IMPROVEMENT_BLOCKER_WINDOW_DAYS)
-    matching = [
-        rec for rec in recent
-        if str(rec.get("blocker_code", "")).strip().lower() == blocker_code
-        and str(rec.get("status", "")).strip().lower() in {"partial", "blocked"}
-        and str(rec.get("repo", "")).strip().lower() in {repo_value, github_repo.lower(), repo_name.lower()}
-    ]
-    if len(matching) < SELF_IMPROVEMENT_BLOCKER_THRESHOLD:
-        return None
-
-    title = f"Reduce repeated {blocker_code.replace('_', ' ')} blockers in {repo_name}"
-    body = (
-        f"## Goal\n"
-        f"Reduce the repeated `{blocker_code}` blocker pattern in `{github_repo or repo_name}` before it causes more stalled work.\n\n"
-        "## Success Criteria\n"
-        f"- The root cause behind the repeated `{blocker_code}` outcomes is identified\n"
-        "- A bounded fix or control-plane guard is implemented\n"
-        "- The same blocker pattern is less likely to recur across the next few task runs\n\n"
-        "## Context\n"
-        f"- Recent blocked/partial outcomes with blocker code `{blocker_code}` in the last 24h: {len(matching)}\n"
-        f"- Description: {BLOCKER_CODE_DESCRIPTIONS.get(blocker_code, 'Repeated execution blocker detected.')}\n\n"
-        "## Constraints\n"
-        "- Prefer minimal diffs\n"
-        "- Focus on systemic prevention, not one-off manual workarounds"
-    )
-    return _create_ready_self_improvement_issue(
-        cfg,
-        meta,
-        title,
-        body,
-        ["enhancement", "prio:high"],
-        logfile,
-        queue_summary_log,
-    )
-
-
-def _maybe_emit_agent_degradation_issue(
-    cfg: dict,
-    meta: dict,
-    final_agent: str | None,
-    metrics_file: Path,
-    logfile: Path | None,
-    queue_summary_log: Path | None,
-) -> str | None:
-    if not final_agent:
-        return None
-    recent = load_recent_metrics(metrics_file)
-    stats = compute_success_rates(recent).get(final_agent)
-    if not stats:
-        return None
-    if stats["total"] < SELF_IMPROVEMENT_DEGRADED_MIN_TOTAL or stats["rate"] >= 0.60:
-        return None
-
-    title = scorer_issue_title(final_agent, stats["rate"])
-    body = (
-        "## Goal\n"
-        f"Improve routing, configuration, or runtime support for `{final_agent}` so its observed success rate recovers.\n\n"
-        "## Success Criteria\n"
-        f"- Recent success rate for `{final_agent}` is investigated using current runtime metrics\n"
-        "- The likely causes (quota, auth, environment, routing, or prompt fit) are classified\n"
-        "- A bounded remediation is implemented or a safer routing decision is enforced\n\n"
-        "## Context\n"
-        f"- Success rate over the recent window: {round(stats['rate'] * 100)}% ({stats['successes']}/{stats['total']})\n\n"
-        "## Constraints\n"
-        "- Prefer minimal diffs\n"
-        "- Reuse existing metrics and queue artifacts before adding new telemetry"
-    )
-    return _create_ready_self_improvement_issue(
-        cfg,
-        meta,
-        title,
-        body,
-        ["enhancement", "prio:high"],
-        logfile,
-        queue_summary_log,
-    )
-
-
 def maybe_emit_self_improvement_events(
     cfg: dict,
     meta: dict,
@@ -645,14 +499,23 @@ def maybe_emit_self_improvement_events(
     queue_summary_log: Path | None,
 ) -> list[str]:
     metrics_file = Path(cfg.get("root_dir", ".")).expanduser() / "runtime" / "metrics" / "agent_stats.jsonl"
-    created: list[str] = []
-    for url in (
-        _maybe_emit_blocker_spike_issue(cfg, meta, final_result, metrics_file, logfile, queue_summary_log),
-        _maybe_emit_agent_degradation_issue(cfg, meta, final_agent, metrics_file, logfile, queue_summary_log),
-    ):
-        if url:
-            created.append(url)
-    return created
+    status = str(final_result.get("status", "")).strip().lower()
+    blocker_code = str(final_result.get("blocker_code", "")).strip().lower()
+    if not metrics_file.exists():
+        return []
+    if status in {"partial", "blocked"} and blocker_code and blocker_code != "none":
+        log(
+            f"Recorded blocker evidence for weekly synthesis: blocker_code={blocker_code}",
+            logfile,
+            queue_summary_log=queue_summary_log,
+        )
+    elif final_agent:
+        log(
+            f"Recorded runtime evidence for weekly synthesis: agent={final_agent}",
+            logfile,
+            queue_summary_log=queue_summary_log,
+        )
+    return []
 
 
 def get_issue_title_and_body(repo: str, issue_number: int) -> tuple[str, str]:

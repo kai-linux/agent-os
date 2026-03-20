@@ -486,7 +486,7 @@ def test_rescue_git_progress_withholds_push_when_validation_fails(tmp_path, monk
     assert commit_calls == []
 
 
-def test_maybe_emit_self_improvement_events_creates_blocker_spike_issue(tmp_path, monkeypatch):
+def test_maybe_emit_self_improvement_events_records_blocker_for_weekly_synthesis(tmp_path, monkeypatch):
     cfg = {
         "root_dir": str(tmp_path),
         "github_projects": {"agent-os": {"ready_value": "Ready"}},
@@ -497,29 +497,17 @@ def test_maybe_emit_self_improvement_events_creates_blocker_spike_issue(tmp_path
         "github_project_key": "agent-os",
     }
     result = {"status": "blocked", "blocker_code": "environment_failure"}
-    monkeypatch.setattr(
-        "orchestrator.queue.load_recent_metrics",
-        lambda metrics_file, window_days=7: [
-            {"repo": "kai-linux/agent-os", "status": "blocked", "blocker_code": "environment_failure"},
-            {"repo": "kai-linux/agent-os", "status": "partial", "blocker_code": "environment_failure"},
-            {"repo": "kai-linux/agent-os", "status": "blocked", "blocker_code": "environment_failure"},
-        ],
-    )
-    monkeypatch.setattr("orchestrator.queue.compute_success_rates", lambda records: {})
-    created = []
-    monkeypatch.setattr(
-        "orchestrator.queue._create_ready_self_improvement_issue",
-        lambda cfg, meta, title, body, labels, logfile, queue_summary_log: created.append((title, labels)) or "https://github.com/kai-linux/agent-os/issues/99",
-    )
+    metrics_dir = tmp_path / "runtime" / "metrics"
+    metrics_dir.mkdir(parents=True)
+    (metrics_dir / "agent_stats.jsonl").write_text("{}", encoding="utf-8")
 
     urls = maybe_emit_self_improvement_events(cfg, meta, result, "codex", tmp_path / "q.log", tmp_path / "s.log")
 
-    assert urls == ["https://github.com/kai-linux/agent-os/issues/99"]
-    assert created[0][0] == "Reduce repeated environment failure blockers in agent-os"
-    assert created[0][1] == ["enhancement", "prio:high"]
+    assert urls == []
+    assert "Recorded blocker evidence for weekly synthesis" in (tmp_path / "q.log").read_text(encoding="utf-8")
 
 
-def test_maybe_emit_self_improvement_events_creates_degraded_agent_issue(tmp_path, monkeypatch):
+def test_maybe_emit_self_improvement_events_records_agent_evidence_without_issue_creation(tmp_path):
     cfg = {
         "root_dir": str(tmp_path),
         "github_projects": {"agent-os": {"ready_value": "Ready"}},
@@ -530,21 +518,14 @@ def test_maybe_emit_self_improvement_events_creates_degraded_agent_issue(tmp_pat
         "github_project_key": "agent-os",
     }
     result = {"status": "complete", "blocker_code": "none"}
-    monkeypatch.setattr("orchestrator.queue.load_recent_metrics", lambda metrics_file, window_days=7: [{"repo": "kai-linux/agent-os"}] * 4)
-    monkeypatch.setattr(
-        "orchestrator.queue.compute_success_rates",
-        lambda records: {"codex": {"total": 4, "successes": 1, "rate": 0.25}},
-    )
-    created = []
-    monkeypatch.setattr(
-        "orchestrator.queue._create_ready_self_improvement_issue",
-        lambda cfg, meta, title, body, labels, logfile, queue_summary_log: created.append((title, labels)) or "https://github.com/kai-linux/agent-os/issues/100",
-    )
+    metrics_dir = tmp_path / "runtime" / "metrics"
+    metrics_dir.mkdir(parents=True)
+    (metrics_dir / "agent_stats.jsonl").write_text("{}", encoding="utf-8")
 
     urls = maybe_emit_self_improvement_events(cfg, meta, result, "codex", tmp_path / "q.log", tmp_path / "s.log")
 
-    assert urls == ["https://github.com/kai-linux/agent-os/issues/100"]
-    assert created[0][0] == "Agent codex degraded (25% success rate)"
+    assert urls == []
+    assert "Recorded runtime evidence for weekly synthesis: agent=codex" in (tmp_path / "q.log").read_text(encoding="utf-8")
 
 
 def test_handle_telegram_callback_requeue(monkeypatch):

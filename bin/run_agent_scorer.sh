@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Weekly agent performance scorer — computes per-agent success rates and
-# creates a GitHub issue if any agent drops below 60% over the past 7 days.
+# writes structured degradation findings for log_analyzer synthesis.
 set -euo pipefail
 
 # shellcheck source=bin/common_env.sh
