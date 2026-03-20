@@ -16,6 +16,18 @@
 
 ## Recent Changes
 
+### 2026-03-20 — [task-20260320-101013-build-a-normalized-production-feedback-substrate-f] (#62 kai-linux/agent-os)
+Added a first-class file-based production feedback substrate that refreshes bounded repo-local evidence into `PRODUCTION_FEEDBACK.md`, guards stale/low-trust/privacy-sensitive inputs, and injects the resulting artifact into planning, backlog grooming, and evidence-heavy execution context while keeping legacy `planning_signals` config working.
+
+**Files:** `- .gitignore`, `- .agent_result.md`, `- CODEBASE.md`, `- README.md`, `- example.config.yaml`, `- orchestrator/backlog_groomer.py`, `- orchestrator/repo_context.py`, `- orchestrator/strategic_planner.py`
+
+**Decisions:**
+  - - Reused the existing bounded planning-signals refresh path and layered repo-context pattern instead of creating a new memory subsystem
+  - - Kept legacy `planning_signals` config support so existing repos can migrate incrementally
+  - - Made stale, low-trust, and privacy-sensitive inputs inspectable but guarded inside the artifact instead of silently dropping them
+  - - Kept the first version file-based and repo-opt-in through `production_feedback` config and `PRODUCTION_FEEDBACK.md`
+
+
 ### 2026-03-20 — [task-20260320-100911-require-structured-blocker-codes-on-blocked-task-o] (#54 kai-linux/agent-os)
 Added bounded `BLOCKER_CODE` validation and persistence for blocked and partial task outcomes, updated queue-generated fallback outcomes to emit valid codes, and documented the contract without breaking existing readers that ignore unknown fields.
 
