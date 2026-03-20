@@ -38,6 +38,7 @@ BLOCKER_CODE_DESCRIPTIONS = {
     "invalid_result_contract": "The worker produced an invalid or missing task outcome contract.",
 }
 VALID_BLOCKER_CODES = set(BLOCKER_CODE_DESCRIPTIONS)
+PROMPT_INSPECTION_BLOCKER_CODES = {"invalid_result_contract"}
 
 
 def now_ts():
@@ -727,6 +728,11 @@ def parse_task(path: Path):
     return meta, body
 
 
+def render_task(meta: dict, body: str) -> str:
+    frontmatter_text = yaml.safe_dump(meta, sort_keys=False).strip()
+    return f"---\n{frontmatter_text}\n---\n\n{body.rstrip()}\n"
+
+
 def split_section(text: str, start_label: str, end_labels: list[str]):
     if end_labels:
         pattern = rf"^{re.escape(start_label)}:\s*(.*?)(?=^(?:{'|'.join(map(re.escape, end_labels))}):|\Z)"
@@ -734,6 +740,127 @@ def split_section(text: str, start_label: str, end_labels: list[str]):
         pattern = rf"^{re.escape(start_label)}:\s*(.*)$"
     m = re.search(pattern, text, flags=re.MULTILINE | re.DOTALL)
     return m.group(1).strip() if m else ""
+
+
+def _extract_markdown_section(text: str, heading: str, end_headings: list[str]) -> str:
+    if end_headings:
+        pattern = rf"(?ms)^## {re.escape(heading)}\s*\n(.*?)(?=^## (?:{'|'.join(map(re.escape, end_headings))})\s*$|\Z)"
+    else:
+        pattern = rf"(?ms)^## {re.escape(heading)}\s*\n(.*)$"
+    match = re.search(pattern, text)
+    return match.group(1).strip() if match else ""
+
+
+def _prompt_inspection_recovery_request(meta: dict, body: str) -> dict | None:
+    trigger = str(
+        meta.get("recovery_trigger")
+        or _extract_markdown_section(body, "Recovery Trigger", ["Original Task ID", "Prior Blocker Code"])
+    ).strip().lower().replace(" ", "_").replace("-", "_")
+    target_task_id = str(
+        meta.get("recovery_target_task_id")
+        or _extract_markdown_section(body, "Original Task ID", ["Prior Blocker Code", "Recovery Trigger"])
+    ).strip()
+    prior_blocker_code = normalize_blocker_code(
+        meta.get("recovery_target_blocker_code")
+        or _extract_markdown_section(body, "Prior Blocker Code", ["Recovery Trigger", "Prompt Snapshot", "Context"])
+    )
+
+    inferred_prompt_context = bool(re.search(r"(?i)\b(worker prompt|prompt inspection|prompt snapshot)\b", body or ""))
+    if trigger and trigger not in {"prompt_inspection", "worker_prompt_inspection"}:
+        return None
+    if not trigger and not inferred_prompt_context:
+        return None
+    if not target_task_id or prior_blocker_code not in PROMPT_INSPECTION_BLOCKER_CODES:
+        return None
+    return {
+        "target_task_id": target_task_id,
+        "prior_blocker_code": prior_blocker_code,
+    }
+
+
+def _find_blocked_task_for_recovery(blocked_dir: Path, task_id: str) -> tuple[Path, dict, str] | tuple[None, None, None]:
+    candidates: list[tuple[float, Path, dict, str]] = []
+    for task_path in blocked_dir.glob("*.md"):
+        try:
+            meta, body = parse_task(task_path)
+        except Exception:
+            continue
+        if meta.get("task_id") != task_id:
+            continue
+        candidates.append((task_path.stat().st_mtime, task_path, meta, body))
+
+    if not candidates:
+        return None, None, None
+
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    _mtime, task_path, meta, body = candidates[0]
+    return task_path, meta, body
+
+
+def maybe_requeue_prompt_inspection_recovery(
+    paths: dict,
+    completed_meta: dict,
+    completed_body: str,
+    result: dict,
+    logfile: Path,
+    queue_summary_log: Path,
+) -> Path | None:
+    if result.get("status") != "complete":
+        return None
+
+    recovery = _prompt_inspection_recovery_request(completed_meta, completed_body)
+    if recovery is None:
+        return None
+
+    blocked_path, blocked_meta, blocked_body = _find_blocked_task_for_recovery(
+        paths["BLOCKED"],
+        recovery["target_task_id"],
+    )
+    if blocked_path is None or blocked_meta is None:
+        log(
+            f"Prompt inspection recovery skipped: blocked task {recovery['target_task_id']} not found.",
+            logfile,
+            queue_summary_log=queue_summary_log,
+        )
+        return None
+
+    if blocked_meta.get("prompt_inspection_requeued_by"):
+        log(
+            f"Prompt inspection recovery skipped: {recovery['target_task_id']} was already requeued by {blocked_meta['prompt_inspection_requeued_by']}.",
+            logfile,
+            queue_summary_log=queue_summary_log,
+        )
+        return None
+
+    new_task_id = f"task-{now_ts()}-rerun-{sanitize_slug(recovery['target_task_id'], max_len=24)}"
+    rerun_meta = dict(blocked_meta)
+    rerun_meta["task_id"] = new_task_id
+    rerun_meta["attempt"] = int(blocked_meta.get("attempt", 1)) + 1
+    rerun_meta["model_attempts"] = []
+    rerun_meta["recovery_source_task_id"] = blocked_meta.get("task_id")
+    rerun_meta["recovery_trigger"] = "prompt_inspection"
+    rerun_meta["recovery_trigger_task_id"] = completed_meta.get("task_id")
+    rerun_meta["recovery_trigger_blocker_code"] = recovery["prior_blocker_code"]
+    prompt_snapshot_dir = Path(
+        rerun_meta.get("prompt_snapshot_path")
+        or (paths["ROOT"] / "runtime" / "prompts" / f"{new_task_id}.txt")
+    ).parent
+    rerun_meta["prompt_snapshot_path"] = str(prompt_snapshot_dir / f"{new_task_id}.txt")
+
+    blocked_meta["prompt_inspection_requeued_by"] = completed_meta.get("task_id")
+    blocked_meta["prompt_inspection_requeued_at"] = datetime.now(timezone.utc).isoformat()
+    blocked_meta["prompt_inspection_recovery_task_id"] = new_task_id
+    blocked_path.write_text(render_task(blocked_meta, blocked_body), encoding="utf-8")
+
+    rerun_path = paths["INBOX"] / f"{new_task_id}.md"
+    rerun_path.write_text(render_task(rerun_meta, blocked_body), encoding="utf-8")
+    log(
+        f"Prompt inspection recovery requeued {recovery['target_task_id']} as {new_task_id}.",
+        logfile,
+        also_summary=True,
+        queue_summary_log=queue_summary_log,
+    )
+    return rerun_path
 
 
 def parse_bullets(section_text: str):
@@ -1762,6 +1889,15 @@ def main():
         except Exception as e:
             log(f"GitHub sync warning: {e}", logfile, queue_summary_log=QUEUE_SUMMARY_LOG)
 
+        recovery_rerun = maybe_requeue_prompt_inspection_recovery(
+            paths,
+            meta,
+            body,
+            final_result,
+            logfile,
+            QUEUE_SUMMARY_LOG,
+        )
+
         # Update CODEBASE.md memory on the main repo branch after completion.
         if final_result["status"] == "complete":
             try:
@@ -1774,7 +1910,8 @@ def main():
             shutil.move(str(processing), str(DONE / processing.name))
             send_telegram(
                 cfg,
-                f"✅ Complete\nTask: {task_id}\nRepo: {repo.name}\nBranch: {branch}\nModel: {final_agent}\nCommit: {commit_hash or 'none'}\nSummary: {final_result['summary']}",
+                f"✅ Complete\nTask: {task_id}\nRepo: {repo.name}\nBranch: {branch}\nModel: {final_agent}\nCommit: {commit_hash or 'none'}\nSummary: {final_result['summary']}"
+                + (f"\nRecovery rerun: {recovery_rerun.name}" if recovery_rerun else ""),
                 logfile,
                 QUEUE_SUMMARY_LOG,
             )
