@@ -64,13 +64,24 @@ def _metrics_summary(records: list[dict]) -> str:
 
 def _call_haiku(prompt: str) -> str:
     claude_bin = os.environ.get("CLAUDE_BIN", "claude")
+    codex_bin = os.environ.get("CODEX_BIN", "codex")
+    errors: list[str] = []
     result = subprocess.run(
         [claude_bin, "-p", prompt, "--model", ANALYSIS_MODEL],
         capture_output=True, text=True, timeout=120,
     )
-    if result.returncode != 0:
-        raise RuntimeError(f"Claude exit {result.returncode}: {result.stderr[:300]}")
-    return result.stdout.strip()
+    if result.returncode == 0:
+        return result.stdout.strip()
+    errors.append(f"Claude exit {result.returncode}: {result.stderr[:300]}")
+
+    result = subprocess.run(
+        [codex_bin, "exec", "--skip-git-repo-check", prompt],
+        capture_output=True, text=True, timeout=120,
+    )
+    if result.returncode == 0:
+        return result.stdout.strip()
+    errors.append(f"Codex exit {result.returncode}: {(result.stderr or result.stdout)[:300]}")
+    raise RuntimeError(" | ".join(errors))
 
 
 def _parse_issues(text: str) -> list[dict]:

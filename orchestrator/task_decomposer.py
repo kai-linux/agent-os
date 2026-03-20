@@ -48,19 +48,33 @@ def decompose_issue(title: str, body: str, model: str | None = None) -> dict | N
     """
     prompt = DECOMPOSE_PROMPT.format(title=title, body=body or "(no body)")
     claude_bin = os.environ.get("CLAUDE_BIN", "claude")
+    codex_bin = os.environ.get("CODEX_BIN", "codex")
     model = model or os.environ.get("DECOMPOSER_MODEL", "haiku")
 
     try:
+        errors = []
+        text = ""
         result = subprocess.run(
             [claude_bin, "-p", prompt, "--model", model],
             capture_output=True,
             text=True,
             timeout=60,
         )
-        if result.returncode != 0:
-            raise RuntimeError(f"exit {result.returncode}: {result.stderr[:200]}")
-
-        text = result.stdout.strip()
+        if result.returncode == 0:
+            text = result.stdout.strip()
+        else:
+            errors.append(f"Claude exit {result.returncode}: {result.stderr[:200]}")
+            result = subprocess.run(
+                [codex_bin, "exec", "--skip-git-repo-check", prompt],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            if result.returncode == 0:
+                text = result.stdout.strip()
+            else:
+                errors.append(f"Codex exit {result.returncode}: {(result.stderr or result.stdout)[:200]}")
+                raise RuntimeError(" | ".join(errors))
 
         # Strip markdown fences if present
         if text.startswith("```"):
