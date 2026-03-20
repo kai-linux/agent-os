@@ -16,6 +16,16 @@
 
 ## Recent Changes
 
+### 2026-03-20 — [task-20260320-134012-collapse-self-improvement-generators-behind-one-ev] (#63 kai-linux/agent-os)
+Collapsed overlapping self-improvement issue generation behind `log_analyzer.py` by turning `agent_scorer.py` into a structured finding emitter, removing queue-side remediation issue creation, and adding bounded evidence/reasoning to synthesized remediation issues.
+
+**Files:** `- orchestrator/agent_scorer.py`, `- orchestrator/log_analyzer.py`, `- orchestrator/queue.py`, `- tests/test_log_analyzer.py`, `- tests/test_queue.py`, `- README.md`, `- bin/run_agent_scorer.sh`, `- bin/run_log_analyzer.sh`
+
+**Decisions:**
+  - - Reused existing metrics and queue artifacts, with one persisted scorer findings artifact, instead of adding new telemetry sources
+  - - Kept all remediation issue creation inside `log_analyzer.py` so duplicate suppression and audit formatting happen in one place
+
+
 ### 2026-03-20 — [task-20260320-133911-preflight-git-push-readiness-before-dispatching-pu] (#50 kai-linux/agent-os)
 Added a pre-dispatch push-readiness check for publish-requiring issues so the dispatcher blocks those tasks with a dedicated machine-readable `push_not_ready` classification when the runtime or repo is not push-capable.
 
