@@ -23,6 +23,7 @@ from orchestrator.paths import load_config, runtime_paths
 from orchestrator.agent_scorer import load_recent_metrics
 from orchestrator.gh_project import ensure_labels, query_project, set_item_status, gh
 from orchestrator.repo_context import (
+    read_production_feedback_artifact,
     read_north_star,
     read_planning_principles,
     read_planning_research_artifact,
@@ -515,6 +516,9 @@ Each object must have:
 --- Planning principles (PLANNING_PRINCIPLES.md) ---
 {planning_principles}
 
+--- Production feedback artifact (PRODUCTION_FEEDBACK.md) ---
+{production_feedback}
+
 --- Planning research artifact (PLANNING_RESEARCH.md) ---
 {research_context}
 
@@ -725,6 +729,7 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
     north_star = read_north_star(repo_path, max_chars=1400)
     strategy_context = read_strategy_context(repo_path, max_chars=1600)
     planning_principles = read_planning_principles(repo_path, max_chars=1400)
+    production_feedback = read_production_feedback_artifact(repo_path, max_chars=1800)
     research_context = read_planning_research_artifact(repo_path, max_chars=1600)
     print(f"  Blocked/partial task outcomes: {len(blocked_tasks)}")
     print(f"  Repo gaps: {len(repo_gaps)}, blocked issues: {len(blocked_issues)}")
@@ -789,6 +794,7 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
         north_star=north_star,
         strategy_context=strategy_context,
         planning_principles=planning_principles,
+        production_feedback=production_feedback,
         research_context=research_context,
         completions=completions_text,
         open_issues=open_text,

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+import os
 import subprocess
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -240,6 +241,7 @@ def test_groom_repo_prompt_includes_repo_documents(tmp_path, monkeypatch):
     (repo / "STRATEGY.md").write_text("## Product Vision\n\nBuild an autonomous agent OS.\n", encoding="utf-8")
     (repo / "PLANNING_PRINCIPLES.md").write_text("Prefer autonomy gains.\n", encoding="utf-8")
     (repo / "CODEBASE.md").write_text("# Codebase\n", encoding="utf-8")
+    (repo / "PRODUCTION_FEEDBACK.md").write_text("# Production Feedback\n\nFresh evidence.\n", encoding="utf-8")
     (repo / "PLANNING_RESEARCH.md").write_text("# Planning Research\n\nEvidence.\n", encoding="utf-8")
 
     monkeypatch.setattr(bg, "_list_open_issues", lambda repo, cfg: [])
@@ -261,6 +263,7 @@ def test_groom_repo_prompt_includes_repo_documents(tmp_path, monkeypatch):
     assert "Closed-loop self-improvement." in prompt
     assert "Build an autonomous agent OS." in prompt
     assert "Prefer autonomy gains." in prompt
+    assert "Fresh evidence." in prompt
     assert "Evidence." in prompt
 
 
@@ -328,9 +331,9 @@ def test_run_sends_telegram_when_repo_created_items(tmp_path, monkeypatch):
 
 def test_call_haiku_falls_back_to_codex_when_claude_fails(monkeypatch):
     def fake_run(cmd, capture_output=True, text=True, timeout=120):
-        if cmd[0] == "claude":
+        if os.path.basename(cmd[0]) == "claude":
             return subprocess.CompletedProcess(cmd, 1, "", "quota")
-        if cmd[0] == "codex":
+        if os.path.basename(cmd[0]) == "codex":
             return subprocess.CompletedProcess(cmd, 0, '[{"title":"Fix thing"}]', "")
         raise AssertionError(f"Unexpected command: {cmd}")
 

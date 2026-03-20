@@ -67,41 +67,62 @@ planning_research:
       kind: "repo_reference"
       path: "../shared/launch-notes.md"
 
-planning_signals:
+production_feedback:
   enabled: false
-  max_age_hours: 24                # Refresh stale signals every 24h before planning
+  max_age_hours: 24                # Refresh stale feedback every 24h before planning
+  stale_after_hours: 72            # Guardrail: older evidence is marked guarded, not planning-driving
+  minimum_trust_level: "medium"    # Guardrail: low-trust inputs stay inspectable but do not drive planning
+  allowed_privacy_levels:          # Guardrail: restricted inputs stay visible but are excluded from planning use
+    - public
   max_inputs: 6                    # Hard cap; keep the first version bounded
   max_source_chars: 4000           # Per-input fetch/read cap before normalization
   allowed_domains:                 # Only used for type=web inputs; host must match
     - analytics.example.com
     - community.example.com
-    - competitor.example.com
-  artifact_file: "PLANNING_SIGNALS.md"
+    - status.example.com
+    - app.example.com
+  artifact_file: "PRODUCTION_FEEDBACK.md"
   inputs:
     - name: "Weekly activation funnel"
       type: "web"
-      input_type: "analytics"
+      signal_class: "analytics"
       url: "https://analytics.example.com/public/weekly-funnel"
       observed_at: "2026-03-19T08:00:00Z"
       provenance: "Public dashboard snapshot"
+      trust_level: "high"
       trust_note: "Aggregated product analytics exported for planning"
+      privacy: "public"
       privacy_note: "Aggregated public-safe metrics only"
     - name: "Community export requests"
       type: "file"
-      input_type: "user_feedback"
+      signal_class: "user_feedback"
       path: "../shared/community-feedback.md"
       observed_at: "2026-03-18T17:00:00Z"
       provenance: "Maintainer-curated summary of public issue comments"
+      trust_level: "medium"
       trust_note: "Qualitative sample; treat volume as directional"
+      privacy: "public"
       privacy_note: "Summary only; no raw user identifiers"
-    - name: "Competitor packaging page"
+    - name: "Signup flow inspection"
       type: "web"
-      input_type: "market_signal"
-      url: "https://competitor.example.com/pricing"
-      observed_at: "2026-03-18T10:00:00Z"
-      provenance: "Public pricing page"
-      trust_note: "Public market signal; validate before major roadmap shifts"
-      privacy_note: "Public web content"
+      signal_class: "product_inspection"
+      url: "https://app.example.com/signup"
+      observed_at: "2026-03-19T09:30:00Z"
+      provenance: "Maintainer walkthrough of public product surface"
+      trust_level: "medium"
+      trust_note: "Manual inspection; verify before large workflow changes"
+      privacy: "public"
+      privacy_note: "Public product surface only"
+    - name: "Weekly availability summary"
+      type: "file"
+      signal_class: "incident_slo"
+      path: "../shared/status-summary.md"
+      observed_at: "2026-03-19T06:00:00Z"
+      provenance: "Bounded incident summary exported from status tooling"
+      trust_level: "high"
+      trust_note: "Operational summary reviewed by maintainer"
+      privacy: "public"
+      privacy_note: "Service-level summary only; no customer-identifying logs"
 
 agent_timeout_minutes:
   codex: 40
@@ -137,14 +158,15 @@ github_projects:
               type: "web"
               kind: "official_docs"
               url: "https://docs.example.com/repo1"
-        planning_signals:
+        production_feedback:
           enabled: true
+          stale_after_hours: 48
           allowed_domains:
             - analytics.example.com
           inputs:
             - name: "Repo1 activation"
               type: "web"
-              input_type: "analytics"
+              signal_class: "analytics"
               url: "https://analytics.example.com/repo1"
               observed_at: "2026-03-19T08:00:00Z"
               provenance: "Public repo metrics snapshot"
