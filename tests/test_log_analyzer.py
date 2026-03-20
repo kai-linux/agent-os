@@ -97,6 +97,7 @@ def test_build_issue_body_includes_evidence_and_reasoning():
         "goal": "Restore codex routing reliability.",
         "success_criteria": ["Classify the main failure mode", "Implement one bounded mitigation"],
         "constraints": ["Prefer minimal diffs"],
+        "next_steps": ["Update the repo-specific routing rule", "Verify the next scorer run improves"],
         "reasoning": "The same degradation signal appears across recent operational evidence.",
         "evidence_ids": ["agent_degraded:codex", "queue_log_tail"],
     }
@@ -113,6 +114,8 @@ def test_build_issue_body_includes_evidence_and_reasoning():
 
     body = build_issue_body(issue, evidence_lookup)
 
+    assert "## Next Steps" in body
+    assert "- Update the repo-specific routing rule" in body
     assert "## Evidence" in body
     assert "`agent_degraded:codex` (agent_scorer): Codex fell below the weekly success-rate threshold." in body
     assert "## Reasoning" in body

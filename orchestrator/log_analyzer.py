@@ -37,13 +37,16 @@ Do not create multiple issues for the same underlying problem. Merge overlapping
 Return ONLY a JSON array (no markdown fences, no commentary) of exactly {top_n} objects.
 Each object must have:
   "title": concise GitHub issue title under 70 chars
-  "repo": GitHub repo slug, default "{default_repo}"
+  "repo": GitHub repo slug, default "{default_repo}" and preserve any repo explicitly named in a structured finding
   "labels": JSON array chosen from ["bug", "enhancement", "agent-os", "prio:high", "prio:normal"]
-  "goal": one sentence
+  "goal": one sentence that is specific to the repo and remediation action
   "success_criteria": JSON array of 2-4 short bullets
   "constraints": JSON array of 1-3 short bullets
+  "next_steps": JSON array of 2-4 short, concrete follow-up steps
   "reasoning": one sentence explaining why this is the best single remediation task for the evidence
   "evidence_ids": JSON array of evidence ids from the structured findings section below and/or "{queue_log_evidence_id}" and "{metrics_evidence_id}"
+
+When a structured finding includes `goal_hint`, `success_criteria_hint`, `constraints_hint`, `next_steps`, or `reasoning_hint`, keep the same remediation direction and stay concrete instead of generating a generic investigation ticket.
 
 --- Structured findings ---
 {structured_findings}
@@ -296,6 +299,7 @@ def build_issue_body(issue: dict, evidence_lookup: dict[str, dict]) -> str:
     goal = str(issue.get("goal", "")).strip()
     success_criteria = [str(item).strip() for item in issue.get("success_criteria", []) if str(item).strip()]
     constraints = [str(item).strip() for item in issue.get("constraints", []) if str(item).strip()]
+    next_steps = [str(item).strip() for item in issue.get("next_steps", []) if str(item).strip()]
     reasoning = str(issue.get("reasoning", "")).strip()
     evidence_ids = [str(item).strip() for item in issue.get("evidence_ids", []) if str(item).strip()]
 
@@ -305,6 +309,10 @@ def build_issue_body(issue: dict, evidence_lookup: dict[str, dict]) -> str:
         lines.append(f"- {item}")
     lines.extend(["", "## Constraints"])
     for item in constraints or ["- Prefer minimal diffs"]:
+        prefix = "" if item.startswith("- ") else "- "
+        lines.append(f"{prefix}{item}")
+    lines.extend(["", "## Next Steps"])
+    for item in next_steps or ["Use the cited evidence to implement one bounded remediation step in the target repo."]:
         prefix = "" if item.startswith("- ") else "- "
         lines.append(f"{prefix}{item}")
     lines.extend(["", "## Evidence"])
