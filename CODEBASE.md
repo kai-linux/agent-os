@@ -16,6 +16,16 @@
 
 ## Recent Changes
 
+### 2026-03-20 — [task-20260320-134110-auto-generate-production-feedback-md-each-sprint-c] (#76 kai-linux/agent-os)
+Strategic planning now auto-generates `PRODUCTION_FEEDBACK.md` from repo-local runtime feedback data each sprint cycle, including explicit no-signal summaries when no substrate data exists.
+
+**Files:** `- orchestrator/strategic_planner.py`, `- tests/test_strategic_planner.py`, `- .agent_result.md`
+
+**Decisions:**
+  - - Auto-enabled substrate-backed production feedback only when no explicit production-feedback config exists, while still respecting explicit `enabled: false`
+  - - Reused existing runtime metrics and outcome attribution logs instead of adding a new storage path or job
+
+
 ### 2026-03-20 — [task-20260320-134012-collapse-self-improvement-generators-behind-one-ev] (#63 kai-linux/agent-os)
 Collapsed overlapping self-improvement issue generation behind `log_analyzer.py` by turning `agent_scorer.py` into a structured finding emitter, removing queue-side remediation issue creation, and adding bounded evidence/reasoning to synthesized remediation issues.
 
