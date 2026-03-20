@@ -6,13 +6,15 @@ from pathlib import Path
 
 
 RESEARCH_ARTIFACT_DEFAULT = "PLANNING_RESEARCH.md"
+PRODUCTION_FEEDBACK_ARTIFACT_DEFAULT = "PRODUCTION_FEEDBACK.md"
 SIGNALS_ARTIFACT_DEFAULT = "PLANNING_SIGNALS.md"
 EXECUTION_RESEARCH_TASK_TYPES = {"architecture", "research", "docs", "design", "content"}
 EXECUTION_RESEARCH_HINTS = {
     "strategy", "roadmap", "research", "competitor", "analytics", "conversion",
     "user feedback", "evidence", "pricing", "positioning", "planning",
     "self-improvement", "self improvement", "degradation", "routing", "reliability",
-    "observability", "score", "metrics",
+    "observability", "score", "metrics", "incident", "slo", "feedback",
+    "inspection", "retention", "activation",
 }
 
 
@@ -81,6 +83,18 @@ def read_planning_signals_artifact(repo_path: Path, artifact_name: str = SIGNALS
     return content[:max_chars] if content else "(empty planning signals artifact)"
 
 
+def read_production_feedback_artifact(
+    repo_path: Path,
+    artifact_name: str = PRODUCTION_FEEDBACK_ARTIFACT_DEFAULT,
+    max_chars: int = 3200,
+) -> str:
+    artifact = repo_path / artifact_name
+    if artifact.exists():
+        content = artifact.read_text(encoding="utf-8", errors="replace").strip()
+        return content[:max_chars] if content else "(empty production feedback artifact)"
+    return read_planning_signals_artifact(repo_path, max_chars=max_chars)
+
+
 def should_include_research(task_type: str, body: str) -> bool:
     task_type = str(task_type or "").strip().lower()
     if task_type in EXECUTION_RESEARCH_TASK_TYPES:
@@ -98,7 +112,7 @@ def build_execution_context(repo_path: Path, task_type: str, body: str) -> str:
         ("Planning Principles (PLANNING_PRINCIPLES.md)", read_planning_principles(repo_path)),
     ]
     if should_include_research(task_type, body):
-        sections.append(("Planning Signals (PLANNING_SIGNALS.md)", read_planning_signals_artifact(repo_path)))
+        sections.append(("Production Feedback (PRODUCTION_FEEDBACK.md)", read_production_feedback_artifact(repo_path)))
         sections.append(("Planning Research (PLANNING_RESEARCH.md)", read_planning_research_artifact(repo_path)))
 
     lines = ["", "", "---", "# Repository Context (read-only)", ""]

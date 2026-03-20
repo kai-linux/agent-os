@@ -58,6 +58,7 @@ APPROVAL_TIMEOUT_HOURS = 24
 APPROVAL_KEYWORDS = {"yes", "approve", "approved", "ok", "go", "lgtm"}
 REJECTION_KEYWORDS = {"no", "reject", "skip", "cancel", "nope"}
 RESEARCH_ARTIFACT_DEFAULT = "PLANNING_RESEARCH.md"
+PRODUCTION_FEEDBACK_ARTIFACT_DEFAULT = "PRODUCTION_FEEDBACK.md"
 SIGNALS_ARTIFACT_DEFAULT = "PLANNING_SIGNALS.md"
 RESEARCH_ALLOWED_KINDS = {
     "official_docs",
@@ -65,14 +66,26 @@ RESEARCH_ALLOWED_KINDS = {
     "product_surface",
     "repo_reference",
 }
-SIGNAL_INPUT_TYPES = {"analytics", "user_feedback", "market_signal"}
+FEEDBACK_SIGNAL_CLASSES = {
+    "analytics",
+    "user_feedback",
+    "product_inspection",
+    "incident_slo",
+    "market_signal",
+}
+TRUST_LEVEL_RANK = {"low": 0, "medium": 1, "high": 2}
+PRIVACY_LEVELS = {"public", "internal", "restricted"}
 RESEARCH_MAX_SOURCES = 4
 RESEARCH_MAX_SOURCE_CHARS = 4000
 RESEARCH_CONTEXT_MAX_CHARS = 4000
 RESEARCH_FETCH_TIMEOUT_SECONDS = 20
-SIGNALS_MAX_INPUTS = 6
-SIGNALS_MAX_SOURCE_CHARS = 4000
-SIGNALS_CONTEXT_MAX_CHARS = 5000
+FEEDBACK_MAX_INPUTS = 6
+FEEDBACK_MAX_SOURCE_CHARS = 4000
+FEEDBACK_CONTEXT_MAX_CHARS = 6000
+SIGNAL_INPUT_TYPES = FEEDBACK_SIGNAL_CLASSES
+SIGNALS_MAX_INPUTS = FEEDBACK_MAX_INPUTS
+SIGNALS_MAX_SOURCE_CHARS = FEEDBACK_MAX_SOURCE_CHARS
+SIGNALS_CONTEXT_MAX_CHARS = FEEDBACK_CONTEXT_MAX_CHARS
 
 
 def _format_cadence(days: float) -> str:
@@ -798,35 +811,57 @@ def _planning_research_context(cfg: dict, github_slug: str, repo_path: Path) -> 
     return content[:RESEARCH_CONTEXT_MAX_CHARS] if content else "(empty planning research artifact)"
 
 
-def _repo_signals_config(cfg: dict, github_slug: str) -> dict:
-    """Return merged planning signals config for a repo."""
-    signals_cfg = dict(cfg.get("planning_signals") or {})
+def _feedback_artifact_default(feedback_cfg: dict) -> str:
+    if feedback_cfg.get("_legacy_alias") == "planning_signals":
+        return SIGNALS_ARTIFACT_DEFAULT
+    return PRODUCTION_FEEDBACK_ARTIFACT_DEFAULT
+
+
+def _repo_production_feedback_config(cfg: dict, github_slug: str) -> dict:
+    """Return merged production feedback config for a repo."""
+    feedback_cfg = dict(cfg.get("production_feedback") or {})
+    if not feedback_cfg and isinstance(cfg.get("planning_signals"), dict):
+        feedback_cfg = dict(cfg.get("planning_signals") or {})
+        feedback_cfg["_legacy_alias"] = "planning_signals"
+
     for project_cfg in cfg.get("github_projects", {}).values():
         if not isinstance(project_cfg, dict):
             continue
         for repo_cfg in project_cfg.get("repos", []):
             if repo_cfg.get("github_repo") != github_slug:
                 continue
-            override = repo_cfg.get("planning_signals")
+            override = repo_cfg.get("production_feedback")
+            if not isinstance(override, dict):
+                override = repo_cfg.get("planning_signals")
+                if isinstance(override, dict) and not feedback_cfg.get("_legacy_alias"):
+                    feedback_cfg["_legacy_alias"] = "planning_signals"
             if isinstance(override, dict):
-                merged = dict(signals_cfg)
+                merged = dict(feedback_cfg)
                 merged.update(override)
-                signals_cfg = merged
-            return signals_cfg
-    return signals_cfg
+                feedback_cfg = merged
+            return feedback_cfg
+    return feedback_cfg
 
 
-_SIGNAL_SUMMARY_PROMPT = """\
-You are normalizing bounded planning signals for a software sprint planner.
+def _repo_signals_config(cfg: dict, github_slug: str) -> dict:
+    """Backward-compatible alias for legacy planning_signals callers."""
+    return _repo_production_feedback_config(cfg, github_slug)
+
+
+_FEEDBACK_SUMMARY_PROMPT = """\
+You are normalizing bounded production feedback for a software sprint planner.
 
 Use only the provided source text and the explicit metadata. Do not invent facts.
 Extract measurable evidence first, then concise planning implications.
 
-Input type: {input_type}
+Signal class: {signal_class}
 Source name: {name}
-Source location: {location}
+Source: {location}
 Observed at: {observed_at}
+Freshness policy: {freshness_policy}
+Trust level: {trust_level}
 Trust note: {trust_note}
+Privacy level: {privacy_level}
 Privacy note: {privacy_note}
 
 Source text:
@@ -835,21 +870,67 @@ Source text:
 Return ONLY JSON with this schema:
 {{
   "summary": "2-4 sentence factual summary",
-  "key_metrics": ["metric with number or bounded qualitative count", "metric"],
+  "key_evidence": ["metric with number or bounded qualitative count", "evidence point"],
   "planning_implications": ["bullet", "bullet", "bullet"]
 }}
 """
 
 
-def _summarize_signal_input(signal: dict, content: str) -> tuple[str, list[str], list[str]]:
-    prompt = _SIGNAL_SUMMARY_PROMPT.format(
-        input_type=signal.get("input_type", "unknown"),
+def _normalize_trust_level(raw: str | None) -> str:
+    level = str(raw or "").strip().lower()
+    return level if level in TRUST_LEVEL_RANK else "medium"
+
+
+def _normalize_privacy_level(raw: str | None) -> str:
+    level = str(raw or "").strip().lower()
+    return level if level in PRIVACY_LEVELS else "public"
+
+
+def _feedback_guardrail_decision(
+    signal: dict,
+    observed_at: datetime | None,
+    feedback_cfg: dict,
+) -> tuple[str, list[str], str, str]:
+    trust_level = _normalize_trust_level(signal.get("trust_level"))
+    privacy_level = _normalize_privacy_level(signal.get("privacy"))
+    minimum_trust = _normalize_trust_level(feedback_cfg.get("minimum_trust_level"))
+    allowed_privacy = {
+        _normalize_privacy_level(level)
+        for level in feedback_cfg.get("allowed_privacy_levels", ["public"])
+        if str(level).strip()
+    } or {"public"}
+    stale_after_hours = float(feedback_cfg.get("stale_after_hours", feedback_cfg.get("max_age_hours", 24) * 3))
+
+    reasons = []
+    age_hours = None
+    if observed_at:
+        age_hours = max(0.0, (datetime.now(tz=timezone.utc) - observed_at).total_seconds() / 3600.0)
+    if observed_at is None:
+        reasons.append("freshness unknown")
+    elif age_hours is not None and age_hours > stale_after_hours:
+        reasons.append(f"stale ({age_hours:.1f}h > {stale_after_hours:g}h)")
+    if TRUST_LEVEL_RANK[trust_level] < TRUST_LEVEL_RANK[minimum_trust]:
+        reasons.append(f"trust below minimum ({trust_level} < {minimum_trust})")
+    if privacy_level not in allowed_privacy:
+        reasons.append(f"privacy level {privacy_level} not allowed")
+
+    if reasons:
+        return "guarded", reasons, trust_level, privacy_level
+    return "included", [], trust_level, privacy_level
+
+
+def _summarize_feedback_input(signal: dict, content: str, freshness_policy: str) -> tuple[str, list[str], list[str]]:
+    prompt = _FEEDBACK_SUMMARY_PROMPT.format(
+        signal_class=signal.get("signal_class", signal.get("input_type", "unknown")),
         name=signal.get("name", "Unnamed input"),
         location=signal.get("url") or signal.get("path") or "(unknown)",
         observed_at=signal.get("observed_at") or "unspecified",
+        freshness_policy=freshness_policy,
+        trust_level=_normalize_trust_level(signal.get("trust_level")),
         trust_note=signal.get("trust_note") or "not specified",
+        privacy_level=_normalize_privacy_level(signal.get("privacy")),
         privacy_note=signal.get("privacy_note") or "public-safe source expected",
-        source_text=content[:SIGNALS_MAX_SOURCE_CHARS],
+        source_text=content[:FEEDBACK_MAX_SOURCE_CHARS],
     )
     try:
         raw = _call_haiku(prompt)
@@ -858,9 +939,9 @@ def _summarize_signal_input(signal: dict, content: str) -> tuple[str, list[str],
             text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
         data = json.loads(text)
         summary = str(data.get("summary", "")).strip()
-        metrics = [
+        evidence = [
             str(item).strip()
-            for item in data.get("key_metrics", [])
+            for item in data.get("key_evidence", [])
             if str(item).strip()
         ]
         implications = [
@@ -869,9 +950,9 @@ def _summarize_signal_input(signal: dict, content: str) -> tuple[str, list[str],
             if str(item).strip()
         ]
         if summary:
-            return summary[:700], metrics[:5], implications[:5]
+            return summary[:700], evidence[:5], implications[:5]
     except Exception as e:
-        print(f"  Signal summarization failed for {signal.get('name', '?')}: {e}")
+        print(f"  Production feedback summarization failed for {signal.get('name', '?')}: {e}")
 
     fallback_summary = content[:700].replace("\n", " ").strip()
     fallback_summary = re.sub(r"\s{2,}", " ", fallback_summary)
@@ -879,7 +960,7 @@ def _summarize_signal_input(signal: dict, content: str) -> tuple[str, list[str],
         fallback_summary += "..."
     return (
         fallback_summary or "(no content)",
-        ["No normalized metric extracted; raw evidence fallback was used."],
+        ["No normalized evidence extracted; raw evidence fallback was used."],
         ["Treat as raw evidence; normalization fallback was used."],
     )
 
@@ -895,51 +976,70 @@ def _format_freshness_hours(observed_at: datetime | None) -> str:
     return f"{round(age_hours / 24, 1):g}d old"
 
 
-def _write_signals_artifact(repo_path: Path, artifact_path: Path, sections: list[dict], refresh_hours: float):
+def _write_production_feedback_artifact(
+    repo_path: Path,
+    artifact_path: Path,
+    sections: list[dict],
+    refresh_hours: float,
+    feedback_cfg: dict,
+):
     generated = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    allowed_privacy = ", ".join(
+        _normalize_privacy_level(level)
+        for level in feedback_cfg.get("allowed_privacy_levels", ["public"])
+        if str(level).strip()
+    ) or "public"
     lines = [
-        "# Planning Signals",
+        "# Production Feedback",
         "",
         f"- Generated: {generated}",
         f"- Refresh after: {refresh_hours:g}h",
-        "- Scope: bounded analytics, user feedback, and market signals for sprint selection",
+        f"- Default stale after: {float(feedback_cfg.get('stale_after_hours', feedback_cfg.get('max_age_hours', 24) * 3)):g}h",
+        f"- Minimum trust for planning use: {_normalize_trust_level(feedback_cfg.get('minimum_trust_level'))}",
+        f"- Allowed privacy levels for planning use: {allowed_privacy}",
+        "- Scope: bounded analytics, user feedback, product inspection, incident/SLO, and legacy market signals",
         "",
     ]
     if not sections:
         lines.extend([
             "## Findings",
             "",
-            "(no usable planning signals were gathered)",
+            "(no usable production feedback was gathered)",
             "",
         ])
     for section in sections:
         lines.extend([
             f"## {section['name']}",
             "",
-            f"- Input Type: {section['input_type']}",
-            f"- Source Location: {section['location']}",
+            f"- Signal Class: {section['signal_class']}",
+            f"- Source: {section['location']}",
             f"- Observed At: {section['observed_at']}",
             f"- Freshness: {section['freshness']}",
+            f"- Freshness Policy: {section['freshness_policy']}",
             f"- Provenance: {section['provenance']}",
-            f"- Trust Boundary: {section['trust_note']}",
-            f"- Privacy Boundary: {section['privacy_note']}",
+            f"- Trust: {section['trust_level']} ({section['trust_note']})",
+            f"- Privacy: {section['privacy_level']} ({section['privacy_note']})",
+            f"- Planning Use: {section['planning_use']}",
             "",
             "### Signal Summary",
             "",
             section["summary"],
             "",
-            "### Key Metrics",
+            "### Key Evidence",
             "",
         ])
-        for metric in section["key_metrics"]:
-            lines.append(f"- {metric}")
+        for evidence in section["key_evidence"]:
+            lines.append(f"- {evidence}")
         lines.extend([
             "",
             "### Planning Implications",
             "",
         ])
-        for implication in section["planning_implications"]:
-            lines.append(f"- {implication}")
+        if section["planning_implications"]:
+            for implication in section["planning_implications"]:
+                lines.append(f"- {implication}")
+        else:
+            lines.append(f"- Guarded: {section['guardrail_note']}")
         lines.append("")
     artifact_path.parent.mkdir(parents=True, exist_ok=True)
     updated = "\n".join(lines).rstrip() + "\n"
@@ -953,61 +1053,81 @@ def _write_signals_artifact(repo_path: Path, artifact_path: Path, sections: list
     )
 
 
-def _planning_signals_context(cfg: dict, github_slug: str, repo_path: Path) -> str:
-    """Return normalized planning signals, refreshing the artifact when stale."""
-    signals_cfg = _repo_signals_config(cfg, github_slug)
-    if not signals_cfg.get("enabled"):
-        return "(planning signals disabled)"
+def _production_feedback_context(cfg: dict, github_slug: str, repo_path: Path) -> str:
+    """Return normalized production feedback, refreshing the artifact when stale."""
+    feedback_cfg = _repo_production_feedback_config(cfg, github_slug)
+    if not feedback_cfg.get("enabled"):
+        return "(production feedback disabled)"
 
-    inputs = signals_cfg.get("inputs", [])
+    inputs = feedback_cfg.get("inputs", [])
     if not isinstance(inputs, list) or not inputs:
-        return "(planning signals enabled but no inputs configured)"
+        return "(production feedback enabled but no inputs configured)"
 
-    artifact_name = str(signals_cfg.get("artifact_file", SIGNALS_ARTIFACT_DEFAULT)).strip() or SIGNALS_ARTIFACT_DEFAULT
-    refresh_hours = float(signals_cfg.get("max_age_hours", 24))
-    max_inputs = max(1, min(int(signals_cfg.get("max_inputs", SIGNALS_MAX_INPUTS)), SIGNALS_MAX_INPUTS))
+    artifact_name = str(
+        feedback_cfg.get("artifact_file", _feedback_artifact_default(feedback_cfg))
+    ).strip() or _feedback_artifact_default(feedback_cfg)
+    refresh_hours = float(feedback_cfg.get("max_age_hours", 24))
+    max_inputs = max(1, min(int(feedback_cfg.get("max_inputs", FEEDBACK_MAX_INPUTS)), FEEDBACK_MAX_INPUTS))
     artifact_path = _artifact_path(repo_path, artifact_name)
 
     if artifact_path.exists():
         age_seconds = time.time() - artifact_path.stat().st_mtime
         if age_seconds <= refresh_hours * 3600:
             content = artifact_path.read_text(encoding="utf-8", errors="replace").strip()
-            return content[:SIGNALS_CONTEXT_MAX_CHARS] if content else "(empty planning signals artifact)"
+            return content[:FEEDBACK_CONTEXT_MAX_CHARS] if content else "(empty production feedback artifact)"
 
     sections = []
     for signal in inputs[:max_inputs]:
         if not isinstance(signal, dict):
             continue
-        input_type = str(signal.get("input_type", "")).strip().lower()
-        if input_type not in SIGNAL_INPUT_TYPES:
-            print(f"  Skipping signal input with unsupported type: {input_type or '?'}")
+        signal_class = str(signal.get("signal_class") or signal.get("input_type") or "").strip().lower()
+        if signal_class not in FEEDBACK_SIGNAL_CLASSES:
+            print(f"  Skipping production feedback input with unsupported class: {signal_class or '?'}")
             continue
         content, error = _read_research_source(repo_path, signal, {
-            "allowed_domains": signals_cfg.get("allowed_domains", []),
-            "max_source_chars": signals_cfg.get("max_source_chars", SIGNALS_MAX_SOURCE_CHARS),
+            "allowed_domains": feedback_cfg.get("allowed_domains", []),
+            "max_source_chars": feedback_cfg.get("max_source_chars", FEEDBACK_MAX_SOURCE_CHARS),
         })
         if error:
-            print(f"  Skipping signal input {signal.get('name', '?')}: {error}")
+            print(f"  Skipping production feedback input {signal.get('name', '?')}: {error}")
             continue
         observed_at = _parse_signal_timestamp(signal.get("observed_at"))
-        summary, key_metrics, implications = _summarize_signal_input(signal, content or "")
+        planning_use, guardrail_reasons, trust_level, privacy_level = _feedback_guardrail_decision(
+            signal,
+            observed_at,
+            feedback_cfg,
+        )
+        freshness_policy = (
+            f"ignore for planning if older than {float(feedback_cfg.get('stale_after_hours', feedback_cfg.get('max_age_hours', 24) * 3)):g}h"
+        )
+        summary, key_evidence, implications = _summarize_feedback_input(signal, content or "", freshness_policy)
         sections.append({
             "name": str(signal.get("name", "Unnamed input")).strip() or "Unnamed input",
-            "input_type": input_type,
+            "signal_class": signal_class,
             "location": str(signal.get("url") or signal.get("path") or "(unknown)").strip(),
             "observed_at": observed_at.strftime("%Y-%m-%d %H:%M UTC") if observed_at else "unspecified",
             "freshness": _format_freshness_hours(observed_at),
+            "freshness_policy": freshness_policy,
             "provenance": str(signal.get("provenance") or "configured source").strip(),
             "trust_note": str(signal.get("trust_note") or "treat as advisory external evidence; verify before irreversible action").strip(),
             "privacy_note": str(signal.get("privacy_note") or "public-safe summary only; do not include raw personal data").strip(),
+            "trust_level": trust_level,
+            "privacy_level": privacy_level,
+            "planning_use": planning_use,
             "summary": summary,
-            "key_metrics": key_metrics or ["No explicit metric extracted."],
-            "planning_implications": implications or ["No direct sprint implication captured."],
+            "key_evidence": key_evidence or ["No explicit evidence extracted."],
+            "planning_implications": implications if planning_use == "included" else [],
+            "guardrail_note": "; ".join(guardrail_reasons) if guardrail_reasons else "included in planning context",
         })
 
-    _write_signals_artifact(repo_path, artifact_path, sections, refresh_hours)
+    _write_production_feedback_artifact(repo_path, artifact_path, sections, refresh_hours, feedback_cfg)
     content = artifact_path.read_text(encoding="utf-8", errors="replace").strip()
-    return content[:SIGNALS_CONTEXT_MAX_CHARS] if content else "(empty planning signals artifact)"
+    return content[:FEEDBACK_CONTEXT_MAX_CHARS] if content else "(empty production feedback artifact)"
+
+
+def _planning_signals_context(cfg: dict, github_slug: str, repo_path: Path) -> str:
+    """Backward-compatible alias for older planner call sites and tests."""
+    return _production_feedback_context(cfg, github_slug, repo_path)
 
 
 def _recently_closed_issues(repo: str, days: int = 7) -> str:
@@ -1380,8 +1500,8 @@ Context about this repository:
 --- Stable Planning Principles (PLANNING_PRINCIPLES.md) ---
 {planning_principles}
 
---- Planning Signals (PLANNING_SIGNALS.md) ---
-{signals_context}
+--- Production Feedback (PRODUCTION_FEEDBACK.md) ---
+{production_feedback_context}
 
 --- Codebase Context (CODEBASE.md) ---
 {codebase_context}
@@ -1416,7 +1536,8 @@ Rules:
 - Order by priority (most impactful first)
 - Build on last sprint's outcomes — continue momentum, fix regressions, advance strategy
 - Treat the planning principles as the stable north-star rubric when strategy and backlog quality are ambiguous
-- When planning signals are present, prioritize measurable user, market, and analytics outcomes over narrative summaries alone
+- When production feedback is present, prioritize measurable analytics, user feedback, product inspection, and incident/SLO outcomes over narrative summaries alone
+- Treat entries marked `Planning Use: guarded` as audit context only, not as drivers for roadmap or prioritization decisions
 - When fresh research is present, use it to inform prioritization and rationale. Prefer work that is supported by repo-local strategy plus bounded external evidence.
 - Prefer unblockers, autonomy gains, planning-quality gains, and evidence-driven improvements over local churn
 - Include a mix of: feature work that advances the product vision, bug fixes, self-improvement, and infrastructure
@@ -1518,7 +1639,7 @@ def _build_plan_prompt(
     north_star: str,
     planning_principles: str,
     codebase_context: str,
-    signals_context: str,
+    production_feedback_context: str,
     research_context: str,
     retrospective: str,
     git_log: str,
@@ -1534,7 +1655,7 @@ def _build_plan_prompt(
         readme_goal=readme_goal,
         north_star=north_star,
         planning_principles=planning_principles,
-        signals_context=signals_context,
+        production_feedback_context=production_feedback_context,
         codebase_context=codebase_context,
         research_context=research_context,
         retrospective=retrospective,
@@ -1874,9 +1995,9 @@ def plan_repo(
     codebase_context = _read_codebase_md(repo_path)
     print(f"  CODEBASE.md: {len(codebase_context)} chars")
 
-    # 6. Planning signals
-    signals_context = _planning_signals_context(cfg, github_slug, repo_path)
-    print(f"  Signals context: {len(signals_context)} chars")
+    # 6. Production feedback
+    production_feedback_context = _production_feedback_context(cfg, github_slug, repo_path)
+    print(f"  Production feedback: {len(production_feedback_context)} chars")
 
     # 7. Pre-planning research
     research_context = _planning_research_context(cfg, github_slug, repo_path)
@@ -1917,7 +2038,7 @@ def plan_repo(
         north_star=north_star,
         planning_principles=planning_principles,
         codebase_context=codebase_context,
-        signals_context=signals_context,
+        production_feedback_context=production_feedback_context,
         research_context=research_context,
         retrospective=retrospective,
         git_log=git_log,
