@@ -23,7 +23,16 @@ from orchestrator.trust import is_trusted
 
 SECTION_RE = re.compile(r"^##\s+(.+?)\n(.*?)(?=^##\s+|\Z)", re.MULTILINE | re.DOTALL)
 DEPENDENCY_RE = re.compile(r"(?im)^\s*(?:depends on|blocked by)\s+#(\d+)\b")
+PUBLISH_ACTION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("git_commit", re.compile(r"\bgit\s+commit\b", re.IGNORECASE)),
+    ("git_push", re.compile(r"\bgit\s+push\b", re.IGNORECASE)),
+    ("push_branch", re.compile(r"\bpush(?:ing)?\s+(?:the\s+)?branch\b", re.IGNORECASE)),
+    ("open_pr", re.compile(r"\b(?:open|create|submit|raise)\s+(?:a\s+|the\s+)?(?:pull request|pr)\b", re.IGNORECASE)),
+    ("publish_changes", re.compile(r"\bpublish(?:ing|ed)?\b", re.IGNORECASE)),
+)
 MAX_DEPENDENCY_DEPTH = 3
+MISSING_PUBLISH_CAPABILITY_LABEL = "dispatch:missing-publish-capability"
+MISSING_PUBLISH_CAPABILITY_CODE = "missing_publish_capability"
 
 
 def slugify(text: str) -> str:
@@ -248,6 +257,69 @@ def _mark_issue_blocked(repo_full: str, item: dict, info: dict, project_cfg: dic
     add_issue_comment(repo_full, item["number"], f"Waiting for #{dependency_number}")
 
 
+def _detect_publish_requirements(issue: dict, parsed: dict | None = None) -> list[str]:
+    text_parts = [
+        issue.get("title", ""),
+        issue.get("body", ""),
+    ]
+    if parsed:
+        text_parts.extend([
+            parsed.get("goal", ""),
+            parsed.get("success_criteria", ""),
+            parsed.get("constraints", ""),
+            parsed.get("context", ""),
+        ])
+
+    text = "\n".join(part for part in text_parts if part)
+    matches: list[str] = []
+    for code, pattern in PUBLISH_ACTION_PATTERNS:
+        if pattern.search(text):
+            matches.append(code)
+    return matches
+
+
+def _skip_missing_publish_capability(
+    cfg: dict,
+    repo_full: str,
+    item: dict,
+    info: dict | None,
+    project_cfg: dict,
+    requirements: list[str],
+):
+    blocked_value = project_cfg.get("blocked_value", "Blocked")
+    if info is not None and item.get("item_id"):
+        try:
+            _set_project_status(info, item["item_id"], blocked_value)
+        except Exception as e:
+            print(f"Warning: failed to set project status: {e}")
+
+    edit_issue_labels(
+        repo_full,
+        item["number"],
+        add=["blocked", MISSING_PUBLISH_CAPABILITY_LABEL],
+        remove=["ready", "in-progress", "agent-dispatched"],
+    )
+
+    payload = json.dumps(
+        {
+            "code": MISSING_PUBLISH_CAPABILITY_CODE,
+            "requirements": requirements,
+            "runtime_allow_push": bool(cfg.get("default_allow_push", True)),
+        },
+        sort_keys=True,
+    )
+    add_issue_comment(
+        repo_full,
+        item["number"],
+        "\n".join([
+            "<!-- agent-os-dispatch-skip",
+            payload,
+            "-->",
+            "Blocked automatically: task requires publish capability but this runtime cannot push.",
+        ]),
+    )
+
+
 def _requeue_unblocked_items(queried, repo_to_project, issue_lookup):
     for info, _ready_items in queried.values():
         for item in info.get("items", []):
@@ -421,6 +493,16 @@ def _dispatch_item(cfg, paths, owner, repo_to_project, info, ready_items, issue_
         if resolution["status"] == "unknown":
             print(f"Warning: could not resolve dependency #{resolution['dependency']} for {repo_full}#{item['number']}")
             continue
+
+        if not cfg.get("default_allow_push", True):
+            requirements = _detect_publish_requirements(item)
+            if requirements:
+                _skip_missing_publish_capability(cfg, repo_full, item, info, pcfg, requirements)
+                print(
+                    f"Skipped {repo_full}#{item['number']} — "
+                    f"{MISSING_PUBLISH_CAPABILITY_CODE}: {', '.join(requirements)}"
+                )
+                continue
 
         # --- Task decomposition: split epics into sub-issues ---
         decomp = _try_decompose(cfg, repo_full, item, info, pcfg)
@@ -603,6 +685,15 @@ def dispatch_one():
                     if resolution["status"] in {"depth-limit", "unknown"}:
                         print(f"Warning: dependency check skipped dispatch for {repo_full}#{issue['number']}: {resolution}")
                         continue
+                    if not cfg.get("default_allow_push", True):
+                        requirements = _detect_publish_requirements(issue)
+                        if requirements:
+                            _skip_missing_publish_capability(cfg, repo_full, issue, None, project_cfg, requirements)
+                            print(
+                                f"Skipped {repo_full}#{issue['number']} — "
+                                f"{MISSING_PUBLISH_CAPABILITY_CODE}: {', '.join(requirements)}"
+                            )
+                            continue
                     task_id, task_md = build_mailbox_task(cfg, project_key, repo_cfg, issue)
                     task_path = paths["INBOX"] / f"{task_id}.md"
                     task_path.write_text(task_md, encoding="utf-8")
