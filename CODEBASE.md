@@ -16,6 +16,16 @@
 
 ## Recent Changes
 
+### 2026-03-20 — [task-20260320-100812-persist-worker-prompt-snapshots-for-each-dispatche] (#51 kai-linux/agent-os)
+Persisted each task run's exact final worker prompt to a stable `runtime/prompts/<task_id>.txt` artifact and linked that artifact from task frontmatter so blocked and partial runs keep a reproducible prompt snapshot without agent-specific handling.
+
+**Files:** `- orchestrator/paths.py`, `- orchestrator/github_dispatcher.py`, `- orchestrator/queue.py`, `- tests/test_github_dispatcher.py`, `- tests/test_queue.py`, `- .agent_result.md`
+
+**Decisions:**
+  - - Reused existing task metadata and runtime directories instead of introducing a new prompt-tracking subsystem.
+  - - Stored the final prompt snapshot by task id and rewrote it on each prompt regeneration so the durable artifact always reflects the exact last prompt actually used.
+
+
 ### 2026-03-20 — [task-20260320-081208-gate-git-publish-tasks-on-writable-remote-capabili] (#58 kai-linux/agent-os)
 Added a dispatch-time publish capability gate so tasks that explicitly require commit/push or PR publication are blocked before entering the worker inbox when `default_allow_push` is disabled, with a machine-readable skip reason recorded on the issue.
 
