@@ -15,6 +15,7 @@ from orchestrator.queue import (
     build_escalation_message,
     get_agent_chain,
     handle_telegram_callback,
+    maybe_requeue_prompt_inspection_recovery,
     maybe_emit_self_improvement_events,
     parse_agent_result,
     parse_bullets,
@@ -369,6 +370,114 @@ def test_run_tests_marks_complete_result_partial_with_test_failure_code(tmp_path
     assert "STATUS: partial" in updated
     assert "BLOCKER_CODE:\ntest_failure" in updated
     assert "Tests failed: pytest" in updated
+
+
+def test_prompt_inspection_success_requeues_blocked_task_once(tmp_path, monkeypatch):
+    inbox = tmp_path / "inbox"
+    blocked = tmp_path / "blocked"
+    root = tmp_path / "root"
+    for path in (inbox, blocked, root):
+        path.mkdir()
+
+    blocked_task = blocked / "task-original.md"
+    blocked_task.write_text(textwrap.dedent("""\
+        ---
+        task_id: task-original
+        repo: /tmp/repo
+        agent: auto
+        task_type: implementation
+        attempt: 1
+        max_attempts: 4
+        prompt_snapshot_path: /tmp/prompts/task-original.txt
+        ---
+
+        # Goal
+
+        Fix the broken worker prompt path.
+    """), encoding="utf-8")
+
+    completed_meta = {
+        "task_id": "task-inspect",
+        "recovery_trigger": "prompt_inspection",
+        "recovery_target_task_id": "task-original",
+        "recovery_target_blocker_code": "invalid_result_contract",
+    }
+    completed_body = textwrap.dedent("""\
+        # Goal
+
+        Inspect the worker prompt snapshot.
+    """)
+    result = {"status": "complete"}
+
+    monkeypatch.setattr("orchestrator.queue.now_ts", lambda: "20260320-140000")
+
+    rerun = maybe_requeue_prompt_inspection_recovery(
+        {"INBOX": inbox, "BLOCKED": blocked, "ROOT": root},
+        completed_meta,
+        completed_body,
+        result,
+        tmp_path / "queue.log",
+        tmp_path / "summary.log",
+    )
+
+    assert rerun == inbox / "task-20260320-140000-rerun-task-original.md"
+    requeued_text = rerun.read_text(encoding="utf-8")
+    assert "recovery_source_task_id: task-original" in requeued_text
+    assert "recovery_trigger_task_id: task-inspect" in requeued_text
+    assert "attempt: 2" in requeued_text
+    assert "model_attempts: []" in requeued_text
+    assert "prompt_snapshot_path: /tmp/prompts/task-20260320-140000-rerun-task-original.txt" in requeued_text
+
+    blocked_text = blocked_task.read_text(encoding="utf-8")
+    assert "prompt_inspection_requeued_by: task-inspect" in blocked_text
+    assert "prompt_inspection_recovery_task_id: task-20260320-140000-rerun-task-original" in blocked_text
+
+    second = maybe_requeue_prompt_inspection_recovery(
+        {"INBOX": inbox, "BLOCKED": blocked, "ROOT": root},
+        completed_meta,
+        completed_body,
+        result,
+        tmp_path / "queue.log",
+        tmp_path / "summary.log",
+    )
+    assert second is None
+    assert len(list(inbox.glob("*.md"))) == 1
+
+
+def test_prompt_inspection_recovery_skips_non_prompt_blocker_code(tmp_path):
+    inbox = tmp_path / "inbox"
+    blocked = tmp_path / "blocked"
+    root = tmp_path / "root"
+    for path in (inbox, blocked, root):
+        path.mkdir()
+
+    (blocked / "task-original.md").write_text(textwrap.dedent("""\
+        ---
+        task_id: task-original
+        repo: /tmp/repo
+        ---
+
+        # Goal
+
+        Fix the task.
+    """), encoding="utf-8")
+
+    rerun = maybe_requeue_prompt_inspection_recovery(
+        {"INBOX": inbox, "BLOCKED": blocked, "ROOT": root},
+        {
+            "task_id": "task-inspect",
+            "recovery_trigger": "prompt_inspection",
+            "recovery_target_task_id": "task-original",
+            "recovery_target_blocker_code": "environment_failure",
+        },
+        "# Goal\n\nInspect the worker prompt snapshot.\n",
+        {"status": "complete"},
+        tmp_path / "queue.log",
+        tmp_path / "summary.log",
+    )
+
+    assert rerun is None
+    assert list(inbox.glob("*.md")) == []
 
 
 def test_build_escalation_message_contains_required_fields():
