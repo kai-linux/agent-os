@@ -41,6 +41,7 @@ from orchestrator.strategic_planner import (
     _production_feedback_context,
     _planning_signals_context,
     _repo_production_feedback_config,
+    _recent_outcome_summary,
     _repo_signals_config,
     _read_planning_principles,
     _repo_planner_config,
@@ -455,6 +456,7 @@ def test_build_plan_prompt_includes_research_context():
         planning_principles="north-star rubric",
         codebase_context="codebase",
         production_feedback_context="signals",
+        outcome_context="outcomes",
         research_context="# Planning Research\n\nEvidence",
         retrospective="retro",
         git_log="abc123 commit",
@@ -477,6 +479,7 @@ def test_build_plan_prompt_includes_planning_principles():
         planning_principles="Prefer autonomy and evidence.",
         codebase_context="codebase",
         production_feedback_context="signals",
+        outcome_context="outcomes",
         research_context="research",
         retrospective="retro",
         git_log="abc123 commit",
@@ -499,6 +502,7 @@ def test_build_plan_prompt_includes_north_star():
         planning_principles="Prefer autonomy and evidence.",
         codebase_context="codebase",
         production_feedback_context="signals",
+        outcome_context="outcomes",
         research_context="research",
         retrospective="retro",
         git_log="abc123 commit",
@@ -612,6 +616,7 @@ def test_build_plan_prompt_includes_production_feedback():
         planning_principles="Prefer autonomy and evidence.",
         codebase_context="codebase",
         production_feedback_context="# Production Feedback\n\nActivation dropped 20%.",
+        outcome_context="Outcome evidence here.",
         research_context="research",
         retrospective="retro",
         git_log="abc123 commit",
@@ -622,6 +627,7 @@ def test_build_plan_prompt_includes_production_feedback():
         cross_repo_context="(single repo)",
     )
     assert "--- Production Feedback (PRODUCTION_FEEDBACK.md) ---" in prompt
+    assert "--- Recent Outcome Evidence ---" in prompt
     assert "Activation dropped 20%." in prompt
 
 
@@ -662,6 +668,89 @@ def test_production_feedback_context_guards_stale_low_trust_private_inputs(tmp_p
     assert "Guarded:" in context
     assert "trust below minimum" in context
     assert "privacy level restricted not allowed" in context
+
+
+def test_recent_outcome_summary_refreshes_snapshot(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    cfg = {
+        "root_dir": str(tmp_path),
+        "outcome_attribution": {
+            "enabled": True,
+            "checks": [
+                {
+                    "id": "activation",
+                    "name": "Activation rate",
+                    "type": "file",
+                    "path": "outcomes.txt",
+                    "measurement_window_days": 0,
+                    "comparison_window": "Compare 7 days after merge vs 7 days before merge",
+                }
+            ],
+        },
+    }
+    (repo / "outcomes.txt").write_text("Activation improved from 20% to 28%.", encoding="utf-8")
+    metrics_dir = tmp_path / "runtime" / "metrics"
+    metrics_dir.mkdir(parents=True)
+    (metrics_dir / "outcome_attribution.jsonl").write_text(
+        json.dumps(
+            {
+                "record_type": "attribution",
+                "event": "merged",
+                "repo": "owner/repo",
+                "task_id": "task-123",
+                "issue_number": 64,
+                "pr_number": 70,
+                "merged_at": "2026-03-10T09:00:00+00:00",
+                "outcome_check_ids": ["activation"],
+                "timestamp": "2026-03-10T09:00:00+00:00",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "orchestrator.strategic_planner._summarize_outcome_snapshot",
+        lambda check, content: ("Activation improved from 20% to 28%.", "improved"),
+    )
+
+    summary = _recent_outcome_summary(cfg, "owner/repo", repo, days=30)
+
+    assert "Activation rate: improved" in summary
+    logged = (metrics_dir / "outcome_attribution.jsonl").read_text(encoding="utf-8")
+    assert '"record_type": "snapshot"' in logged
+
+
+def test_recent_outcome_summary_marks_missing_checks_inconclusive(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    cfg = {
+        "root_dir": str(tmp_path),
+        "outcome_attribution": {"enabled": True, "checks": []},
+    }
+    metrics_dir = tmp_path / "runtime" / "metrics"
+    metrics_dir.mkdir(parents=True)
+    (metrics_dir / "outcome_attribution.jsonl").write_text(
+        json.dumps(
+            {
+                "record_type": "attribution",
+                "event": "merged",
+                "repo": "owner/repo",
+                "task_id": "task-123",
+                "issue_number": 64,
+                "pr_number": 70,
+                "merged_at": "2026-03-10T09:00:00+00:00",
+                "outcome_check_ids": [],
+                "timestamp": "2026-03-10T09:00:00+00:00",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    summary = _recent_outcome_summary(cfg, "owner/repo", repo, days=30)
+
+    assert "inconclusive" in summary
 
 
 # ---------------------------------------------------------------------------

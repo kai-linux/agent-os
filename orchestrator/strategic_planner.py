@@ -42,6 +42,11 @@ from orchestrator.queue import (
 )
 from orchestrator.scheduler_state import is_due, record_run, job_lock
 from orchestrator.backlog_groomer import groom_repo, _repo_groomer_cadence_days
+from orchestrator.outcome_attribution import (
+    OUTCOME_INTERPRETATIONS,
+    append_outcome_record,
+    load_outcome_records,
+)
 from orchestrator.repo_context import read_north_star
 from orchestrator.trust import is_trusted
 
@@ -86,6 +91,8 @@ SIGNAL_INPUT_TYPES = FEEDBACK_SIGNAL_CLASSES
 SIGNALS_MAX_INPUTS = FEEDBACK_MAX_INPUTS
 SIGNALS_MAX_SOURCE_CHARS = FEEDBACK_MAX_SOURCE_CHARS
 SIGNALS_CONTEXT_MAX_CHARS = FEEDBACK_CONTEXT_MAX_CHARS
+OUTCOME_CONTEXT_MAX_CHARS = 4000
+OUTCOME_MAX_CHECKS = 12
 
 
 def _format_cadence(days: float) -> str:
@@ -1130,6 +1137,249 @@ def _planning_signals_context(cfg: dict, github_slug: str, repo_path: Path) -> s
     return _production_feedback_context(cfg, github_slug, repo_path)
 
 
+def _repo_outcome_config(cfg: dict, github_slug: str) -> dict:
+    outcome_cfg = dict(cfg.get("outcome_attribution") or {})
+    for project_cfg in cfg.get("github_projects", {}).values():
+        if not isinstance(project_cfg, dict):
+            continue
+        for repo_cfg in project_cfg.get("repos", []):
+            if repo_cfg.get("github_repo") != github_slug:
+                continue
+            override = repo_cfg.get("outcome_attribution")
+            if isinstance(override, dict):
+                merged = dict(outcome_cfg)
+                merged.update(override)
+                outcome_cfg = merged
+            return outcome_cfg
+    return outcome_cfg
+
+
+_OUTCOME_SNAPSHOT_PROMPT = """\
+You are evaluating bounded post-merge outcome evidence for shipped software work.
+
+Use only the provided check definition and source text. Do not invent missing numbers.
+Choose exactly one interpretation: improved, unchanged, regressed, or inconclusive.
+
+Check ID: {check_id}
+Check name: {check_name}
+Comparison window: {comparison_window}
+Measurement window days after merge: {measurement_window_days}
+Source location: {location}
+
+Source text:
+{source_text}
+
+Return ONLY JSON with this schema:
+{{
+  "summary": "2-3 sentence factual summary",
+  "interpretation": "improved|unchanged|regressed|inconclusive"
+}}
+"""
+
+
+def _summarize_outcome_snapshot(check: dict, content: str) -> tuple[str, str]:
+    prompt = _OUTCOME_SNAPSHOT_PROMPT.format(
+        check_id=check.get("id", "unknown"),
+        check_name=check.get("name", "Unnamed check"),
+        comparison_window=check.get("comparison_window", "unspecified"),
+        measurement_window_days=int(check.get("measurement_window_days", 7)),
+        location=check.get("url") or check.get("path") or "(unknown)",
+        source_text=(content or "")[:SIGNALS_MAX_SOURCE_CHARS],
+    )
+    try:
+        raw = _call_haiku(prompt)
+        text = raw.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        data = json.loads(text)
+        summary = str(data.get("summary", "")).strip()
+        interpretation = str(data.get("interpretation", "")).strip().lower()
+        if summary and interpretation in OUTCOME_INTERPRETATIONS:
+            return summary[:700], interpretation
+    except Exception as e:
+        print(f"  Outcome snapshot summarization failed for {check.get('id', '?')}: {e}")
+
+    fallback = (content or "").replace("\n", " ").strip()
+    fallback = re.sub(r"\s{2,}", " ", fallback)
+    if len(fallback) > 700:
+        fallback = fallback[:697] + "..."
+    return fallback or "No usable outcome evidence was available from the configured source.", "inconclusive"
+
+
+def _refresh_outcome_snapshots(cfg: dict, github_slug: str, repo_path: Path) -> list[dict]:
+    outcome_cfg = _repo_outcome_config(cfg, github_slug)
+    if not outcome_cfg.get("enabled"):
+        return []
+
+    checks = outcome_cfg.get("checks", [])
+    if not isinstance(checks, list):
+        checks = []
+    checks_by_id = {
+        str(check.get("id", "")).strip().lower(): check
+        for check in checks[:OUTCOME_MAX_CHECKS]
+        if isinstance(check, dict) and str(check.get("id", "")).strip()
+    }
+
+    records = load_outcome_records(cfg, repo=github_slug)
+    snapshots = [
+        record for record in records
+        if record.get("record_type") == "snapshot"
+    ]
+    snapshot_keys = {
+        (record.get("task_id"), record.get("pr_number"), record.get("check_id") or "__none__")
+        for record in snapshots
+    }
+
+    merged_events = [
+        record for record in records
+        if record.get("record_type") == "attribution" and record.get("event") == "merged"
+    ]
+    now = datetime.now(tz=timezone.utc)
+    for merged in merged_events:
+        merged_at = _parse_signal_timestamp(merged.get("merged_at")) or _parse_signal_timestamp(merged.get("timestamp"))
+        if merged_at is None:
+            continue
+        task_id = merged.get("task_id")
+        pr_number = merged.get("pr_number")
+        check_ids = [str(value).strip().lower() for value in merged.get("outcome_check_ids", []) if str(value).strip()]
+        if not check_ids:
+            key = (task_id, pr_number, "__none__")
+            if key not in snapshot_keys:
+                append_outcome_record(
+                    cfg,
+                    {
+                        "record_type": "snapshot",
+                        "repo": github_slug,
+                        "task_id": task_id,
+                        "issue_number": merged.get("issue_number"),
+                        "pr_number": pr_number,
+                        "check_id": None,
+                        "check_name": "No measurable external metric",
+                        "comparison_window": "No post-merge metric was attached",
+                        "measurement_window_days": 0,
+                        "source": "none",
+                        "summary": "Merged work had no configured outcome check, so it is explicitly tracked as inconclusive instead of being treated as impact-free or automatically successful.",
+                        "interpretation": "inconclusive",
+                        "merged_at": merged_at.isoformat(),
+                    },
+                )
+                snapshot_keys.add(key)
+            continue
+
+        for check_id in check_ids:
+            check = checks_by_id.get(check_id)
+            if not check:
+                key = (task_id, pr_number, check_id)
+                if key in snapshot_keys:
+                    continue
+                append_outcome_record(
+                    cfg,
+                    {
+                        "record_type": "snapshot",
+                        "repo": github_slug,
+                        "task_id": task_id,
+                        "issue_number": merged.get("issue_number"),
+                        "pr_number": pr_number,
+                        "check_id": check_id,
+                        "check_name": check_id,
+                        "comparison_window": "Unknown check definition",
+                        "measurement_window_days": 0,
+                        "source": "missing_config",
+                        "summary": f"Outcome check `{check_id}` was attached to shipped work but no matching config exists, so the result remains inconclusive.",
+                        "interpretation": "inconclusive",
+                        "merged_at": merged_at.isoformat(),
+                    },
+                )
+                snapshot_keys.add(key)
+                continue
+
+            measurement_window_days = max(0, int(check.get("measurement_window_days", 7)))
+            if now < merged_at + timedelta(days=measurement_window_days):
+                continue
+            key = (task_id, pr_number, check_id)
+            if key in snapshot_keys:
+                continue
+
+            content, error = _read_research_source(
+                repo_path,
+                check,
+                {
+                    "allowed_domains": outcome_cfg.get("allowed_domains", []),
+                    "max_source_chars": outcome_cfg.get("max_source_chars", SIGNALS_MAX_SOURCE_CHARS),
+                },
+            )
+            if error:
+                summary = f"Outcome check source could not be read: {error}"
+                interpretation = "inconclusive"
+            else:
+                summary, interpretation = _summarize_outcome_snapshot(check, content or "")
+
+            append_outcome_record(
+                cfg,
+                {
+                    "record_type": "snapshot",
+                    "repo": github_slug,
+                    "task_id": task_id,
+                    "issue_number": merged.get("issue_number"),
+                    "pr_number": pr_number,
+                    "check_id": check_id,
+                    "check_name": str(check.get("name") or check_id).strip(),
+                    "comparison_window": str(check.get("comparison_window") or "unspecified").strip(),
+                    "measurement_window_days": measurement_window_days,
+                    "source": str(check.get("url") or check.get("path") or "(unknown)").strip(),
+                    "summary": summary,
+                    "interpretation": interpretation if interpretation in OUTCOME_INTERPRETATIONS else "inconclusive",
+                    "merged_at": merged_at.isoformat(),
+                },
+            )
+            snapshot_keys.add(key)
+
+    return load_outcome_records(cfg, repo=github_slug)
+
+
+def _recent_outcome_summary(cfg: dict, github_slug: str, repo_path: Path, *, days: int) -> str:
+    records = _refresh_outcome_snapshots(cfg, github_slug, repo_path)
+    if not records:
+        return "(no outcome attribution activity)"
+
+    cutoff = datetime.now(tz=timezone.utc) - timedelta(days=days)
+    snapshots = []
+    pending = []
+    for record in records:
+        if record.get("record_type") == "snapshot":
+            timestamp = _parse_signal_timestamp(record.get("timestamp"))
+            if timestamp and timestamp >= cutoff:
+                snapshots.append(record)
+        elif record.get("record_type") == "attribution" and record.get("event") == "merged":
+            merged_at = _parse_signal_timestamp(record.get("merged_at")) or _parse_signal_timestamp(record.get("timestamp"))
+            if merged_at and merged_at >= cutoff:
+                pending.append(record)
+
+    lines: list[str] = []
+    seen_pending: set[tuple[object, object]] = set()
+    for record in snapshots[-8:]:
+        issue = record.get("issue_number")
+        pr = record.get("pr_number")
+        check_name = record.get("check_name") or record.get("check_id") or "Outcome"
+        lines.append(
+            f"- #{issue or '?'} / PR #{pr or '?'} / {check_name}: "
+            f"{record.get('interpretation', 'inconclusive')} — {record.get('summary', '')}"
+        )
+        seen_pending.add((record.get("task_id"), record.get("pr_number")))
+
+    for record in pending[-8:]:
+        key = (record.get("task_id"), record.get("pr_number"))
+        if key in seen_pending:
+            continue
+        check_count = len(record.get("outcome_check_ids") or [])
+        lines.append(
+            f"- #{record.get('issue_number') or '?'} / PR #{record.get('pr_number') or '?'}: "
+            f"merged, outcome snapshot pending ({check_count or 0} configured checks)."
+        )
+
+    return "\n".join(lines) if lines else "(no recent outcome evidence)"
+
+
 def _recently_closed_issues(repo: str, days: int = 7) -> str:
     """Return recently closed issues with close reasons for retrospective."""
     since = (datetime.now(tz=timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
@@ -1435,15 +1685,18 @@ def _update_strategy(
     )
 
 
-def _build_retrospective(repo: str, days: int = DEFAULT_SPRINT_CADENCE_DAYS) -> str:
+def _build_retrospective(cfg: dict, repo: str, repo_path: Path, days: int = DEFAULT_SPRINT_CADENCE_DAYS) -> str:
     """Build a retrospective summary of the last sprint's outcomes."""
     closed = _recently_closed_issues(repo, days=days)
     merged = _recent_merged_prs(repo, days=days)
+    outcomes = _recent_outcome_summary(cfg, repo, repo_path, days=days)
     parts = []
     if closed and not closed.startswith("(no"):
         parts.append(f"Issues completed:\n{closed}")
     if merged and not merged.startswith("(no"):
         parts.append(f"PRs merged:\n{merged}")
+    if outcomes and not outcomes.startswith("(no"):
+        parts.append(f"Outcome evidence:\n{outcomes}")
     if not parts:
         return f"(no activity in the last {days} days)"
     return "\n\n".join(parts)
@@ -1503,6 +1756,9 @@ Context about this repository:
 --- Production Feedback (PRODUCTION_FEEDBACK.md) ---
 {production_feedback_context}
 
+--- Recent Outcome Evidence ---
+{outcome_context}
+
 --- Codebase Context (CODEBASE.md) ---
 {codebase_context}
 
@@ -1538,6 +1794,7 @@ Rules:
 - Treat the planning principles as the stable north-star rubric when strategy and backlog quality are ambiguous
 - When production feedback is present, prioritize measurable analytics, user feedback, product inspection, and incident/SLO outcomes over narrative summaries alone
 - Treat entries marked `Planning Use: guarded` as audit context only, not as drivers for roadmap or prioritization decisions
+- Use recent outcome evidence to reinforce work that improved results, repair regressions, and close measurement gaps
 - When fresh research is present, use it to inform prioritization and rationale. Prefer work that is supported by repo-local strategy plus bounded external evidence.
 - Prefer unblockers, autonomy gains, planning-quality gains, and evidence-driven improvements over local churn
 - Include a mix of: feature work that advances the product vision, bug fixes, self-improvement, and infrastructure
@@ -1640,6 +1897,7 @@ def _build_plan_prompt(
     planning_principles: str,
     codebase_context: str,
     production_feedback_context: str,
+    outcome_context: str,
     research_context: str,
     retrospective: str,
     git_log: str,
@@ -1656,6 +1914,7 @@ def _build_plan_prompt(
         north_star=north_star,
         planning_principles=planning_principles,
         production_feedback_context=production_feedback_context,
+        outcome_context=outcome_context,
         codebase_context=codebase_context,
         research_context=research_context,
         retrospective=retrospective,
@@ -1999,12 +2258,16 @@ def plan_repo(
     production_feedback_context = _production_feedback_context(cfg, github_slug, repo_path)
     print(f"  Production feedback: {len(production_feedback_context)} chars")
 
-    # 7. Pre-planning research
+    # 7. Recent outcome evidence
+    outcome_context = _recent_outcome_summary(cfg, github_slug, repo_path, days=sprint_cadence_days)
+    print(f"  Outcome context: {len(outcome_context)} chars")
+
+    # 8. Pre-planning research
     research_context = _planning_research_context(cfg, github_slug, repo_path)
     print(f"  Research context: {len(research_context)} chars")
 
-    # 8. Sprint retrospective — what shipped last sprint
-    retrospective = _build_retrospective(github_slug, days=sprint_cadence_days)
+    # 9. Sprint retrospective — what shipped last sprint
+    retrospective = _build_retrospective(cfg, github_slug, repo_path, days=sprint_cadence_days)
     print(f"  Retrospective: {len(retrospective)} chars")
 
     # 9. Last 30 git commits
@@ -2039,6 +2302,7 @@ def plan_repo(
         planning_principles=planning_principles,
         codebase_context=codebase_context,
         production_feedback_context=production_feedback_context,
+        outcome_context=outcome_context,
         research_context=research_context,
         retrospective=retrospective,
         git_log=git_log,

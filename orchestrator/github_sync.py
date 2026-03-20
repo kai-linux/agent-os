@@ -13,6 +13,7 @@ from orchestrator.gh_project import (
     gh,
     gh_json,
 )
+from orchestrator.outcome_attribution import append_outcome_record, extract_pr_number
 from orchestrator.privacy import redact_text
 
 
@@ -222,6 +223,20 @@ def sync_result(meta: dict, result: dict, commit_hash: str | None):
         )
         if pr_url:
             comment += f"\n### PR\n{pr_url}\n"
+            append_outcome_record(
+                cfg,
+                {
+                    "record_type": "attribution",
+                    "event": "pr_opened",
+                    "repo": repo,
+                    "task_id": task_id,
+                    "issue_number": issue_number,
+                    "pr_number": extract_pr_number(pr_url),
+                    "pr_url": pr_url,
+                    "branch": branch,
+                    "outcome_check_ids": list(meta.get("outcome_check_ids") or []),
+                },
+            )
 
     if has_manual:
         comment += f"\n### 🔧 Manual steps required\n```\n{public_manual_steps}\n```\n"

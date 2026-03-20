@@ -253,6 +253,30 @@ production_feedback:
       trust_note: Operational summary reviewed by maintainer
       privacy: public
       privacy_note: Service-level summary only; no customer-identifying logs
+      input_type: market_signal
+      url: https://competitor.example.com/pricing
+      observed_at: 2026-03-18T10:00:00Z
+      provenance: Public pricing page
+      trust_note: Public market signal; validate before major roadmap shifts
+      privacy_note: Public web content
+
+outcome_attribution:
+  enabled: true
+  max_source_chars: 4000
+  allowed_domains: [analytics.example.com]
+  checks:
+    - id: activation_rate
+      name: Activation rate
+      type: web
+      url: https://analytics.example.com/public/activation-after-release
+      measurement_window_days: 7
+      comparison_window: Compare 7 days after merge vs 7 days before merge
+    - id: community_feedback
+      name: Community feedback pulse
+      type: file
+      path: ../shared/community-feedback-after-release.md
+      measurement_window_days: 3
+      comparison_window: Compare the post-release comment volume against the prior 3 days
 ```
 
 DeepSeek has its own provider fallback: `openrouter → nanogpt → chutes`. It is kept last in the chain by default because it depends on extra provider configuration and should not consume retries when those providers are unavailable.
@@ -264,6 +288,8 @@ Repos can opt into bounded pre-planning research with `planning_research`. Befor
 Repos can also opt into bounded `production_feedback`. The first version supports explicit signal classes for `analytics`, `user_feedback`, `product_inspection`, and `incident_slo` (with legacy `planning_signals` config still accepted for backward compatibility). Before sprint selection, the planner refreshes `PRODUCTION_FEEDBACK.md` from configured web or file sources, normalizes each entry with source, observed time, freshness, provenance, trust, privacy, and planning implications, and injects that artifact into strategic planning, backlog grooming, and evidence-heavy execution prompts.
 
 Guardrails are explicit and inspectable. Each feedback entry carries `trust_level`, `privacy`, `trust_note`, and `privacy_note`, while repo config sets `minimum_trust_level`, `allowed_privacy_levels`, and `stale_after_hours`. Entries that are stale, too low-trust, or too privacy-sensitive remain visible in the artifact but are marked `Planning Use: guarded`, so they do not silently influence prioritization.
+
+Repos can opt into bounded post-merge measurement with `outcome_attribution`. Issues attach one or more configured check IDs in an `## Outcome Checks` section, for example `- activation_rate`. When the task PR is opened and later merged, Agent OS records the task, issue, PR, and check IDs in `runtime/metrics/outcome_attribution.jsonl`. During planning and retrospectives, the planner refreshes due snapshots from the configured file or public-safe web sources, records a timestamped interpretation (`improved`, `unchanged`, `regressed`, or `inconclusive`), and surfaces that evidence alongside shipped work. If no measurable external metric is attached, the merge is still tracked explicitly as `inconclusive`.
 
 Issues can specify a preferred agent. The dispatcher can auto-detect task type. Priority labels (`prio:high`, `prio:normal`, `prio:low`) influence scheduling order.
 
