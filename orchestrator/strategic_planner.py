@@ -283,15 +283,9 @@ def _has_active_sprint_work(repo: str, cfg: dict) -> tuple[bool, str]:
 
 def _maybe_refresh_backlog_for_early_cycle(cfg: dict, github_slug: str, repo_path: Path) -> tuple[bool, str]:
     """Refresh backlog and allow an early planner cycle when the sprint is empty."""
-    cadence_days = _repo_groomer_cadence_days(cfg, github_slug)
-    due, reason = is_due(
-        cfg,
-        "backlog_groomer",
-        github_slug,
-        cadence_hours=cadence_days * 24.0,
-    )
-    if not due:
-        return False, f"early-complete but groomer not due ({reason})"
+    backlog = _backlog_issues(github_slug, cfg)
+    if backlog:
+        return True, f"early-complete with existing backlog ({len(backlog)} candidates)"
 
     print(f"  Early sprint completion override: refreshing backlog for {github_slug} before planning.")
     result = groom_repo(cfg, github_slug, repo_path)
