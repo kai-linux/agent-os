@@ -84,19 +84,12 @@ def build_mailbox_task(cfg: dict, project_key: str, repo_cfg: dict, issue: dict)
     formatter_model = cfg.get("formatter_model")
     parsed = format_task(title, body_text, model=formatter_model)
     if parsed is None:
-<<<<<<< HEAD
         parsed = raw_parsed
     else:
+        parsed = dict(parsed)
         for key, value in raw_parsed.items():
             if value and not parsed.get(key):
                 parsed[key] = value
-=======
-        parsed = parse_issue_body(body_text)
-    else:
-        parsed = dict(parsed)
-        raw_sections = parse_issue_body(body_text)
-        parsed["outcome_checks"] = raw_sections.get("outcome_checks", [])
->>>>>>> 0b87fed (agent task-20260320-101116-add-post-merge-outcome-attribution-for-issue-pr-an)
 
     criteria = parsed["success_criteria"] or "- Match the issue goal\n- Keep the diff minimal\n- Leave a valid .agent_result.md"
     constraints = parsed["constraints"] or "- Work only inside the repo\n- Prefer minimal diffs"
