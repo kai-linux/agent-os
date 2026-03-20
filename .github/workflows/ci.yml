@@ -11,7 +11,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-      CI_ARTIFACT_DIR: ${{ runner.temp }}/ci-artifacts
     steps:
       - uses: actions/checkout@v4
 
@@ -21,7 +20,10 @@ jobs:
           python-version: "3.12"
 
       - name: Prepare CI artifact directory
-        run: mkdir -p "$CI_ARTIFACT_DIR"
+        shell: bash
+        run: |
+          echo "CI_ARTIFACT_DIR=$RUNNER_TEMP/ci-artifacts" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/ci-artifacts"
 
       - name: Install dependencies
         shell: bash
