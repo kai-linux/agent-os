@@ -18,6 +18,7 @@ test_timeout_minutes: 5             # Timeout for test commands (default: 5)
 
 plan_size: 5                         # Number of tasks per sprint plan (default: 5)
 sprint_cadence_days: 7               # Planner cadence + retrospective window in days; supports fractions, 0=dormant; actual run frequency is still capped by cron frequency
+planner_allow_early_refresh: true    # If true, planner may refresh early when the current sprint empties before the next cadence tick
 groomer_cadence_days: 7              # Backlog grooming cadence in days; supports fractions, 0=dormant; actual run frequency is still capped by cron frequency
 
 priority_weights:                   # Score added per priority label (default: prio:normal=10)
@@ -162,11 +163,13 @@ github_repos:
 
 github_projects:
   example-project:
+    planner_allow_early_refresh: false  # Optional project default: follow cadence strictly unless a repo overrides this
     repos:
       - github_repo: "yourname/repo1"
         path: "/path/to/repo1"
         plan_size: 3
         sprint_cadence_days: 1      # Daily planning for this repo
+        planner_allow_early_refresh: true  # Optional per-repo override
         groomer_cadence_days: 0.5   # Groom every 12 hours for this repo; requires cron to run at least every 12 hours
         planning_research:
           enabled: true

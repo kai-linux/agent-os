@@ -88,6 +88,8 @@ Every Saturday at 20:00:
 
 The planner and groomer are safe to invoke frequently from cron. Each repo has its own cadence in config (`sprint_cadence_days`, `groomer_cadence_days`), fractional days are supported, and `0` means dormant. The configured cadence is a minimum interval, not a scheduler by itself: the job only runs when cron invokes it, so cron must run at least as often as your shortest desired cadence.
 
+Strategic planning also supports an explicit early-refresh policy. `planner_allow_early_refresh: true` lets a repo refresh its sprint before the next cadence tick when the current sprint has gone idle; `false` enforces strict cadence. The setting can be defined globally, per project, or per repo, with repo overrides winning.
+
 The `bin/` entrypoints bootstrap common user-local CLI install paths themselves, so cron usually does not need per-provider `PATH` or `CLAUDE_BIN` overrides.
 
 Sprint selection is guided by three layers of context:

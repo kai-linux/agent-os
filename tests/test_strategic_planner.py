@@ -49,6 +49,7 @@ from orchestrator.strategic_planner import (
     _resolve_repos,
     _set_issues_ready,
     _open_issues_summary,
+    _planner_allow_early_refresh,
     _strategy_dependencies,
     _summarize_strategy,
     _update_focus_areas_section,
@@ -906,6 +907,33 @@ def test_repo_planner_config_supports_fractional_and_dormant_cadence():
     _, cadence_b = _repo_planner_config(cfg, "owner/repo-b")
     assert cadence_a == 0.5
     assert cadence_b == 0.0
+
+
+def test_planner_allow_early_refresh_defaults_true():
+    assert _planner_allow_early_refresh({}, "owner/repo") is True
+
+
+def test_planner_allow_early_refresh_honors_top_level_setting():
+    cfg = {"planner_allow_early_refresh": False}
+    assert _planner_allow_early_refresh(cfg, "owner/repo") is False
+
+
+def test_planner_allow_early_refresh_honors_project_and_repo_overrides():
+    cfg = {
+        "planner_allow_early_refresh": True,
+        "github_projects": {
+            "proj1": {
+                "planner_allow_early_refresh": False,
+                "repos": [
+                    {"github_repo": "owner/repo-a"},
+                    {"github_repo": "owner/repo-b", "planner_allow_early_refresh": True},
+                ],
+            }
+        },
+    }
+    assert _planner_allow_early_refresh(cfg, "owner/repo-a") is False
+    assert _planner_allow_early_refresh(cfg, "owner/repo-b") is True
+    assert _planner_allow_early_refresh(cfg, "owner/other") is True
 
 
 def test_resolve_repos_prefers_explicit_github_projects_local_repo():
