@@ -33,7 +33,13 @@ from uuid import uuid4
 from orchestrator.paths import load_config, runtime_paths
 from orchestrator.agent_scorer import load_recent_metrics
 from orchestrator.gh_project import query_project, set_item_status, edit_issue_labels, ensure_labels
-from orchestrator.queue import planner_reply_markup, save_telegram_action, load_telegram_action, telegram_action_expired
+from orchestrator.queue import (
+    planner_reply_markup,
+    save_telegram_action,
+    load_telegram_action,
+    telegram_action_expired,
+    process_telegram_callbacks,
+)
 from orchestrator.scheduler_state import is_due, record_run, job_lock
 from orchestrator.backlog_groomer import groom_repo, _repo_groomer_cadence_days
 from orchestrator.repo_context import read_north_star
@@ -2053,6 +2059,8 @@ def run():
         if not acquired:
             print("Strategic planner already running; skipping overlapping cron invocation.")
             return
+
+        process_telegram_callbacks(cfg, paths)
 
         repos = _resolve_repos(cfg)
 
