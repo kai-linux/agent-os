@@ -19,14 +19,61 @@ You give it a backlog. It ships pr
 
 
 
+
 <!-- auto-focus-areas -->
-- Strengthen execution reliability by hardening CI, git/publish preflight checks, and regression recovery paths
-- Build closed-loop failure handling with structured blocker data, retries, quarantines, and bounded follow-up automation
-- Expand planning intelligence through evidence-driven artifacts, research inputs, and cross-repo strategic coordination
-- Improve observability and traceability with prompt snapshots, outcome attribution, and normalized production feedback
-- Advance autonomous task orchestration with better decomposition, dependency resolution, adaptive routing, and escalation workflows
+- Harden execution reliability by reducing CI, publish, and control-plane failure modes before tasks run or close
+- Close the loop on blocked and partial work with structured recovery, reruns, quarantines, and bounded follow-ups
+- Strengthen evidence-driven planning through automated research, production-feedback, and sprint-derived strategy artifacts
+- Improve observability and auditability with prompt snapshots, outcome attribution, blocker codes, and failure artifact capture
+- Advance agent autonomy through better task decomposition, dependency handling, adaptive routing, and multi-repo planning
 
 ## Sprint History
+
+### Sprint 2026-03-20
+
+**Retrospective:**
+Issues completed:
+- #78: Auto-rerun blocked tasks after prompt inspection completes [bug, enhancement, prio:high, done] — COMPLETED
+- #76: Auto-generate PRODUCTION_FEEDBACK.md each sprint cycle [enhancement, prio:high, done] — COMPLETED
+- #73: Fix CI failure on PR #71 [bug, prio:high, done] — COMPLETED
+- #69: Reproduce and fix the CI failure behind PR #34 [bug, prio:high] — COMPLETED
+- #65: Replace static fallback chains with adaptive agent routing [enhancement, prio:high, done] — COMPLETED
+- #64: Add post-merge outcome attribution for issue, PR, and task IDs [enhancement, prio:high, done] — COMPLETED
+- #63: Collapse self-improvement generators behind one evidence synthesizer [enhancement, prio:high, done] — COMPLETED
+- #62: Build a normalized production feedback substrate for repos [enhancement, prio:high, done] — COMPLETED
+- #60: Auto-file bounded follow-ups for partial debug outcomes [enhancement, prio:normal, done] — COMPLETED
+- #59: Quarantine tasks that block repeatedly within one day [enhancement, prio:high, done] — COMPLETED
+- #58: Gate git/publish tasks on writable remote capabilities [bug, prio:high, done] — COMPLETED
+- #56: Auto-generate PLANNING_RESEARCH.md each sprint cycle [enhancement, prio:normal, done] — COMPLETED
+- #55: Add regression test for PR CI failure recovery flow [bug, prio:high, done, tech-debt] — COMPLETED
+- #54: Require structured blocker codes on blocked task outcomes [bug, prio:high, done] — COMPLETED
+- #53: Consume escalation-note retry decisions in task dispatch [enhancement, prio:high, done] — COMPLETED
+- #51: Persist worker prompt snapshots for each dispatched task [enhancement, prio:high, done] — COMPLETED
+- #50: Preflight git push readiness before dispatching publish tasks [bug, prio:high, done] — COMPLETED
+- #45: Add CI artifact capture for failing PR jobs [bug, enhancement, prio:high, done] — COMPLETED
+
+PRs merged:
+- PR #84: Agent: task-20260320-134213-auto-rerun-blocked-tasks-after-prompt-inspection-c (branch: agent/task-20260320-134213-auto-rerun-blocked-tasks-after-prompt-inspection-c)
+- PR #83: Agent: task-20260320-134110-auto-generate-production-feedback-md-each-sprint-c (branch: agent/task-20260320-134110-auto-generate-production-feedback-md-each-sprint-c)
+- PR #82: Agent: task-20260320-134012-collapse-self-improvement-generators-behind-one-ev (branch: agent/task-20260320-134012-collapse-self-improvement-generators-behind-one-ev)
+- PR #81: Agent: task-20260320-133911-preflight-git-push-readiness-before-dispatching-pu (branch: agent/task-20260320-133911-preflight-git-push-readiness-before-dispatching-pu)
+- PR #80: Agent: task-20260320-133809-add-ci-artifact-capture-for-failing-pr-jobs (branch: agent/task-20260320-133809-add-ci-artifact-capture-for-failing-pr-jobs)
+- PR #75: Agent: task-20260320-120911-add-regression-test-for-pr-ci-failure-recovery-flo (branch: agent/task-20260320-120911-add-regression-test-for-pr-ci-failure-recovery-flo)
+- PR #74: Agent: task-20260320-120812-consume-escalation-note-retry-decisions-in-task-di (branch: agent/task-20260320-120812-consume-escalation-note-retry-decisions-in-task-di)
+- PR #72: Agent: task-20260320-101212-auto-file-bounded-follow-ups-for-partial-debug-out (branch: agent/task-20260320-101212-auto-file-bounded-follow-ups-for-partial-debug-out)
+- PR #71: Agent: task-20260320-101116-add-post-merge-outcome-attribution-for-issue-pr-an (branch: agent/task-20260320-101116-add-post-merge-outcome-attribution-for-issue-pr-an)
+- PR #68: Agent: task-20260320-101013-build-a-normalized-production-feedback-substrate-f (branch: agent/task-20260320-101013-build-a-normalized-production-feedback-substrate-f)
+- PR #67: Agent: task-20260320-100911-require-structured-blocker-codes-on-blocked-task-o (branch: agent/task-20260320-100911-require-structured-blocker-codes-on-blocked-task-o)
+- PR #66: Agent: task-20260320-100812-persist-worker-prompt-snapshots-for-each-dispatche (branch: agent/task-20260320-100812-persist-worker-prompt-snapshots-for-each-dispatche)
+- PR #61: Agent: task-20260320-081208-gate-git-publish-tasks-on-writable-remote-capabili (branch: agent/task-20260320-081208-gate-git-publish-tasks-on-writable-remote-capabili)
+
+**Plan:**
+- [prio:high] Gate CI debug task closure on a verified green rerun: This is the strongest immediate reliability promotion because the strategy prioritizes removing repeated operational failure modes and tightening closed-loop recovery with verified outcomes.
+- [prio:normal] Record explicit unblock decision for blocked escalation reviews: This directly extends the new blocked-task recovery path and matches the strategy’s emphasis on turning failures and escalations into actionable, auditable loops.
+- [prio:normal] Backfill the current sprint production feedback artifact: This best compounds the recently completed production-feedback infrastructure and aligns with the strategy’s push toward evidence-driven planning over narrative-only inputs.
+- [prio:normal] Backfill first planning research artifact for current sprint: This repairs a planning-evidence gap immediately after research automation landed, which fits the strategy’s priority on improving evidence quality for planning decisions.
+- [prio:normal] Make agent_scorer drive closed-loop remediation: This is the best long-range promotion in the current backlog because it advances the North Star from observation toward self-directed closed-loop optimization that can compound across repos.
+
 
 ### Sprint 2026-03-20
 
