@@ -16,6 +16,16 @@
 
 ## Recent Changes
 
+### 2026-03-20 — [task-20260320-120911-add-regression-test-for-pr-ci-failure-recovery-flo] (#55 kai-linux/agent-os)
+Added a focused regression test that simulates a partial outcome from a PR CI remediation task and verifies the recovery handoff creates a ready follow-up issue on the same PR branch while the active remediation issue moves to blocked.
+
+**Files:** `- tests/test_github_sync.py`, `- .agent_result.md`
+
+**Decisions:**
+  - - Kept the diff limited to test coverage because the existing implementation already satisfies the intended PR CI recovery flow
+  - - Targeted `github_sync.sync_result()` as the recovery handoff seam where a partial remediation outcome must create the correct follow-up state
+
+
 ### 2026-03-20 — [task-20260320-120812-consume-escalation-note-retry-decisions-in-task-di] (#53 kai-linux/agent-os)
 Implemented structured escalation retry-decision parsing in the dispatcher and wired retry, reroute, and stop actions to the originating blocked task record with traceability fields and bounded GitHub status updates.
 
