@@ -34,6 +34,10 @@ PUBLISH_ACTION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 MAX_DEPENDENCY_DEPTH = 3
 MISSING_PUBLISH_CAPABILITY_LABEL = "dispatch:missing-publish-capability"
 MISSING_PUBLISH_CAPABILITY_CODE = "missing_publish_capability"
+RETRY_DECISION_SECTION = "retry decision"
+RETRY_DECISION_APPLIED_MARKER = "<!-- agent-os-retry-decision-applied -->"
+VALID_RETRY_ACTIONS = {"retry", "reroute", "stop"}
+VALID_REROUTE_AGENTS = {"auto", "claude", "codex", "gemini", "deepseek"}
 
 
 def slugify(text: str) -> str:
@@ -44,6 +48,10 @@ def slugify(text: str) -> str:
 
 def now_ts() -> str:
     return datetime.now().strftime("%Y%m%d-%H%M%S")
+
+
+def _now_iso() -> str:
+    return datetime.now().isoformat()
 
 
 def parse_issue_body(body: str) -> dict:
@@ -256,6 +264,231 @@ def _set_project_status(info: dict, item_id: str, status_value: str):
             info["status_field_id"],
             option_id,
         )
+
+
+def _render_mailbox_task(meta: dict, body: str) -> str:
+    frontmatter_text = yaml.safe_dump(meta, sort_keys=False).strip()
+    return f"---\n{frontmatter_text}\n---\n\n{body.rstrip()}\n"
+
+
+def _parse_mailbox_task(path: Path) -> tuple[dict, str]:
+    text = path.read_text(encoding="utf-8")
+    match = re.match(r"^---\s*\n(.*?)\n---\s*\n(.*)$", text, flags=re.DOTALL)
+    if not match:
+        raise ValueError(f"Invalid task format in {path}")
+    return yaml.safe_load(match.group(1)) or {}, match.group(2).strip()
+
+
+def _normalize_retry_decision_payload(payload: dict) -> dict | None:
+    normalized = {str(key).strip().lower(): value for key, value in payload.items()}
+    action = str(normalized.get("action", "")).strip().lower()
+    if action not in VALID_RETRY_ACTIONS:
+        return None
+
+    reason = str(
+        normalized.get("reason")
+        or normalized.get("summary")
+        or normalized.get("next_step")
+        or ""
+    ).strip()
+    decision = {
+        "action": action,
+        "reason": reason or "No reason provided.",
+    }
+
+    reroute_agent = str(
+        normalized.get("agent")
+        or normalized.get("target_agent")
+        or normalized.get("reroute_to")
+        or ""
+    ).strip().lower()
+    if action == "reroute":
+        if reroute_agent not in VALID_REROUTE_AGENTS:
+            return None
+        decision["agent"] = reroute_agent
+
+    return decision
+
+
+def parse_retry_decision(note_text: str) -> dict | None:
+    if RETRY_DECISION_APPLIED_MARKER in (note_text or ""):
+        return None
+
+    sections = {}
+    for name, content in SECTION_RE.findall(note_text or ""):
+        sections[name.strip().lower()] = content.strip()
+
+    section = sections.get(RETRY_DECISION_SECTION, "").strip()
+    if not section:
+        return None
+
+    fenced = re.fullmatch(r"```(?:json|yaml|yml)?\s*\n(.*?)\n```", section, flags=re.DOTALL)
+    if fenced:
+        section = fenced.group(1).strip()
+
+    for loader in (json.loads, yaml.safe_load):
+        try:
+            payload = loader(section)
+        except Exception:
+            continue
+        if isinstance(payload, dict):
+            return _normalize_retry_decision_payload(payload)
+    return None
+
+
+def _find_originating_task(paths: dict, parent_task_id: str) -> tuple[Path, dict, str] | tuple[None, None, None]:
+    candidates: list[tuple[float, Path, dict, str]] = []
+    for base in (paths["ESCALATED"], paths["BLOCKED"]):
+        for task_path in base.glob("*.md"):
+            if task_path.name.endswith("-escalation.md"):
+                continue
+            try:
+                meta, body = _parse_mailbox_task(task_path)
+            except Exception:
+                continue
+            if meta.get("task_id") == parent_task_id or meta.get("parent_task_id") == parent_task_id:
+                candidates.append((task_path.stat().st_mtime, task_path, meta, body))
+
+    if not candidates:
+        return None, None, None
+
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    _mtime, task_path, meta, body = candidates[0]
+    return task_path, meta, body
+
+
+def _find_issue_item(queried: dict[int, tuple[dict, list[dict]]], repo_full: str, issue_number: int) -> tuple[dict, dict] | tuple[None, None]:
+    for info, _ready_items in queried.values():
+        for item in info.get("items", []):
+            if item.get("repo") == repo_full and item.get("number") == issue_number:
+                return info, item
+    return None, None
+
+
+def _append_retry_decision_trace(note_path: Path, task_id: str, decision: dict):
+    trace = (
+        f"\n\n{RETRY_DECISION_APPLIED_MARKER}\n"
+        f"## Dispatcher Action\n"
+        f"- Applied at: {_now_iso()}\n"
+        f"- Task: {task_id}\n"
+        f"- Action: {decision['action']}\n"
+        f"- Reason: {decision['reason']}\n"
+    )
+    if decision.get("agent"):
+        trace += f"- Agent: {decision['agent']}\n"
+    note_path.write_text(note_path.read_text(encoding="utf-8").rstrip() + trace, encoding="utf-8")
+
+
+def _apply_retry_decision_to_task(
+    cfg: dict,
+    paths: dict,
+    queried: dict[int, tuple[dict, list[dict]]],
+    task_path: Path,
+    note_path: Path,
+    meta: dict,
+    body: str,
+    decision: dict,
+):
+    meta = dict(meta)
+    meta["escalation_note"] = note_path.name
+    meta["escalation_decision"] = decision["action"]
+    meta["escalation_decision_reason"] = decision["reason"]
+    meta["escalation_decision_applied_at"] = _now_iso()
+    if decision.get("agent"):
+        meta["escalation_decision_target_agent"] = decision["agent"]
+
+    repo_full = meta.get("github_repo")
+    issue_number = meta.get("github_issue_number")
+    project_cfg = cfg.get("github_projects", {}).get(meta.get("github_project_key", ""), {})
+    info = None
+    item = None
+    if repo_full and issue_number:
+        info, item = _find_issue_item(queried, repo_full, int(issue_number))
+
+    task_path.write_text(_render_mailbox_task(meta, body), encoding="utf-8")
+
+    action = decision["action"]
+    if action == "reroute":
+        meta["agent"] = decision["agent"]
+        task_path.write_text(_render_mailbox_task(meta, body), encoding="utf-8")
+
+    comment_lines = [
+        "## Dispatcher retry decision",
+        f"**Task:** `{meta.get('task_id', 'unknown')}`",
+        f"**Action:** `{action}`",
+        f"**Reason:** {decision['reason']}",
+    ]
+    if decision.get("agent"):
+        comment_lines.append(f"**Agent:** `{decision['agent']}`")
+
+    if action in {"retry", "reroute"}:
+        destination = paths["INBOX"] / task_path.name
+        destination.write_text(_render_mailbox_task(meta, body), encoding="utf-8")
+        if destination != task_path and task_path.exists():
+            task_path.unlink()
+
+        if repo_full and issue_number:
+            edit_issue_labels(
+                repo_full,
+                int(issue_number),
+                add=["ready"],
+                remove=["blocked", "in-progress", "agent-dispatched"],
+            )
+            add_issue_comment(repo_full, int(issue_number), "\n".join(comment_lines))
+            if info is not None and item is not None:
+                _set_project_status(
+                    info,
+                    item["item_id"],
+                    project_cfg.get("ready_value", "Ready"),
+                )
+    else:
+        destination = paths["FAILED"] / task_path.name
+        destination.write_text(_render_mailbox_task(meta, body), encoding="utf-8")
+        if destination != task_path and task_path.exists():
+            task_path.unlink()
+
+        if repo_full and issue_number:
+            gh([
+                "api",
+                f"repos/{repo_full}/issues/{issue_number}",
+                "-X", "PATCH",
+                "-f", "state=closed",
+                "-f", "state_reason=not_planned",
+            ], check=False)
+            edit_issue_labels(
+                repo_full,
+                int(issue_number),
+                add=["done"],
+                remove=["blocked", "ready", "in-progress", "agent-dispatched"],
+            )
+            add_issue_comment(repo_full, int(issue_number), "\n".join(comment_lines))
+            if info is not None and item is not None:
+                _set_project_status(
+                    info,
+                    item["item_id"],
+                    project_cfg.get("done_value", "Done"),
+                )
+
+    _append_retry_decision_trace(note_path, meta.get("task_id", "unknown"), decision)
+    return action
+
+
+def _consume_retry_decisions(cfg: dict, paths: dict, queried: dict[int, tuple[dict, list[dict]]]):
+    for note_path in sorted(paths["ESCALATED"].glob("*-escalation.md")):
+        note_text = note_path.read_text(encoding="utf-8")
+        decision = parse_retry_decision(note_text)
+        if decision is None:
+            continue
+
+        parent_task_id = note_path.name[:-len("-escalation.md")]
+        task_path, meta, body = _find_originating_task(paths, parent_task_id)
+        if task_path is None or meta is None:
+            continue
+
+        action = _apply_retry_decision_to_task(cfg, paths, queried, task_path, note_path, meta, body, decision)
+        print(f"Applied escalation retry decision for {parent_task_id}: {action}")
+        return True
+    return False
 
 
 def _mark_issue_blocked(repo_full: str, item: dict, info: dict, project_cfg: dict, dependency_number: int):
@@ -660,6 +893,8 @@ def dispatch_one():
 
     issue_lookup = _build_issue_lookup(queried)
     _requeue_unblocked_items(queried, repo_to_project, issue_lookup)
+    if _consume_retry_decisions(cfg, paths, queried):
+        return
 
     # Dispatch first matching ready item (Status-based)
     for pn, (info, ready_items) in queried.items():
