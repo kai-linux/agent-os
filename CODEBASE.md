@@ -16,6 +16,16 @@
 
 ## Recent Changes
 
+### 2026-03-20 — [task-20260320-161116-make-agent-scorer-drive-closed-loop-remediation] (#47 kai-linux/agent-os)
+Updated the degradation scorer into a bounded remediation-finding generator that classifies likely causes from existing metrics, scopes findings to the affected repo, and feeds the log analyzer concrete next steps for safer, more actionable self-improvement issues.
+
+**Files:** `- orchestrator/agent_scorer.py`, `- orchestrator/log_analyzer.py`, `- tests/test_agent_scorer.py`, `- tests/test_log_analyzer.py`
+
+**Decisions:**
+  - - Reused existing `blocker_code`, `github_repo`, and success-rate metrics instead of adding new telemetry for degradation-cause classification.
+  - - Kept the remediation loop bounded by emitting at most one cause-specific finding per degraded agent/repo combination and relying on existing log-analyzer dedupe before issue creation.
+
+
 ### 2026-03-20 — [task-20260320-161013-gate-ci-debug-task-closure-on-a-verified-green-rer] (#85 kai-linux/agent-os)
 Added a queue-side PR CI remediation completion gate so debugging tasks only stay complete when GitHub records a post-attempt workflow rerun and the previously failing job is green.
 
