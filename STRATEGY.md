@@ -18,14 +18,51 @@ You give it a backlog. It ships pr
 
 
 
+
 <!-- auto-focus-areas -->
-- Strengthen execution control-plane reliability by preventing repeat CI, git/publish, and task-dispatch failures
-- Close the loop on blocked or partial work with structured blocker data, bounded follow-ups, and recovery automation
-- Improve observability and auditability of agent work through prompt snapshots, outcome attribution, and normalized production feedback
-- Advance evidence-driven strategic planning with richer research inputs, sprint-pattern analysis, and auto-generated planning artifacts
-- Expand autonomous orchestration across tasks and repos with dependency-aware planning, adaptive routing, and decomposed execution
+- Strengthen execution reliability by hardening CI, git/publish preflight checks, and regression recovery paths
+- Build closed-loop failure handling with structured blocker data, retries, quarantines, and bounded follow-up automation
+- Expand planning intelligence through evidence-driven artifacts, research inputs, and cross-repo strategic coordination
+- Improve observability and traceability with prompt snapshots, outcome attribution, and normalized production feedback
+- Advance autonomous task orchestration with better decomposition, dependency resolution, adaptive routing, and escalation workflows
 
 ## Sprint History
+
+### Sprint 2026-03-20
+
+**Retrospective:**
+Issues completed:
+- #73: Fix CI failure on PR #71 [bug, prio:high, done] — COMPLETED
+- #69: Reproduce and fix the CI failure behind PR #34 [bug, prio:high] — COMPLETED
+- #65: Replace static fallback chains with adaptive agent routing [enhancement, prio:high, done] — COMPLETED
+- #64: Add post-merge outcome attribution for issue, PR, and task IDs [enhancement, prio:high, done] — COMPLETED
+- #62: Build a normalized production feedback substrate for repos [enhancement, prio:high, done] — COMPLETED
+- #60: Auto-file bounded follow-ups for partial debug outcomes [enhancement, prio:normal, done] — COMPLETED
+- #59: Quarantine tasks that block repeatedly within one day [enhancement, prio:high, done] — COMPLETED
+- #58: Gate git/publish tasks on writable remote capabilities [bug, prio:high, done] — COMPLETED
+- #56: Auto-generate PLANNING_RESEARCH.md each sprint cycle [enhancement, prio:normal, done] — COMPLETED
+- #55: Add regression test for PR CI failure recovery flow [bug, prio:high, done, tech-debt] — COMPLETED
+- #54: Require structured blocker codes on blocked task outcomes [bug, prio:high, done] — COMPLETED
+- #53: Consume escalation-note retry decisions in task dispatch [enhancement, prio:high, done] — COMPLETED
+- #51: Persist worker prompt snapshots for each dispatched task [enhancement, prio:high, done] — COMPLETED
+
+PRs merged:
+- PR #75: Agent: task-20260320-120911-add-regression-test-for-pr-ci-failure-recovery-flo (branch: agent/task-20260320-120911-add-regression-test-for-pr-ci-failure-recovery-flo)
+- PR #74: Agent: task-20260320-120812-consume-escalation-note-retry-decisions-in-task-di (branch: agent/task-20260320-120812-consume-escalation-note-retry-decisions-in-task-di)
+- PR #72: Agent: task-20260320-101212-auto-file-bounded-follow-ups-for-partial-debug-out (branch: agent/task-20260320-101212-auto-file-bounded-follow-ups-for-partial-debug-out)
+- PR #71: Agent: task-20260320-101116-add-post-merge-outcome-attribution-for-issue-pr-an (branch: agent/task-20260320-101116-add-post-merge-outcome-attribution-for-issue-pr-an)
+- PR #68: Agent: task-20260320-101013-build-a-normalized-production-feedback-substrate-f (branch: agent/task-20260320-101013-build-a-normalized-production-feedback-substrate-f)
+- PR #67: Agent: task-20260320-100911-require-structured-blocker-codes-on-blocked-task-o (branch: agent/task-20260320-100911-require-structured-blocker-codes-on-blocked-task-o)
+- PR #66: Agent: task-20260320-100812-persist-worker-prompt-snapshots-for-each-dispatche (branch: agent/task-20260320-100812-persist-worker-prompt-snapshots-for-each-dispatche)
+- PR #61: Agent: task-20260320-081208-gate-git-publish-tasks-on-writable-remote-capabili (branch: agent/task-20260320-081208-gate-git-publish-tasks-on-writable-remote-capabili)
+
+**Plan:**
+- [prio:high] Auto-rerun blocked tasks after prompt inspection completes: This is the strongest immediate follow-through on the new blocker-code, prompt-snapshot, and bounded-follow-up work because the strategy prioritizes turning blocked work into reliable closed-loop recovery.
+- [prio:high] Auto-generate PRODUCTION_FEEDBACK.md each sprint cycle: This best compounds the recently completed feedback and attribution foundation by advancing the strategy’s evidence-driven planning track with a durable planning input.
+- [prio:high] Preflight git push readiness before dispatching publish tasks: This directly removes a repeated control-plane failure mode and matches the planning principles’ preference for unblockers and reliability improvements over local churn.
+- [prio:high] Add CI artifact capture for failing PR jobs: Recent CI recovery work makes this the right hardening task now because the strategy favors preventing repeated execution failures and improving observability for faster recovery loops.
+- [prio:high] Collapse self-improvement generators behind one evidence synthesizer: This pushes beyond maintenance toward the long-term vision by tightening closed-loop self-improvement and reducing control-plane noise in a way that can compound across repos.
+
 
 ### Sprint 2026-03-20
 
