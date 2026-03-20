@@ -16,6 +16,16 @@
 
 ## Recent Changes
 
+### 2026-03-20 — [task-20260320-133809-add-ci-artifact-capture-for-failing-pr-jobs] (#45 kai-linux/agent-os)
+Updated the existing CI workflow so pull request job failures upload a temporary artifact bundle containing dependency-install, lint, and pytest logs plus a pytest JUnit report when available.
+
+**Files:** `- .github/workflows/ci.yml`, `- .agent_result.md`
+
+**Decisions:**
+  - - Kept the diff limited to the existing CI workflow file used by pull requests instead of adding a new workflow or helper script
+  - - Captured logs directly in each failure-prone step so the uploaded artifact identifies the failing command without requiring a rerun
+
+
 ### 2026-03-20 — [task-20260320-121210-auto-generate-planning-research-md-each-sprint-cyc] (#56 kai-linux/agent-os)
 deepseek failed before producing a valid result file. Runner exited with code 1 while executing `/home/kai/agent-os/bin/agent_runner.sh deepseek /srv/worktrees/agent-os/task-20260320-121210-auto-generate-planning-research-md-each-sprint-cyc /home/kai/agent-os/runtime/tmp/task-20260320-121210-auto-generate-planning-research-md-each-sprint-cyc.txt`. Classified as: authentication failure. Orchestrator rescued and pushed the worktree changes.
 
