@@ -19,7 +19,7 @@ import yaml
 from orchestrator.paths import load_config, runtime_paths
 from orchestrator.github_sync import sync_result
 from orchestrator.codebase_memory import read_codebase_context, update_codebase_memory
-from orchestrator.gh_project import add_issue_comment, gh, query_project, set_item_status
+from orchestrator.gh_project import add_issue_comment, gh, gh_json, query_project, set_item_status
 from orchestrator.repo_context import build_execution_context
 
 
@@ -40,6 +40,10 @@ BLOCKER_CODE_DESCRIPTIONS = {
 }
 VALID_BLOCKER_CODES = set(BLOCKER_CODE_DESCRIPTIONS)
 PROMPT_INSPECTION_BLOCKER_CODES = {"invalid_result_contract"}
+_CI_REMEDIATION_TITLE_RE = re.compile(r"^fix ci failure on pr #(\d+)$", re.IGNORECASE)
+_CI_REMEDIATION_PR_RE = re.compile(r"\bPR\s*#(\d+)\b", re.IGNORECASE)
+_CI_REMEDIATION_PR_URL_RE = re.compile(r"/pull/(\d+)", re.IGNORECASE)
+_CI_FAILED_CHECK_RE = re.compile(r"^- \*\*(.+?)\*\*:", re.MULTILINE)
 
 
 def now_ts():
@@ -253,6 +257,230 @@ def _upsert_single_value_section(text: str, section: str, value: str, next_secti
     if anchor:
         return text[:anchor.start()] + replacement + "\n" + text[anchor.start():]
     return text.rstrip("\n") + f"\n\n{replacement}"
+
+
+def _result_contract_text(result: dict) -> str:
+    status = str(result.get("status", "blocked")).strip().lower()
+    blocker_code = "none" if status == "complete" else (str(result.get("blocker_code", "")).strip() or "none")
+    sections = [
+        ("STATUS", status),
+        ("BLOCKER_CODE", blocker_code),
+        ("SUMMARY", str(result.get("summary", "No summary provided.")).strip() or "No summary provided."),
+        ("DONE", "\n".join(result.get("done", ["- None"]))),
+        ("BLOCKERS", "\n".join(result.get("blockers", ["- None"]))),
+        ("NEXT_STEP", str(result.get("next_step", "None")).strip() or "None"),
+        ("FILES_CHANGED", "\n".join(result.get("files_changed", ["- None"]))),
+        ("TESTS_RUN", "\n".join(result.get("tests_run", ["- None"]))),
+        ("DECISIONS", "\n".join(result.get("decisions", ["- None"]))),
+        ("RISKS", "\n".join(result.get("risks", ["- None"]))),
+        ("ATTEMPTED_APPROACHES", "\n".join(result.get("attempted_approaches", ["- None"]))),
+        ("MANUAL_STEPS", str(result.get("manual_steps", "- None")).strip() or "- None"),
+    ]
+    return "\n\n".join(f"{name}:\n{value}" for name, value in sections) + "\n"
+
+
+def _write_result_contract(worktree: Path, result: dict) -> None:
+    (worktree / ".agent_result.md").write_text(_result_contract_text(result), encoding="utf-8")
+
+
+def _extract_ci_remediation_pr_number(meta: dict, body: str) -> int | None:
+    issue_title = str(meta.get("github_issue_title", "")).strip()
+    if issue_title:
+        match = _CI_REMEDIATION_TITLE_RE.match(issue_title)
+        if match:
+            return int(match.group(1))
+
+    for pattern in (_CI_REMEDIATION_PR_URL_RE, _CI_REMEDIATION_PR_RE):
+        match = pattern.search(body or "")
+        if match:
+            return int(match.group(1))
+    return None
+
+
+def _extract_ci_failed_checks(body: str) -> list[str]:
+    names: list[str] = []
+    seen: set[str] = set()
+    for raw_name in _CI_FAILED_CHECK_RE.findall(body or ""):
+        name = raw_name.strip()
+        key = name.lower()
+        if not name or key in seen:
+            continue
+        seen.add(key)
+        names.append(name)
+    return names
+
+
+def _parse_github_timestamp(value: str | None) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _ci_completion_partial_result(
+    result: dict,
+    *,
+    pr_number: int,
+    reason: str,
+    blocker_code: str,
+    detail: str,
+    next_step: str,
+) -> dict:
+    updated = dict(result)
+    updated["status"] = "partial"
+    updated["blocker_code"] = blocker_code
+    updated["ci_rerun_reason"] = reason
+    updated["summary"] = f"CI rerun verification for PR #{pr_number} is incomplete ({reason}). {detail}"
+
+    blockers = [b for b in result.get("blockers", ["- None"]) if b != "- None"]
+    blockers.append(f"- CI_RERUN_REASON: {reason}")
+    blockers.append(f"- {detail}")
+    updated["blockers"] = blockers
+
+    decisions = list(result.get("decisions", ["- None"]))
+    decisions.append("- Queue requires a post-fix CI rerun with the previously failing job passing before closing PR CI remediation tasks.")
+    updated["decisions"] = decisions
+    updated["next_step"] = next_step
+    return updated
+
+
+def verify_pr_ci_debug_completion(
+    meta: dict,
+    body: str,
+    result: dict,
+    *,
+    commit_hash: str | None,
+    task_started_at: datetime,
+) -> dict:
+    if result.get("status") != "complete":
+        return result
+    if str(meta.get("task_type", "")).strip().lower() != "debugging":
+        return result
+
+    pr_number = _extract_ci_remediation_pr_number(meta, body)
+    if pr_number is None:
+        return result
+
+    repo = str(meta.get("github_repo", "")).strip()
+    branch = str(meta.get("branch", "")).strip()
+    failed_checks = _extract_ci_failed_checks(body)
+    if not repo or not branch:
+        return _ci_completion_partial_result(
+            result,
+            pr_number=pr_number,
+            reason="missing_pr_context",
+            blocker_code="missing_context",
+            detail="The remediation task did not retain the PR repo/branch metadata needed for CI verification.",
+            next_step="Restore the PR remediation context and rerun the task so CI status can be verified.",
+        )
+    if not failed_checks:
+        return _ci_completion_partial_result(
+            result,
+            pr_number=pr_number,
+            reason="missing_failed_job_context",
+            blocker_code="missing_context",
+            detail="The remediation task did not include the previously failing job name, so the queue could not verify the intended CI repair.",
+            next_step="Preserve the failing check name in the remediation issue context and rerun the task.",
+        )
+
+    try:
+        runs_payload = gh_json(["api", f"repos/{repo}/actions/runs?branch={branch}&per_page=20"]) or {}
+    except Exception as exc:
+        return _ci_completion_partial_result(
+            result,
+            pr_number=pr_number,
+            reason="verification_unavailable",
+            blocker_code="environment_failure",
+            detail=f"GitHub Actions verification failed before the rerun could be confirmed: {exc}",
+            next_step="Retry once GitHub Actions metadata is reachable and confirm the PR workflow rerun is green.",
+        )
+
+    runs = runs_payload.get("workflow_runs") or []
+    candidate_runs: list[dict] = []
+    for run in runs:
+        if str(run.get("head_branch", "")).strip() != branch:
+            continue
+        if commit_hash and str(run.get("head_sha", "")).strip() != commit_hash:
+            continue
+        created_at = _parse_github_timestamp(run.get("created_at")) or _parse_github_timestamp(run.get("run_started_at"))
+        if created_at and created_at < task_started_at:
+            continue
+        candidate_runs.append(run)
+
+    if not candidate_runs:
+        return _ci_completion_partial_result(
+            result,
+            pr_number=pr_number,
+            reason="missing_rerun",
+            blocker_code="dependency_blocked",
+            detail="No GitHub Actions workflow rerun was recorded for the PR branch after this fix attempt.",
+            next_step="Wait for or trigger a rerun of the affected CI workflow on the PR branch, then re-check the remediation task.",
+        )
+
+    candidate_runs.sort(
+        key=lambda run: _parse_github_timestamp(run.get("created_at")) or _parse_github_timestamp(run.get("run_started_at")) or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
+    expected = {name.lower() for name in failed_checks}
+    latest_run = candidate_runs[0]
+
+    for run in candidate_runs:
+        try:
+            jobs_payload = gh_json(["api", f"repos/{repo}/actions/runs/{run['id']}/jobs?per_page=100"]) or {}
+        except Exception as exc:
+            return _ci_completion_partial_result(
+                result,
+                pr_number=pr_number,
+                reason="verification_unavailable",
+                blocker_code="environment_failure",
+                detail=f"GitHub Actions jobs for rerun {run.get('id')} could not be read: {exc}",
+                next_step="Retry the verification once the GitHub Actions job metadata can be fetched.",
+            )
+
+        jobs = jobs_payload.get("jobs") or []
+        matched_jobs = [job for job in jobs if str(job.get("name", "")).strip().lower() in expected]
+        if not matched_jobs:
+            continue
+
+        latest_run = run
+        if str(run.get("status", "")).lower() != "completed":
+            return _ci_completion_partial_result(
+                result,
+                pr_number=pr_number,
+                reason="rerun_pending",
+                blocker_code="dependency_blocked",
+                detail=f"Workflow run {run.get('id')} is still {run.get('status', 'pending')}, so the fix has not been verified yet.",
+                next_step="Wait for the current GitHub Actions rerun to finish and verify the previously failing job passes.",
+            )
+
+        failing_jobs = [
+            job.get("name", "unknown")
+            for job in matched_jobs
+            if str(job.get("conclusion", "")).lower() != "success"
+        ]
+        if failing_jobs:
+            return _ci_completion_partial_result(
+                result,
+                pr_number=pr_number,
+                reason="rerun_failed",
+                blocker_code="test_failure",
+                detail=f"Workflow run {run.get('id')} reran the prior failing job(s), but they still are not green: {', '.join(failing_jobs)}.",
+                next_step="Inspect the rerun logs for the still-failing CI job, fix the branch again, and wait for a successful rerun.",
+            )
+
+        return result
+
+    return _ci_completion_partial_result(
+        result,
+        pr_number=pr_number,
+        reason="missing_relevant_job",
+        blocker_code="dependency_blocked",
+        detail=f"Workflow run {latest_run.get('id')} did not include the previously failing job(s): {', '.join(failed_checks)}.",
+        next_step="Rerun the workflow that owns the previously failing job and verify those job names complete successfully.",
+    )
 
 
 def _command_available(cmd: str) -> bool:
@@ -1974,6 +2202,23 @@ def main():
 
         if final_result is None:
             final_result = synthesize_exhausted_result(model_attempts)
+
+        verified_result = verify_pr_ci_debug_completion(
+            meta,
+            body,
+            final_result,
+            commit_hash=commit_hash,
+            task_started_at=start_time,
+        )
+        if verified_result is not final_result:
+            final_result = verified_result
+            _write_result_contract(worktree, final_result)
+            log(
+                f"CI remediation completion gate downgraded task to {final_result['status']} ({final_result.get('ci_rerun_reason', 'verification_required')}).",
+                logfile,
+                also_summary=True,
+                queue_summary_log=QUEUE_SUMMARY_LOG,
+            )
 
         try:
             record_metrics(cfg, meta, final_result, final_agent, model_attempts, start_time, logfile, QUEUE_SUMMARY_LOG)
