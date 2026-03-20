@@ -16,6 +16,17 @@
 
 ## Recent Changes
 
+### 2026-03-20 — [task-20260320-113613-fix-ci-failure-on-pr-71] (#73 kai-linux/agent-os)
+Repaired the PR #71 CI failure in the worktree by resolving committed merge-conflict markers in `orchestrator/github_dispatcher.py` and `tests/test_github_dispatcher.py`, preserving both intended behaviors: fallback branch-field retention and outcome-check propagation; local verification is green, but commit/push is blocked by sandbox denial on the worktree Git admin directory. Orchestrator rescued and pushed the worktree changes.
+
+**Files:** `- .agent_result.md`, `- orchestrator/github_dispatcher.py`, `- tests/test_github_dispatcher.py`
+
+**Decisions:**
+  - - Kept the smallest viable diff by resolving the accidental merge conflicts instead of refactoring dispatcher parsing
+  - - Combined both sides of the conflicted changes so the dispatcher still backfills missing raw issue fields and still emits outcome check IDs
+  - - Queue performed git rescue after the agent left valid changes behind.
+
+
 ### 2026-03-20 — [task-20260320-112312-fix-ci-failure-on-pr-71] (#73 kai-linux/agent-os)
 CI was failing because the PR branch still contained unresolved merge-conflict markers in `orchestrator/strategic_planner.py`, `tests/test_strategic_planner.py`, and `README.md`, which broke pytest collection. I resolved the conflicted sections by keeping both the production-feedback and outcome-attribution behavior, aligned the planner prompt/tests to the merged signature, and verified the full test suite passes locally, but I could not commit or push because this environment is denied access to the worktree git lockfile path. Orchestrator rescued and pushed the worktree changes.
 
