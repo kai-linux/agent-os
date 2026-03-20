@@ -11,6 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      CI_ARTIFACT_DIR: ${{ runner.temp }}/ci-artifacts
     steps:
       - uses: actions/checkout@v4
 
@@ -19,11 +20,31 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Prepare CI artifact directory
+        run: mkdir -p "$CI_ARTIFACT_DIR"
+
       - name: Install dependencies
-        run: pip install -r requirements.txt pytest
+        shell: bash
+        run: |
+          set -o pipefail
+          pip install -r requirements.txt pytest 2>&1 | tee "$CI_ARTIFACT_DIR/install.log"
 
       - name: Lint (syntax check)
-        run: python -m py_compile orchestrator/*.py
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m py_compile orchestrator/*.py 2>&1 | tee "$CI_ARTIFACT_DIR/lint.log"
 
       - name: Run tests
-        run: pytest tests/ -v
+        shell: bash
+        run: |
+          set -o pipefail
+          pytest tests/ -v --junitxml="$CI_ARTIFACT_DIR/pytest.xml" 2>&1 | tee "$CI_ARTIFACT_DIR/pytest.log"
+
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-ci-failure-${{ github.job }}-${{ github.run_attempt }}
+          path: ${{ env.CI_ARTIFACT_DIR }}
+          if-no-files-found: ignore
