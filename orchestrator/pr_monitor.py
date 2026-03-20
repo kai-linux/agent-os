@@ -7,6 +7,11 @@ import subprocess
 from pathlib import Path
 
 from orchestrator.paths import load_config, runtime_paths
+from orchestrator.outcome_attribution import (
+    append_outcome_record,
+    extract_task_id_from_pr_title,
+    load_outcome_records,
+)
 from orchestrator.gh_project import (
     add_issue_comment,
     create_pr_for_branch,
@@ -396,6 +401,39 @@ def _mark_issue_ready(cfg: dict, repo: str, issue_number: int, *, reopen_issue: 
 def _cleanup_merged_pr_issues(cfg: dict, repo: str, pr: dict):
     pr_number = pr["number"]
     issue_number = _extract_issue_number(pr.get("body", ""))
+    task_id = extract_task_id_from_pr_title(pr.get("title"))
+    prior_records = load_outcome_records(cfg, repo=repo)
+    outcome_check_ids: list[str] = []
+    merge_already_logged = False
+    for record in reversed(prior_records):
+        if record.get("record_type") == "attribution" and record.get("event") == "merged" and record.get("pr_number") == pr_number:
+            merge_already_logged = True
+            break
+        if record.get("record_type") != "attribution":
+            continue
+        if task_id and record.get("task_id") == task_id:
+            outcome_check_ids = list(record.get("outcome_check_ids") or [])
+            break
+        if record.get("pr_number") == pr_number:
+            outcome_check_ids = list(record.get("outcome_check_ids") or [])
+            break
+
+    if not merge_already_logged:
+        append_outcome_record(
+            cfg,
+            {
+                "record_type": "attribution",
+                "event": "merged",
+                "repo": repo,
+                "task_id": task_id,
+                "issue_number": issue_number,
+                "pr_number": pr_number,
+                "pr_url": pr.get("url"),
+                "branch": pr.get("headRefName"),
+                "merged_at": pr.get("mergedAt"),
+                "outcome_check_ids": outcome_check_ids,
+            },
+        )
 
     if issue_number:
         _mark_issue_done(

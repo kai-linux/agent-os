@@ -18,6 +18,7 @@ from orchestrator.gh_project import (
 )
 from orchestrator.task_formatter import format_task
 from orchestrator.task_decomposer import decompose_issue, create_sub_issues
+from orchestrator.outcome_attribution import parse_outcome_check_ids
 from orchestrator.trust import is_trusted
 
 
@@ -55,6 +56,7 @@ def parse_issue_body(body: str) -> dict:
         "success_criteria": sections.get("success criteria", "").strip(),
         "task_type": sections.get("task type", "").strip().lower() or "implementation",
         "agent_preference": sections.get("agent preference", "").strip().lower() or "auto",
+        "outcome_checks": parse_outcome_check_ids(sections.get("outcome checks", "")),
         "constraints": sections.get("constraints", "").strip(),
         "context": sections.get("context", "").strip(),
         "base_branch": sections.get("base branch", "").strip(),
@@ -82,11 +84,19 @@ def build_mailbox_task(cfg: dict, project_key: str, repo_cfg: dict, issue: dict)
     formatter_model = cfg.get("formatter_model")
     parsed = format_task(title, body_text, model=formatter_model)
     if parsed is None:
+<<<<<<< HEAD
         parsed = raw_parsed
     else:
         for key, value in raw_parsed.items():
             if value and not parsed.get(key):
                 parsed[key] = value
+=======
+        parsed = parse_issue_body(body_text)
+    else:
+        parsed = dict(parsed)
+        raw_sections = parse_issue_body(body_text)
+        parsed["outcome_checks"] = raw_sections.get("outcome_checks", [])
+>>>>>>> 0b87fed (agent task-20260320-101116-add-post-merge-outcome-attribution-for-issue-pr-an)
 
     criteria = parsed["success_criteria"] or "- Match the issue goal\n- Keep the diff minimal\n- Leave a valid .agent_result.md"
     constraints = parsed["constraints"] or "- Work only inside the repo\n- Prefer minimal diffs"
@@ -127,6 +137,7 @@ def build_mailbox_task(cfg: dict, project_key: str, repo_cfg: dict, issue: dict)
         "github_issue_number": issue["number"],
         "github_issue_url": issue["url"],
         "prompt_snapshot_path": str(Path(cfg.get("root_dir", Path.cwd())) / "runtime" / "prompts" / f"{task_id}.txt"),
+        "outcome_check_ids": parsed.get("outcome_checks", []),
     }
 
     frontmatter_text = yaml.safe_dump(frontmatter, sort_keys=False).strip()
