@@ -110,6 +110,19 @@ agent/task-123
     assert parsed["branch"] == "agent/task-123"
 
 
+def test_parse_issue_body_extracts_outcome_checks():
+    body = """
+## Goal
+Measure adoption
+
+## Outcome Checks
+- activation_rate
+- signup_completion
+"""
+    parsed = gd.parse_issue_body(body)
+    assert parsed["outcome_checks"] == ["activation_rate", "signup_completion"]
+
+
 def test_build_mailbox_task_preserves_custom_branch(monkeypatch):
     cfg = {
         "default_agent": "auto",
@@ -179,6 +192,8 @@ agent/task-123
 
 ## Branch
 agent/task-123
+## Outcome Checks
+- activation_rate
 """,
     }
 
@@ -194,11 +209,45 @@ agent/task-123
             "context": "None",
             "base_branch": "",
             "branch": "",
+            "outcome_checks": [],
         },
     )
     _task_id, task_md = gd.build_mailbox_task(cfg, "proj", repo_cfg, issue)
     assert "base_branch: agent/task-123" in task_md
     assert "branch: agent/task-123" in task_md
+    assert "outcome_check_ids:" in task_md
+    assert "- activation_rate" in task_md
+
+
+def test_build_mailbox_task_includes_outcome_check_ids(monkeypatch):
+    cfg = {
+        "default_agent": "auto",
+        "default_task_type": "implementation",
+        "default_base_branch": "main",
+        "default_allow_push": True,
+        "default_max_attempts": 4,
+        "max_runtime_minutes": 40,
+        "formatter_model": None,
+    }
+    repo_cfg = {"local_repo": "/tmp/repo", "github_repo": "owner/repo"}
+    issue = {
+        "number": 42,
+        "title": "Improve activation",
+        "url": "https://github.com/owner/repo/issues/42",
+        "labels": [{"name": "prio:high"}],
+        "body": """
+## Goal
+Improve activation.
+
+## Outcome Checks
+- activation_rate
+""",
+    }
+
+    monkeypatch.setattr(gd, "format_task", lambda title, body, model=None: None)
+    _task_id, task_md = gd.build_mailbox_task(cfg, "proj", repo_cfg, issue)
+    assert "outcome_check_ids:" in task_md
+    assert "- activation_rate" in task_md
 
 
 def test_dispatch_item_blocks_publish_task_without_push_capability(tmp_path, monkeypatch):
