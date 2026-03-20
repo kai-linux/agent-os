@@ -121,6 +121,7 @@ def build_mailbox_task(cfg: dict, project_key: str, repo_cfg: dict, issue: dict)
         "github_repo": repo_cfg["github_repo"],
         "github_issue_number": issue["number"],
         "github_issue_url": issue["url"],
+        "prompt_snapshot_path": str(Path(cfg.get("root_dir", Path.cwd())) / "runtime" / "prompts" / f"{task_id}.txt"),
     }
 
     frontmatter_text = yaml.safe_dump(frontmatter, sort_keys=False).strip()

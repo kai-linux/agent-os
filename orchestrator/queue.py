@@ -695,6 +695,8 @@ ATTEMPTED_APPROACHES:
 def write_prompt(task_id: str, meta: dict, body: str, current_agent: str, prior_results: list[dict], root: Path, worktree: Path | None = None):
     prompt_file = root / "runtime" / "tmp" / f"{task_id}.txt"
     prompt_file.parent.mkdir(parents=True, exist_ok=True)
+    snapshot_path = Path(meta.get("prompt_snapshot_path") or (root / "runtime" / "prompts" / f"{task_id}.txt"))
+    snapshot_path.parent.mkdir(parents=True, exist_ok=True)
 
     codebase_context = read_codebase_context(worktree) if worktree else ""
     layered_context = build_execution_context(
@@ -781,6 +783,7 @@ Rules:
   This section is CRITICAL — the operator depends on it to know what to do after deployment.
 """
     prompt_file.write_text(prompt, encoding="utf-8")
+    snapshot_path.write_text(prompt, encoding="utf-8")
     return prompt_file
 
 
@@ -1041,6 +1044,7 @@ def create_followup_task(
         "github_repo": original_meta.get("github_repo"),
         "github_issue_number": original_meta.get("github_issue_number"),
         "github_issue_url": original_meta.get("github_issue_url"),
+        "prompt_snapshot_path": str(Path(original_meta.get("prompt_snapshot_path", inbox.parent.parent / "prompts" / f"{new_task_id}.txt")).parent / f"{new_task_id}.txt"),
     }
 
     frontmatter_text = yaml.safe_dump(frontmatter, sort_keys=False).strip()
