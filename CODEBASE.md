@@ -16,6 +16,17 @@
 
 ## Recent Changes
 
+### 2026-03-20 — [task-20260320-112312-fix-ci-failure-on-pr-71] (#73 kai-linux/agent-os)
+CI was failing because the PR branch still contained unresolved merge-conflict markers in `orchestrator/strategic_planner.py`, `tests/test_strategic_planner.py`, and `README.md`, which broke pytest collection. I resolved the conflicted sections by keeping both the production-feedback and outcome-attribution behavior, aligned the planner prompt/tests to the merged signature, and verified the full test suite passes locally, but I could not commit or push because this environment is denied access to the worktree git lockfile path. Orchestrator rescued and pushed the worktree changes.
+
+**Files:** `- .agent_result.md`, `- README.md`, `- orchestrator/strategic_planner.py`, `- tests/test_strategic_planner.py`
+
+**Decisions:**
+  - - Resolved the conflict by preserving both features instead of reverting either side, because the branch was meant to include production feedback and post-merge outcome attribution together.
+  - - Kept the diff minimal and limited to the conflicted files plus the required task result artifact.
+  - - Queue performed git rescue after the agent left valid changes behind.
+
+
 ### 2026-03-20 — [task-20260320-105114-fix-ci-failure-on-pr-71] (#73 kai-linux/agent-os)
 deepseek failed before producing a valid result file. Runner exited with code 1 while executing `/home/kai/agent-os/bin/agent_runner.sh deepseek /srv/worktrees/agent-os/task-20260320-105114-fix-ci-failure-on-pr-71 /home/kai/agent-os/runtime/tmp/task-20260320-105114-fix-ci-failure-on-pr-71.txt`. Classified as: authentication failure. Orchestrator rescued and pushed the worktree changes.
 
