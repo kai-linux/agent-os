@@ -21,7 +21,6 @@ import json
 import os
 import re
 import subprocess
-import time
 from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
@@ -48,7 +47,6 @@ MIN_SPRINTS_FOR_FOCUS = 3
 FOCUS_AREA_MARKER = "<!-- auto-focus-areas -->"
 SIMILARITY_THRESHOLD = 0.75
 CROSS_REPO_SUMMARY_MAX_CHARS = 1500  # per-repo summary cap for cross-repo context
-POLL_INTERVAL_SECONDS = 300   # 5 minutes
 APPROVAL_TIMEOUT_HOURS = 24
 APPROVAL_KEYWORDS = {"yes", "approve", "approved", "ok", "go", "lgtm"}
 REJECTION_KEYWORDS = {"no", "reject", "skip", "cancel", "nope"}
@@ -1552,31 +1550,90 @@ def _create_plan_approval_action(cfg: dict, repo: str, cadence_days: float) -> d
         "repo": repo,
         "approval": "pending",
         "timeout_hours": timeout_hours,
+        "plan": [],
+        "retrospective": "",
     }
 
 
-def _poll_approval(paths: dict, action_id: str, timeout_hours: float = APPROVAL_TIMEOUT_HOURS, poll_interval: int = POLL_INTERVAL_SECONDS) -> bool:
-    """Poll the persisted planner approval action. Returns True if approved."""
-    actions_dir = paths["TELEGRAM_ACTIONS"]
-    deadline = time.time() + timeout_hours * 3600
-    print(f"Polling for approval (timeout: {timeout_hours}h, interval: {poll_interval}s)...")
+def _list_pending_plan_actions(actions_dir: Path) -> list[dict]:
+    actions: list[dict] = []
+    for path in sorted(actions_dir.glob("*.json")):
+        try:
+            action = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if action.get("type") != "plan_approval":
+            continue
+        if action.get("status") in {"completed", "rejected", "expired"}:
+            continue
+        actions.append(action)
+    return actions
 
-    while time.time() < deadline:
-        action = load_telegram_action(actions_dir, action_id)
-        if action:
-            if action.get("approval") == "approved":
-                print("Approval received via Telegram button.")
-                return True
-            if action.get("approval") == "rejected":
-                print("Rejection received via Telegram button.")
-                return False
-            if telegram_action_expired(action):
-                print("Approval timed out.")
-                return False
-        time.sleep(poll_interval)
 
-    print("Approval timed out.")
-    return False
+def _repo_pending_plan_action(actions_dir: Path, repo: str) -> dict | None:
+    repo_actions = [
+        action for action in _list_pending_plan_actions(actions_dir)
+        if action.get("repo") == repo
+    ]
+    if not repo_actions:
+        return None
+    repo_actions.sort(key=lambda action: action.get("created_at", ""))
+    return repo_actions[-1]
+
+
+def _complete_plan_action(
+    cfg: dict,
+    paths: dict,
+    action: dict,
+    repo_path: Path,
+) -> bool:
+    repo = action.get("repo", "")
+    action_id = action.get("action_id", "?")
+    approval = action.get("approval", "pending")
+    now = datetime.now(timezone.utc).isoformat()
+
+    if approval == "approved":
+        print(f"  Applying previously approved plan for {repo} ({action_id})...")
+        plan = action.get("plan") or []
+        retrospective = action.get("retrospective", "")
+        ready_urls, skipped = apply_plan_promotions(cfg, repo, plan)
+        sprint_summary = "\n".join(
+            f"- [{t.get('priority', '?')}] {t.get('title', '?')}: {t.get('rationale', '')}"
+            for t in plan
+        )
+        _update_strategy(repo_path, repo, sprint_summary, retrospective)
+        summary = (
+            f"✅ Approved sprint applied for {repo}\n"
+            f"Issues moved to Ready: {len(ready_urls)} | Skipped: {len(skipped)}\n"
+            f"{chr(10).join(ready_urls[:10]) if ready_urls else '(no issues promoted)'}"
+        )
+        print(summary)
+        _send_telegram(cfg, summary)
+        action["status"] = "completed"
+        action["completed_at"] = now
+        save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
+        return True
+
+    if approval == "rejected":
+        skip_msg = f"⏭️ Sprint plan for {repo} was not approved. Skipping this cycle."
+        print(skip_msg)
+        _send_telegram(cfg, skip_msg)
+        action["status"] = "rejected"
+        action["completed_at"] = now
+        save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
+        return True
+
+    if telegram_action_expired(action):
+        skip_msg = f"⏭️ Sprint plan for {repo} expired without approval. Skipping this cycle."
+        print(skip_msg)
+        _send_telegram(cfg, skip_msg)
+        action["status"] = "expired"
+        action["expired_at"] = now
+        save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
+        return True
+
+    print(f"  Pending approval for {repo}: awaiting Telegram response ({action_id})")
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -1948,6 +2005,11 @@ def run():
             print("Planning order: " + " -> ".join(github_slug for github_slug, _ in repos))
 
         for github_slug, repo_path in repos:
+            pending_action = _repo_pending_plan_action(paths["TELEGRAM_ACTIONS"], github_slug)
+            if pending_action:
+                _complete_plan_action(cfg, paths, pending_action, repo_path)
+                continue
+
             _, sprint_cadence_days = _repo_planner_config(cfg, github_slug)
             due, reason = is_due(
                 cfg,
@@ -2002,40 +2064,13 @@ def run():
                 print("  Skipping plan application — approval gate is mandatory.")
                 continue
             action["message_id"] = msg_id
+            action["plan"] = plan
+            action["retrospective"] = retrospective
             save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
 
             # Count this as a planning run once the approval request exists.
             record_run(cfg, "strategic_planner", github_slug)
-
-            # Phase 3: Wait for human approval
-            approved = _poll_approval(paths, action["action_id"], timeout_hours=action["timeout_hours"])
-
-            if not approved:
-                skip_msg = f"⏭️ Sprint plan for {github_slug} was not approved. Skipping this cycle."
-                print(skip_msg)
-                _send_telegram(cfg, skip_msg)
-                continue
-
-            # Phase 4: Promote selected backlog issues (only on approval)
-            print(f"\n  Applying approved plan ({github_slug})...")
-            ready_urls, skipped = apply_plan_promotions(cfg, github_slug, plan)
-
-            # Phase 5: Update STRATEGY.md with sprint plan and retrospective
-            sprint_summary = "\n".join(
-                f"- [{t.get('priority', '?')}] {t.get('title', '?')}: {t.get('rationale', '')}"
-                for t in plan
-            )
-            _update_strategy(repo_path, github_slug, sprint_summary, retrospective)
-
-            summary = (
-                f"✅ Sprint plan approved for {github_slug}\n"
-                f"Issues moved to Ready: {len(ready_urls)} | Skipped: {len(skipped)}\n"
-                f"Status: Ready → dispatch will begin within 1 minute"
-            )
-            for url in ready_urls:
-                summary += f"\n  {url}"
-            print(summary)
-            _send_telegram(cfg, summary)
+            print(f"  Approval requested for {github_slug}; continuing to other repos until a later cron tick resolves it.")
 
 
 if __name__ == "__main__":
