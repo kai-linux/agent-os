@@ -24,6 +24,20 @@ from orchestrator.repo_context import build_execution_context
 
 
 TELEGRAM_ACTION_TTL_HOURS = 48
+BLOCKER_CODE_DESCRIPTIONS = {
+    "missing_context": "The task cannot continue because required specs or repository context are missing.",
+    "missing_credentials": "The task is blocked on authentication, secrets, or access that the worker does not have.",
+    "environment_failure": "The local execution environment, tooling, or infrastructure is broken or unavailable.",
+    "dependency_blocked": "Progress depends on another task, issue, or external dependency resolving first.",
+    "quota_limited": "The selected model or tool hit a usage, quota, or rate limit.",
+    "runner_failure": "The agent runner failed before the task could complete normally.",
+    "timeout": "Execution exceeded the allowed time budget.",
+    "test_failure": "Implementation landed, but verification failed and follow-up work is still required.",
+    "manual_intervention_required": "A human or out-of-band action is required before automation can continue.",
+    "fallback_exhausted": "All configured automated fallback attempts were exhausted.",
+    "invalid_result_contract": "The worker produced an invalid or missing task outcome contract.",
+}
+VALID_BLOCKER_CODES = set(BLOCKER_CODE_DESCRIPTIONS)
 
 
 def now_ts():
@@ -103,6 +117,70 @@ def _format_runner_failure(exc: Exception) -> tuple[str, list[str], str | None]:
         detail = stderr_tail or stdout_tail or ""
         return summary, blockers, detail
     return str(exc), [f"- Runner/model failure: {exc}"], str(exc)
+
+
+def _blocker_code_from_runner_failure(summary: str, detail: str | None = None) -> str:
+    classification = _classify_runner_failure("\n".join(part for part in [summary, detail or ""] if part))
+    if classification == "usage limit / rate limit":
+        return "quota_limited"
+    if classification == "authentication failure":
+        return "missing_credentials"
+    if classification == "runner/cli configuration failure":
+        return "environment_failure"
+    return "runner_failure"
+
+
+def normalize_blocker_code(value: str | None) -> str:
+    raw = str(value or "").strip().lower()
+    if raw in {"", "none", "- none", "n/a", "na"}:
+        return ""
+    return raw
+
+
+def result_contract_blocker_guidance() -> str:
+    return "\n".join(f"- `{code}`: {desc}" for code, desc in BLOCKER_CODE_DESCRIPTIONS.items())
+
+
+def _invalid_result_contract_result(
+    *,
+    reason: str,
+    raw: str,
+    done: list[str],
+    files_changed: list[str],
+    tests_run: list[str],
+    decisions: list[str],
+    risks: list[str],
+    attempted_approaches: list[str],
+    manual_steps: str,
+) -> dict:
+    blockers = [f"- {reason}"]
+    return {
+        "status": "blocked",
+        "blocker_code": "invalid_result_contract",
+        "summary": "The worker produced an invalid .agent_result.md contract.",
+        "done": done or ["- Worker produced an unusable handoff file."],
+        "blockers": blockers,
+        "next_step": "Fix the task outcome contract and rerun the task.",
+        "files_changed": files_changed or ["- Unknown / inspect worktree"],
+        "tests_run": tests_run or ["- None"],
+        "decisions": decisions or ["- Queue rejected an invalid task outcome contract."],
+        "risks": risks or ["- Automatic recovery routing may be degraded until the contract is fixed."],
+        "attempted_approaches": attempted_approaches or ["- Parsed the worker result and rejected it during validation."],
+        "manual_steps": manual_steps,
+        "raw": raw,
+    }
+
+
+def _upsert_single_value_section(text: str, section: str, value: str, next_sections: list[str]) -> str:
+    pattern = rf"(?ms)^({section}:\s*\n?)(.*?)(?=^\s*(?:{'|'.join(re.escape(s) for s in next_sections)})\s*:|\Z)"
+    match = re.search(pattern, text)
+    replacement = f"{section}:\n{value}\n"
+    if match:
+        return text[:match.start()] + replacement + text[match.end():]
+    anchor = re.search(r"^BLOCKERS:\s*$", text, re.MULTILINE)
+    if anchor:
+        return text[:anchor.start()] + replacement + "\n" + text[anchor.start():]
+    return text.rstrip("\n") + f"\n\n{replacement}"
 
 
 def _command_available(cmd: str) -> bool:
@@ -294,6 +372,7 @@ def build_escalation_message(meta: dict, result: dict, esc_path: Path | None = N
         f"Issue: {meta.get('github_issue_url', 'n/a')}",
         f"Task ID: {meta.get('task_id', 'unknown')}",
         f"Repo: {Path(meta.get('repo', 'unknown')).name}",
+        f"Blocker code: {result.get('blocker_code', 'none') or 'none'}",
         "",
         "Summary:",
         result.get("summary", "No summary provided."),
@@ -326,6 +405,7 @@ def create_escalation_action(meta: dict, result: dict, esc_path: Path, chat_id: 
         "github_issue_number": meta.get("github_issue_number"),
         "github_issue_url": meta.get("github_issue_url"),
         "branch": meta.get("branch"),
+        "blocker_code": result.get("blocker_code", ""),
         "summary": result.get("summary", ""),
         "blockers": result.get("blockers", ["- None"]),
         "files_changed": result.get("files_changed", ["- None"]),
@@ -682,6 +762,7 @@ def render_prior_attempt_history(prior_results: list[dict]) -> str:
             f"""Attempt {idx}
 MODEL: {r.get("agent", "unknown")}
 STATUS: {r.get("status", "unknown")}
+BLOCKER_CODE: {r.get("blocker_code", "none") or "none"}
 SUMMARY: {r.get("summary", "No summary")}
 BLOCKERS:
 {chr(10).join(r.get("blockers", ["- None"]))}
@@ -728,6 +809,9 @@ Use EXACTLY this format:
 
 STATUS: complete|partial|blocked
 
+BLOCKER_CODE:
+One line. Required when STATUS is partial or blocked. Use `none` when STATUS is complete.
+
 SUMMARY:
 One short paragraph.
 
@@ -772,6 +856,8 @@ Rules:
 - If you complete the task, set STATUS: complete
 - If you made progress but more work remains, set STATUS: partial
 - If blocked by missing context, missing credentials, broken environment, or ambiguity, set STATUS: blocked
+- If STATUS is partial or blocked, BLOCKER_CODE is required and must be one of:
+{result_contract_blocker_guidance()}
 - Always write .agent_result.md even if no code changes were made
 - In ATTEMPTED_APPROACHES, describe what you tried this run so future runs do not repeat the same failed path
 - Read the prior model attempts above and avoid repeating clearly failed approaches unless you have a specific new reason
@@ -886,6 +972,7 @@ def parse_agent_result(worktree: Path):
     if not result_file.exists():
         raw = (
             "STATUS: blocked\n\n"
+            "BLOCKER_CODE:\ninvalid_result_contract\n\n"
             "SUMMARY:\nNo .agent_result.md was produced.\n\n"
             "DONE:\n- No .agent_result.md was produced.\n\n"
             "BLOCKERS:\n- Worker did not write the required result file.\n\n"
@@ -898,6 +985,7 @@ def parse_agent_result(worktree: Path):
         )
         return {
             "status": "blocked",
+            "blocker_code": "invalid_result_contract",
             "summary": "No .agent_result.md was produced.",
             "done": ["- No .agent_result.md was produced."],
             "blockers": ["- Worker did not write the required result file."],
@@ -913,24 +1001,56 @@ def parse_agent_result(worktree: Path):
     text = result_file.read_text(encoding="utf-8")
 
     status_match = re.search(r"^STATUS:\s*(.+)$", text, flags=re.MULTILINE)
-    all_sections = ["DONE", "BLOCKERS", "NEXT_STEP", "FILES_CHANGED", "TESTS_RUN", "DECISIONS", "RISKS", "ATTEMPTED_APPROACHES", "MANUAL_STEPS"]
+    all_sections = ["BLOCKER_CODE", "DONE", "BLOCKERS", "NEXT_STEP", "FILES_CHANGED", "TESTS_RUN", "DECISIONS", "RISKS", "ATTEMPTED_APPROACHES", "MANUAL_STEPS"]
     summary = split_section(text, "SUMMARY", all_sections)
-    done = split_section(text, "DONE", all_sections[1:])
-    blockers = split_section(text, "BLOCKERS", all_sections[2:])
-    next_step = split_section(text, "NEXT_STEP", all_sections[3:])
-    files_changed = split_section(text, "FILES_CHANGED", all_sections[4:])
-    tests_run = split_section(text, "TESTS_RUN", all_sections[5:])
-    decisions = split_section(text, "DECISIONS", all_sections[6:])
-    risks = split_section(text, "RISKS", all_sections[7:])
-    attempted_approaches = split_section(text, "ATTEMPTED_APPROACHES", all_sections[8:])
+    blocker_code = split_section(text, "BLOCKER_CODE", ["SUMMARY", *all_sections[1:]])
+    done = split_section(text, "DONE", all_sections[2:])
+    blockers = split_section(text, "BLOCKERS", all_sections[3:])
+    next_step = split_section(text, "NEXT_STEP", all_sections[4:])
+    files_changed = split_section(text, "FILES_CHANGED", all_sections[5:])
+    tests_run = split_section(text, "TESTS_RUN", all_sections[6:])
+    decisions = split_section(text, "DECISIONS", all_sections[7:])
+    risks = split_section(text, "RISKS", all_sections[8:])
+    attempted_approaches = split_section(text, "ATTEMPTED_APPROACHES", all_sections[9:])
     manual_steps = split_section(text, "MANUAL_STEPS", [])
 
     status = status_match.group(1).strip().lower() if status_match else "blocked"
     if status not in {"complete", "partial", "blocked"}:
         status = "blocked"
 
+    blocker_code_value = normalize_blocker_code(blocker_code)
+    if blocker_code_value and blocker_code_value not in VALID_BLOCKER_CODES:
+        return _invalid_result_contract_result(
+            reason=(
+                "BLOCKER_CODE must be one of: "
+                + ", ".join(sorted(VALID_BLOCKER_CODES))
+                + f". Received: {blocker_code_value}"
+            ),
+            raw=text,
+            done=parse_bullets(done),
+            files_changed=parse_bullets(files_changed),
+            tests_run=parse_bullets(tests_run),
+            decisions=parse_bullets(decisions),
+            risks=parse_bullets(risks),
+            attempted_approaches=parse_bullets(attempted_approaches),
+            manual_steps=manual_steps.strip() if manual_steps else "",
+        )
+    if status in {"partial", "blocked"} and not blocker_code_value:
+        return _invalid_result_contract_result(
+            reason="Blocked and partial outcomes must include a valid BLOCKER_CODE.",
+            raw=text,
+            done=parse_bullets(done),
+            files_changed=parse_bullets(files_changed),
+            tests_run=parse_bullets(tests_run),
+            decisions=parse_bullets(decisions),
+            risks=parse_bullets(risks),
+            attempted_approaches=parse_bullets(attempted_approaches),
+            manual_steps=manual_steps.strip() if manual_steps else "",
+        )
+
     return {
         "status": status,
+        "blocker_code": blocker_code_value,
         "summary": summary or "No summary provided.",
         "done": parse_bullets(done),
         "blockers": parse_bullets(blockers),
@@ -1078,6 +1198,10 @@ def create_followup_task(
 
 {result.get("summary", "No summary provided.")}
 
+# Prior Blocker Code
+
+{result.get("blocker_code", "none") or "none"}
+
 # Prior Progress
 
 {chr(10).join(result.get("done", ["- None"]))}
@@ -1141,6 +1265,9 @@ def create_escalation_note(original_meta: dict, original_body: str, result: dict
 
 ## Final Status
 {result.get("status", "blocked")}
+
+## Blocker Code
+{result.get("blocker_code", "none") or "none"}
 
 ## Summary
 {result.get("summary", "No summary provided.")}
@@ -1239,6 +1366,12 @@ def run_tests(cfg: dict, repo: Path, worktree: Path, logfile: Path, queue_summar
     # Override STATUS if tests failed and agent reported complete
     if not passed and re.search(r'^STATUS:\s*complete\s*$', text, re.MULTILINE):
         text = re.sub(r'^STATUS:\s*complete\s*$', 'STATUS: partial', text, flags=re.MULTILINE)
+        text = _upsert_single_value_section(
+            text,
+            "BLOCKER_CODE",
+            "test_failure",
+            ["SUMMARY", "DONE", "BLOCKERS", "NEXT_STEP", "FILES_CHANGED", "TESTS_RUN", "DECISIONS", "RISKS", "ATTEMPTED_APPROACHES", "MANUAL_STEPS"],
+        )
         blocker = f"- Tests failed: {test_command} → {status_label}"
         bm = re.search(r'^BLOCKERS:\s*$', text, re.MULTILINE)
         if bm:
@@ -1271,6 +1404,7 @@ def record_metrics(
         "repo": str(meta.get("repo", "unknown")),
         "agent": final_agent or "unknown",
         "status": final_result.get("status", "unknown"),
+        "blocker_code": final_result.get("blocker_code", ""),
         "attempt_count": len(model_attempts),
         "duration_seconds": round(duration, 1),
         "task_type": meta.get("task_type", "unknown"),
@@ -1301,6 +1435,7 @@ def record_metrics(
 def synthesize_exhausted_result(model_attempts: list[str]) -> dict:
     return {
         "status": "blocked",
+        "blocker_code": "fallback_exhausted",
         "summary": "All configured models for this task type were already tried.",
         "done": ["- Multiple model attempts were made."],
         "blockers": [f"- No remaining fallback models. Tried: {', '.join(model_attempts) if model_attempts else 'none'}"],
@@ -1442,6 +1577,7 @@ def main():
                 timeout_result = {
                     "agent": current_agent,
                     "status": "blocked",
+                    "blocker_code": "timeout",
                     "summary": f"{current_agent} timed out.",
                     "done": ["- Execution started but timed out."],
                     "blockers": ["- Model execution exceeded timeout."],
@@ -1468,6 +1604,7 @@ def main():
                 runner_result = {
                     "agent": current_agent,
                     "status": "blocked",
+                    "blocker_code": _blocker_code_from_runner_failure(failure_summary, failure_detail),
                     "summary": f"{current_agent} failed before producing a valid result file. {failure_summary}",
                     "done": ["- Agent runner was invoked."],
                     "blockers": failure_blockers,
@@ -1680,6 +1817,7 @@ def main():
 
             failure_result = {
                 "status": "blocked",
+                "blocker_code": "environment_failure",
                 "summary": f"Queue execution failed after {max_infra_retries} infrastructure retries: {e}",
                 "done": ["- Task was dispatched and execution started."],
                 "blockers": [f"- Hard execution failure: {e}"],
