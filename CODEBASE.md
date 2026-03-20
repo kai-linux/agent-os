@@ -16,6 +16,16 @@
 
 ## Recent Changes
 
+### 2026-03-20 — [task-20260320-105114-fix-ci-failure-on-pr-71] (#73 kai-linux/agent-os)
+deepseek failed before producing a valid result file. Runner exited with code 1 while executing `/home/kai/agent-os/bin/agent_runner.sh deepseek /srv/worktrees/agent-os/task-20260320-105114-fix-ci-failure-on-pr-71 /home/kai/agent-os/runtime/tmp/task-20260320-105114-fix-ci-failure-on-pr-71.txt`. Classified as: authentication failure. Orchestrator rescued and pushed the worktree changes.
+
+**Files:** `- Unknown / inspect worktree`
+
+**Decisions:**
+  - - Treat runner failure as model-level failure and continue fallback chain if possible.
+  - - Queue performed git rescue after the agent left valid changes behind.
+
+
 ### 2026-03-20 — [task-20260320-101212-auto-file-bounded-follow-ups-for-partial-debug-out] (#60 kai-linux/agent-os)
 Implemented deduped GitHub follow-up creation for partial debugging outcomes and suppressed the local mailbox stub when that GitHub follow-up exists, with a focused regression test covering create-once behavior.
 
