@@ -315,6 +315,28 @@ def _maybe_refresh_backlog_for_early_cycle(cfg: dict, github_slug: str, repo_pat
     return True, f"early-complete with groomer refresh ({result.get('status', 'unknown')})"
 
 
+def _planner_allow_early_refresh(cfg: dict, github_slug: str) -> bool:
+    """Return whether a repo may bypass cadence when its sprint empties early."""
+    allow_early = bool(cfg.get("planner_allow_early_refresh", True))
+
+    for project_cfg in cfg.get("github_projects", {}).values():
+        if not isinstance(project_cfg, dict):
+            continue
+        if "planner_allow_early_refresh" in project_cfg:
+            project_allow_early = bool(project_cfg.get("planner_allow_early_refresh"))
+        else:
+            project_allow_early = allow_early
+
+        for repo_cfg in project_cfg.get("repos", []):
+            if repo_cfg.get("github_repo") != github_slug:
+                continue
+            if "planner_allow_early_refresh" in repo_cfg:
+                return bool(repo_cfg.get("planner_allow_early_refresh"))
+            return project_allow_early
+
+    return allow_early
+
+
 def _format_backlog_for_prompt(issues: list[dict]) -> str:
     """Format backlog issues for the planner prompt."""
     if not issues:
@@ -2713,6 +2735,9 @@ def run():
                 cadence_hours=sprint_cadence_days * 24.0,
             )
             if not due:
+                if not _planner_allow_early_refresh(cfg, github_slug):
+                    print(f"  Skipping {github_slug}: {reason} (strict cadence)")
+                    continue
                 active, active_reason = _has_active_sprint_work(github_slug, cfg)
                 if active:
                     print(f"  Skipping {github_slug}: {reason} ({active_reason})")
