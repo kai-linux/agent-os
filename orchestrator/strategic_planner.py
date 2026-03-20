@@ -740,7 +740,15 @@ def _write_research_artifact(repo_path: Path, artifact_path: Path, sections: lis
             lines.append(f"- {implication}")
         lines.append("")
     artifact_path.parent.mkdir(parents=True, exist_ok=True)
-    artifact_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    updated = "\n".join(lines).rstrip() + "\n"
+    artifact_path.write_text(updated, encoding="utf-8")
+    _commit_repo_markdown_with_retry(
+        repo_path,
+        artifact_path.relative_to(repo_path),
+        updated,
+        f"chore: refresh {artifact_path.name}",
+        f"  {artifact_path.name} updated and pushed for {repo_path.name}",
+    )
 
 
 def _planning_research_context(cfg: dict, github_slug: str, repo_path: Path) -> str:
@@ -934,7 +942,15 @@ def _write_signals_artifact(repo_path: Path, artifact_path: Path, sections: list
             lines.append(f"- {implication}")
         lines.append("")
     artifact_path.parent.mkdir(parents=True, exist_ok=True)
-    artifact_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    updated = "\n".join(lines).rstrip() + "\n"
+    artifact_path.write_text(updated, encoding="utf-8")
+    _commit_repo_markdown_with_retry(
+        repo_path,
+        artifact_path.relative_to(repo_path),
+        updated,
+        f"chore: refresh {artifact_path.name}",
+        f"  {artifact_path.name} updated and pushed for {repo_path.name}",
+    )
 
 
 def _planning_signals_context(cfg: dict, github_slug: str, repo_path: Path) -> str:
@@ -1177,6 +1193,59 @@ def _update_focus_areas_section(content: str, areas: list[str]) -> str:
     return updated
 
 
+def _commit_repo_markdown_with_retry(
+    repo_path: Path,
+    relative_path: Path,
+    target_content: str,
+    commit_message: str,
+    success_message: str,
+    max_attempts: int = 3,
+):
+    """Commit/push repo-local markdown updates without leaving the checkout dirty."""
+    file_path = repo_path / relative_path
+    relative_str = str(relative_path)
+
+    for attempt in range(max_attempts):
+        try:
+            subprocess.run(
+                ["git", "-C", str(repo_path), "add", relative_str],
+                check=True, capture_output=True, text=True,
+            )
+            diff = subprocess.run(
+                ["git", "-C", str(repo_path), "diff", "--cached", "--quiet"],
+                capture_output=True,
+            )
+            if diff.returncode == 0:
+                return
+
+            subprocess.run(
+                ["git", "-C", str(repo_path), "commit", "-m", commit_message],
+                check=True, capture_output=True, text=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(repo_path), "push", "origin", "main"],
+                check=True, capture_output=True, text=True,
+            )
+            print(success_message)
+            return
+        except subprocess.CalledProcessError as e:
+            stderr = (e.stderr or "").strip()
+            if "rejected" in stderr or "non-fast-forward" in stderr:
+                pull = subprocess.run(
+                    ["git", "-C", str(repo_path), "pull", "--rebase", "origin", "main"],
+                    capture_output=True, text=True,
+                )
+                if pull.returncode != 0:
+                    print(f"  Warning: failed to rebase {relative_str} for {repo_path.name}: {pull.stderr.strip()}")
+                    return
+                file_path.write_text(target_content, encoding="utf-8")
+                continue
+            print(f"  Warning: failed to push {relative_str} for {repo_path.name}: {stderr or e}")
+            return
+
+    print(f"  Warning: gave up updating {relative_str} for {repo_path.name} after {max_attempts} attempts")
+
+
 def _update_strategy(
     repo_path: Path,
     repo_name: str,
@@ -1226,30 +1295,13 @@ def _update_strategy(
 
     strategy_md.write_text(updated, encoding="utf-8")
 
-    # Commit and push
-    try:
-        subprocess.run(
-            ["git", "-C", str(repo_path), "add", "STRATEGY.md"],
-            check=True, capture_output=True,
-        )
-        diff = subprocess.run(
-            ["git", "-C", str(repo_path), "diff", "--cached", "--quiet"],
-            capture_output=True,
-        )
-        if diff.returncode == 0:
-            return  # No changes
-        subprocess.run(
-            ["git", "-C", str(repo_path), "commit", "-m",
-             f"chore: update STRATEGY.md — sprint {now}"],
-            check=True, capture_output=True,
-        )
-        subprocess.run(
-            ["git", "-C", str(repo_path), "push", "origin", "main"],
-            check=True, capture_output=True,
-        )
-        print(f"  STRATEGY.md updated and pushed for {repo_name}")
-    except Exception as e:
-        print(f"  Warning: failed to push STRATEGY.md for {repo_name}: {e}")
+    _commit_repo_markdown_with_retry(
+        repo_path,
+        Path("STRATEGY.md"),
+        updated,
+        f"chore: update STRATEGY.md — sprint {now}",
+        f"  STRATEGY.md updated and pushed for {repo_name}",
+    )
 
 
 def _build_retrospective(repo: str, days: int = DEFAULT_SPRINT_CADENCE_DAYS) -> str:
