@@ -288,9 +288,13 @@ def _find_repo_project(cfg: dict, repo: str) -> tuple[str, dict, dict] | tuple[N
 
 
 def _find_open_issue_by_title(repo: str, title: str) -> dict | None:
+    return _find_issue_by_title(repo, title, state="open")
+
+
+def _find_issue_by_title(repo: str, title: str, *, state: str = "open") -> dict | None:
     try:
         issues = gh_json([
-            "issue", "list", "-R", repo, "--state", "open",
+            "issue", "list", "-R", repo, "--state", state,
             "--search", title, "--json", "number,title,url,labels",
             "--limit", "20",
         ]) or []
@@ -345,6 +349,50 @@ def _mark_issue_done(cfg: dict, repo: str, issue_number: int, *, close_issue: bo
         _set_project_issue_status(cfg, repo, issue_number, project_cfg.get("done_value", "Done"))
 
 
+def _mark_issue_in_progress(cfg: dict, repo: str, issue_number: int, *, reopen_issue: bool, comment: str | None = None):
+    _project_key, project_cfg, _repo_cfg = _find_repo_project(cfg, repo)
+    if reopen_issue:
+        try:
+            gh(["issue", "reopen", str(issue_number), "-R", repo], check=False)
+        except Exception as e:
+            print(f"Warning: failed to reopen {repo}#{issue_number}: {e}")
+    edit_issue_labels(
+        repo,
+        issue_number,
+        add=["in-progress", "agent-dispatched"],
+        remove=["blocked", "ready", "done"],
+    )
+    if comment:
+        try:
+            add_issue_comment(repo, issue_number, comment)
+        except Exception as e:
+            print(f"Warning: failed to comment on {repo}#{issue_number}: {e}")
+    if project_cfg:
+        _set_project_issue_status(cfg, repo, issue_number, project_cfg.get("in_progress_value", "In Progress"))
+
+
+def _mark_issue_ready(cfg: dict, repo: str, issue_number: int, *, reopen_issue: bool, comment: str | None = None):
+    _project_key, project_cfg, _repo_cfg = _find_repo_project(cfg, repo)
+    if reopen_issue:
+        try:
+            gh(["issue", "reopen", str(issue_number), "-R", repo], check=False)
+        except Exception as e:
+            print(f"Warning: failed to reopen {repo}#{issue_number}: {e}")
+    edit_issue_labels(
+        repo,
+        issue_number,
+        add=["ready"],
+        remove=["blocked", "in-progress", "agent-dispatched", "done"],
+    )
+    if comment:
+        try:
+            add_issue_comment(repo, issue_number, comment)
+        except Exception as e:
+            print(f"Warning: failed to comment on {repo}#{issue_number}: {e}")
+    if project_cfg:
+        _set_project_issue_status(cfg, repo, issue_number, project_cfg.get("ready_value", "Ready"))
+
+
 def _cleanup_merged_pr_issues(cfg: dict, repo: str, pr: dict):
     pr_number = pr["number"]
     issue_number = _extract_issue_number(pr.get("body", ""))
@@ -368,6 +416,42 @@ def _cleanup_merged_pr_issues(cfg: dict, repo: str, pr: dict):
             close_issue=True,
             comment=f"✅ Resolved automatically after PR #{pr_number} merged.",
         )
+
+
+def _reconcile_open_pr_state(cfg: dict, repo: str, pr: dict, checks: list[dict], state: dict) -> bool:
+    changed = False
+    pr_number = pr["number"]
+    pr_url = pr["url"]
+    issue_number = _extract_issue_number(pr.get("body", ""))
+    remediation_title = f"Fix CI failure on PR #{pr_number}"
+
+    if issue_number:
+        _mark_issue_in_progress(
+            cfg,
+            repo,
+            issue_number,
+            reopen_issue=True,
+        )
+
+    if not _checks_any_failed(checks):
+        return changed
+
+    remediation_issue = _find_issue_by_title(repo, remediation_title, state="all")
+    if remediation_issue and remediation_issue.get("number"):
+        reopen_needed = str(remediation_issue.get("state", "")).upper() != "OPEN"
+        if reopen_needed:
+            _mark_issue_ready(
+                cfg,
+                repo,
+                int(remediation_issue["number"]),
+                reopen_issue=True,
+                comment=f"🔁 Reopened automatically because PR #{pr_number} is still failing CI.",
+            )
+            changed = True
+        if pr_url in state and state[pr_url].get("attempts", 0) >= MAX_MERGE_ATTEMPTS:
+            state.pop(pr_url, None)
+            changed = True
+    return changed
 
 
 def _list_open_ci_remediation_issues(repo: str) -> list[dict]:
@@ -536,22 +620,22 @@ def _handle_ci_failure(cfg: dict, repo: str, pr: dict, checks: list[dict], attem
             print(f"Warning: failed to post comment on #{issue_number}: {e}")
 
         try:
-            edit_issue_labels(repo, issue_number, add=["blocked"], remove=["in-progress", "ready"])
+            edit_issue_labels(repo, issue_number, add=["in-progress", "agent-dispatched"], remove=["blocked", "ready", "done"])
         except Exception as e:
             print(f"Warning: failed to update labels on #{issue_number}: {e}")
 
-        # Set project Status → Blocked
+        # Keep source issue in progress while its PR is still active.
         owner = cfg.get("github_owner", "")
         for project_cfg in cfg.get("github_projects", {}).values():
             for repo_cfg in project_cfg.get("repos", []):
                 if repo_cfg.get("github_repo") != repo:
                     continue
-                blocked_value = project_cfg.get("blocked_value", "Blocked")
+                in_progress_value = project_cfg.get("in_progress_value", "In Progress")
                 try:
                     info = query_project(project_cfg["project_number"], owner)
-                    option_id = info["status_options"].get(blocked_value)
+                    option_id = info["status_options"].get(in_progress_value)
                     if not info["status_field_id"] or not option_id:
-                        print(f"Warning: status option '{blocked_value}' not found in project")
+                        print(f"Warning: status option '{in_progress_value}' not found in project")
                         break
                     issue_url_prefix = f"https://github.com/{repo}/issues/{issue_number}"
                     for item in info["items"]:
@@ -562,7 +646,7 @@ def _handle_ci_failure(cfg: dict, repo: str, pr: dict, checks: list[dict], attem
                                 info["status_field_id"],
                                 option_id,
                             )
-                            print(f"Project status set to '{blocked_value}' for #{issue_number}")
+                            print(f"Project status set to '{in_progress_value}' for #{issue_number}")
                             break
                     else:
                         print(f"Warning: issue #{issue_number} not found in project")
@@ -658,15 +742,17 @@ def monitor_prs():
                 print(f"  PR #{pr_number}: draft, skipping")
                 continue
 
-            if attempts >= MAX_MERGE_ATTEMPTS:
-                print(f"  PR #{pr_number}: max merge attempts reached, skipping")
-                continue
-
             checks = _get_pr_checks(repo, pr_number)
             print(f"  PR #{pr_number} '{pr_title}': {len(checks)} check(s)")
+            if _reconcile_open_pr_state(cfg, repo, pr, checks, state):
+                _save_state(paths, state)
 
             if _checks_any_failed(checks):
-                new_attempts = attempts + 1
+                remediation_issue = _find_open_issue_by_title(repo, f"Fix CI failure on PR #{pr_number}")
+                if remediation_issue:
+                    print(f"  PR #{pr_number}: CI failed and remediation issue #{remediation_issue['number']} is active")
+                    continue
+                new_attempts = min(attempts + 1, MAX_MERGE_ATTEMPTS)
                 state.setdefault(pr_url, {})["attempts"] = new_attempts
                 _save_state(paths, state)
                 print(f"  PR #{pr_number}: CI failed (attempt {new_attempts}/{MAX_MERGE_ATTEMPTS})")
@@ -675,6 +761,10 @@ def monitor_prs():
 
             if not _checks_all_passed(checks):
                 print(f"  PR #{pr_number}: checks pending, will retry next poll")
+                continue
+
+            if attempts >= MAX_MERGE_ATTEMPTS:
+                print(f"  PR #{pr_number}: max merge attempts reached, skipping")
                 continue
 
             mergeable = (pr.get("mergeable") or "").upper()

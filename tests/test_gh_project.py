@@ -169,6 +169,68 @@ def test_cleanup_stale_ci_remediation_issues_for_merged_pr(monkeypatch):
     assert state == {}
 
 
+def test_reconcile_open_pr_state_keeps_source_issue_in_progress(monkeypatch):
+    calls = []
+    monkeypatch.setattr(pm, "_extract_issue_number", lambda body: 64)
+    monkeypatch.setattr(
+        pm,
+        "_mark_issue_in_progress",
+        lambda cfg, repo, issue_number, reopen_issue, comment=None: calls.append((repo, issue_number, reopen_issue)),
+    )
+    monkeypatch.setattr(pm, "_find_issue_by_title", lambda repo, title, state="open": None)
+
+    changed = pm._reconcile_open_pr_state(
+        {},
+        "owner/repo",
+        {"number": 71, "url": "https://github.com/owner/repo/pull/71", "body": "Fixes #64"},
+        [{"name": "test", "state": "SUCCESS", "bucket": "pass"}],
+        {},
+    )
+
+    assert changed is False
+    assert calls == [("owner/repo", 64, True)]
+
+
+def test_reconcile_open_pr_state_reopens_closed_remediation_and_clears_attempts(monkeypatch):
+    source_calls = []
+    ready_calls = []
+    monkeypatch.setattr(pm, "_extract_issue_number", lambda body: 64)
+    monkeypatch.setattr(
+        pm,
+        "_mark_issue_in_progress",
+        lambda cfg, repo, issue_number, reopen_issue, comment=None: source_calls.append((repo, issue_number, reopen_issue)),
+    )
+    monkeypatch.setattr(
+        pm,
+        "_find_issue_by_title",
+        lambda repo, title, state="open": {
+            "number": 73,
+            "title": title,
+            "state": "CLOSED",
+        } if state == "all" else None,
+    )
+    monkeypatch.setattr(
+        pm,
+        "_mark_issue_ready",
+        lambda cfg, repo, issue_number, reopen_issue, comment=None: ready_calls.append((repo, issue_number, reopen_issue, comment)),
+    )
+    state = {"https://github.com/owner/repo/pull/71": {"attempts": 3}}
+
+    changed = pm._reconcile_open_pr_state(
+        {},
+        "owner/repo",
+        {"number": 71, "url": "https://github.com/owner/repo/pull/71", "body": "Fixes #64"},
+        [{"name": "test", "state": "FAILURE", "bucket": "fail"}],
+        state,
+    )
+
+    assert changed is True
+    assert source_calls == [("owner/repo", 64, True)]
+    assert ready_calls and ready_calls[0][1] == 73
+    assert "PR #71 is still failing CI" in ready_calls[0][3]
+    assert state == {}
+
+
 # ---------------------------------------------------------------------------
 # _extract_issue_number
 # ---------------------------------------------------------------------------
