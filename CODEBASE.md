@@ -27,6 +27,13 @@ Added a first-class file-based production feedback substrate that refreshes boun
   - - Made stale, low-trust, and privacy-sensitive inputs inspectable but guarded inside the artifact instead of silently dropping them
   - - Kept the first version file-based and repo-opt-in through `production_feedback` config and `PRODUCTION_FEEDBACK.md`
 
+Added a first-class, file-based production feedback substrate that refreshes bounded repo-local evidence into `PRODUCTION_FEEDBACK.md`, applies freshness/trust/privacy guardrails, and injects the artifact into strategic planning, backlog grooming, and evidence-heavy execution prompts while preserving legacy `planning_signals` compatibility.
+
+**Files:** `- orchestrator/strategic_planner.py`, `- orchestrator/repo_context.py`, `- orchestrator/backlog_groomer.py`, `- README.md`, `- example.config.yaml`, `- .gitignore`, `- tests/test_strategic_planner.py`, `- tests/test_backlog_groomer.py`, `- tests/test_queue.py`
+
+**Decisions:**
+  - - Reused the existing planning-signals refresh path and layered repo-context model instead of introducing a separate memory or ingestion subsystem
+  - - Guarded stale, low-trust, and privacy-sensitive inputs in the artifact itself so evidence stays inspectable without silently driving planning
 
 ### 2026-03-20 — [task-20260320-100911-require-structured-blocker-codes-on-blocked-task-o] (#54 kai-linux/agent-os)
 Added bounded `BLOCKER_CODE` validation and persistence for blocked and partial task outcomes, updated queue-generated fallback outcomes to emit valid codes, and documented the contract without breaking existing readers that ignore unknown fields.

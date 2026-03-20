@@ -97,7 +97,7 @@ Sprint selection is guided by three layers of context:
 
 Execution uses the same context model with different depth:
 - high-level context: `README.md`, `STRATEGY.md`, `PLANNING_PRINCIPLES.md`
-- evidence layer: `PLANNING_RESEARCH.md` when the task is strategic or evidence-driven
+- evidence layers: `PRODUCTION_FEEDBACK.md` and `PLANNING_RESEARCH.md` when the task is strategic or evidence-driven
 - low-level context: `CODEBASE.md`
 
 That keeps context dynamic without collapsing high-level product direction, sprint-local strategy, bounded research, and code-level memory into a single bloated document.
@@ -202,38 +202,57 @@ planning_research:
       kind: repo_reference
       path: ../shared/launch-notes.md
 
-planning_signals:
+production_feedback:
   enabled: true
   max_age_hours: 24
+  stale_after_hours: 72
+  minimum_trust_level: medium
+  allowed_privacy_levels: [public]
   max_inputs: 6
   max_source_chars: 4000
-  allowed_domains: [analytics.example.com, community.example.com, competitor.example.com]
-  artifact_file: PLANNING_SIGNALS.md
+  allowed_domains: [analytics.example.com, community.example.com, status.example.com, app.example.com]
+  artifact_file: PRODUCTION_FEEDBACK.md
   inputs:
     - name: Weekly activation funnel
       type: web
-      input_type: analytics
+      signal_class: analytics
       url: https://analytics.example.com/public/weekly-funnel
       observed_at: 2026-03-19T08:00:00Z
       provenance: Public dashboard snapshot
+      trust_level: high
       trust_note: Aggregated product analytics exported for planning
+      privacy: public
       privacy_note: Aggregated public-safe metrics only
     - name: Community export requests
       type: file
-      input_type: user_feedback
+      signal_class: user_feedback
       path: ../shared/community-feedback.md
       observed_at: 2026-03-18T17:00:00Z
       provenance: Maintainer-curated summary of public issue comments
+      trust_level: medium
       trust_note: Qualitative sample; treat volume as directional
+      privacy: public
       privacy_note: Summary only; no raw user identifiers
-    - name: Competitor pricing
+    - name: Signup flow inspection
       type: web
-      input_type: market_signal
-      url: https://competitor.example.com/pricing
-      observed_at: 2026-03-18T10:00:00Z
-      provenance: Public pricing page
-      trust_note: Public market signal; validate before major roadmap shifts
-      privacy_note: Public web content
+      signal_class: product_inspection
+      url: https://app.example.com/signup
+      observed_at: 2026-03-19T09:30:00Z
+      provenance: Maintainer walkthrough of public product surface
+      trust_level: medium
+      trust_note: Manual inspection; validate before large workflow changes
+      privacy: public
+      privacy_note: Public product surface only
+    - name: Weekly availability summary
+      type: file
+      signal_class: incident_slo
+      path: ../shared/status-summary.md
+      observed_at: 2026-03-19T06:00:00Z
+      provenance: Bounded incident summary exported from status tooling
+      trust_level: high
+      trust_note: Operational summary reviewed by maintainer
+      privacy: public
+      privacy_note: Service-level summary only; no customer-identifying logs
 ```
 
 DeepSeek has its own provider fallback: `openrouter → nanogpt → chutes`. It is kept last in the chain by default because it depends on extra provider configuration and should not consume retries when those providers are unavailable.
@@ -242,7 +261,9 @@ Strategic planning uses its own narrow fallback chain (`planner_agents`) so the 
 
 Repos can opt into bounded pre-planning research with `planning_research`. Before sprint selection, the planner refreshes `PLANNING_RESEARCH.md` only when it is older than `max_age_hours`; otherwise it reuses the existing artifact. Research is intentionally constrained to explicitly configured `https` URLs on allowed domains plus relative repo or repo-adjacent files. There is no search step and no open-ended browsing path.
 
-Repos can also opt into bounded evidence inputs with `planning_signals`. The first version supports only three explicit `input_type` values: `analytics`, `user_feedback`, and `market_signal`. Before sprint selection, the planner normalizes those inputs into `PLANNING_SIGNALS.md` with timestamps, provenance, freshness, trust notes, privacy notes, extracted metrics, and planning implications. This stays safe for public repos by assuming aggregated or public-safe summaries rather than private raw analytics exports.
+Repos can also opt into bounded `production_feedback`. The first version supports explicit signal classes for `analytics`, `user_feedback`, `product_inspection`, and `incident_slo` (with legacy `planning_signals` config still accepted for backward compatibility). Before sprint selection, the planner refreshes `PRODUCTION_FEEDBACK.md` from configured web or file sources, normalizes each entry with source, observed time, freshness, provenance, trust, privacy, and planning implications, and injects that artifact into strategic planning, backlog grooming, and evidence-heavy execution prompts.
+
+Guardrails are explicit and inspectable. Each feedback entry carries `trust_level`, `privacy`, `trust_note`, and `privacy_note`, while repo config sets `minimum_trust_level`, `allowed_privacy_levels`, and `stale_after_hours`. Entries that are stale, too low-trust, or too privacy-sensitive remain visible in the artifact but are marked `Planning Use: guarded`, so they do not silently influence prioritization.
 
 Issues can specify a preferred agent. The dispatcher can auto-detect task type. Priority labels (`prio:high`, `prio:normal`, `prio:low`) influence scheduling order.
 
