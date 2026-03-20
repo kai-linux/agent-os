@@ -1565,7 +1565,7 @@ def _list_pending_plan_actions(actions_dir: Path) -> list[dict]:
             continue
         if action.get("type") != "plan_approval":
             continue
-        if action.get("status") in {"completed", "rejected", "expired"}:
+        if action.get("status") in {"completed", "rejected", "expired", "invalid"}:
             continue
         actions.append(action)
     return actions
@@ -1597,12 +1597,26 @@ def _complete_plan_action(
         print(f"  Applying previously approved plan for {repo} ({action_id})...")
         plan = action.get("plan") or []
         retrospective = action.get("retrospective", "")
+        if not plan:
+            warn_msg = (
+                f"⚠️ Approved sprint plan for {repo} could not be applied because the stored "
+                "proposal did not include a persisted plan payload. A fresh plan will be generated "
+                "on the next eligible cycle."
+            )
+            print(warn_msg)
+            _send_telegram(cfg, warn_msg)
+            action["status"] = "invalid"
+            action["completed_at"] = now
+            action["invalid_reason"] = "approved action missing persisted plan payload"
+            save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
+            return True
         ready_urls, skipped = apply_plan_promotions(cfg, repo, plan)
         sprint_summary = "\n".join(
             f"- [{t.get('priority', '?')}] {t.get('title', '?')}: {t.get('rationale', '')}"
             for t in plan
         )
         _update_strategy(repo_path, repo, sprint_summary, retrospective)
+        record_run(cfg, "strategic_planner", repo)
         summary = (
             f"✅ Approved sprint applied for {repo}\n"
             f"Issues moved to Ready: {len(ready_urls)} | Skipped: {len(skipped)}\n"
@@ -1619,6 +1633,7 @@ def _complete_plan_action(
         skip_msg = f"⏭️ Sprint plan for {repo} was not approved. Skipping this cycle."
         print(skip_msg)
         _send_telegram(cfg, skip_msg)
+        record_run(cfg, "strategic_planner", repo)
         action["status"] = "rejected"
         action["completed_at"] = now
         save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
@@ -1628,6 +1643,7 @@ def _complete_plan_action(
         skip_msg = f"⏭️ Sprint plan for {repo} expired without approval. Skipping this cycle."
         print(skip_msg)
         _send_telegram(cfg, skip_msg)
+        record_run(cfg, "strategic_planner", repo)
         action["status"] = "expired"
         action["expired_at"] = now
         save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
@@ -2069,8 +2085,6 @@ def run():
             action["retrospective"] = retrospective
             save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
 
-            # Count this as a planning run once the approval request exists.
-            record_run(cfg, "strategic_planner", github_slug)
             print(f"  Approval requested for {github_slug}; continuing to other repos until a later cron tick resolves it.")
 
 
