@@ -141,6 +141,8 @@ def test_write_prompt_includes_layered_repo_context(tmp_path):
     assert "Planning Signals (PLANNING_SIGNALS.md)" in text
     assert "Planning Research (PLANNING_RESEARCH.md)" in text
     assert "Codebase Memory (read-only context)" in text
+    snapshot = root / "runtime" / "prompts" / "task-1.txt"
+    assert snapshot.read_text(encoding="utf-8") == text
 
 
 def test_write_prompt_skips_research_for_plain_implementation(tmp_path):
@@ -167,6 +169,8 @@ def test_write_prompt_skips_research_for_plain_implementation(tmp_path):
 
     text = prompt_file.read_text(encoding="utf-8")
     assert "Planning Research (PLANNING_RESEARCH.md)" not in text
+    snapshot = root / "runtime" / "prompts" / "task-2.txt"
+    assert snapshot.read_text(encoding="utf-8") == text
 
 
 # ---------------------------------------------------------------------------
