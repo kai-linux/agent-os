@@ -16,6 +16,16 @@
 
 ## Recent Changes
 
+### 2026-03-20 — [task-20260320-121113-replace-static-fallback-chains-with-adaptive-agent] (#65 kai-linux/agent-os)
+codex failed before producing a valid result file. Runner exited with code 1 while executing `/home/kai/agent-os/bin/agent_runner.sh codex /srv/worktrees/agent-os/task-20260320-121113-replace-static-fallback-chains-with-adaptive-agent /home/kai/agent-os/runtime/tmp/task-20260320-121113-replace-static-fallback-chains-with-adaptive-agent.txt`. Classified as: usage limit / rate limit. Orchestrator rescued and pushed the worktree changes.
+
+**Files:** `- Unknown / inspect worktree`
+
+**Decisions:**
+  - - Treat runner failure as model-level failure and continue fallback chain if possible.
+  - - Queue performed git rescue after the agent left valid changes behind.
+
+
 ### 2026-03-20 — [task-20260320-121011-quarantine-tasks-that-block-repeatedly-within-one-] (#59 kai-linux/agent-os)
 deepseek failed before producing a valid result file. Runner exited with code 1 while executing `/home/kai/agent-os/bin/agent_runner.sh deepseek /srv/worktrees/agent-os/task-20260320-121011-quarantine-tasks-that-block-repeatedly-within-one- /home/kai/agent-os/runtime/tmp/task-20260320-121011-quarantine-tasks-that-block-repeatedly-within-one-.txt`. Classified as: authentication failure. Orchestrator rescued and pushed the worktree changes.
 
