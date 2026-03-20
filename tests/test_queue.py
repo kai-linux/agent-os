@@ -27,6 +27,7 @@ from orchestrator.queue import (
     save_telegram_action,
     split_section,
     telegram_action_expired,
+    verify_pr_ci_debug_completion,
     WorkflowValidationError,
     write_prompt,
 )
@@ -301,6 +302,138 @@ def test_parse_agent_result_partial_accepts_valid_blocker_code():
         result = parse_agent_result(tmp)
         assert result["status"] == "partial"
         assert result["blocker_code"] == "missing_context"
+
+
+def test_verify_pr_ci_debug_completion_requires_post_attempt_rerun(monkeypatch):
+    monkeypatch.setattr(
+        "orchestrator.queue.gh_json",
+        lambda args: {"workflow_runs": []},
+    )
+
+    result = verify_pr_ci_debug_completion(
+        {
+            "task_type": "debugging",
+            "github_repo": "owner/repo",
+            "github_issue_title": "Fix CI failure on PR #71",
+            "branch": "agent/task-71",
+        },
+        textwrap.dedent("""\
+            # Context
+
+            - PR: https://github.com/owner/repo/pull/71
+            - Failed checks:
+            - **pytest**: `failure`
+        """),
+        {"status": "complete", "summary": "fixed", "blockers": ["- None"], "decisions": ["- Kept diff minimal."]},
+        commit_hash="abc123",
+        task_started_at=datetime(2026, 3, 20, 10, 0, tzinfo=timezone.utc),
+    )
+
+    assert result["status"] == "partial"
+    assert result["blocker_code"] == "dependency_blocked"
+    assert result["ci_rerun_reason"] == "missing_rerun"
+    assert "No GitHub Actions workflow rerun was recorded" in result["summary"]
+
+
+def test_verify_pr_ci_debug_completion_requires_passing_rerun_for_prior_failed_job(monkeypatch):
+    def fake_gh_json(args):
+        if args == ["api", "repos/owner/repo/actions/runs?branch=agent/task-71&per_page=20"]:
+            return {
+                "workflow_runs": [
+                    {
+                        "id": 201,
+                        "head_branch": "agent/task-71",
+                        "head_sha": "abc123",
+                        "status": "completed",
+                        "created_at": "2026-03-20T10:15:00Z",
+                    }
+                ]
+            }
+        if args == ["api", "repos/owner/repo/actions/runs/201/jobs?per_page=100"]:
+            return {
+                "jobs": [
+                    {"name": "pytest", "conclusion": "failure"},
+                ]
+            }
+        raise AssertionError(args)
+
+    monkeypatch.setattr("orchestrator.queue.gh_json", fake_gh_json)
+
+    result = verify_pr_ci_debug_completion(
+        {
+            "task_type": "debugging",
+            "github_repo": "owner/repo",
+            "github_issue_title": "Fix CI failure on PR #71",
+            "branch": "agent/task-71",
+        },
+        textwrap.dedent("""\
+            # Context
+
+            - PR: https://github.com/owner/repo/pull/71
+            - Failed checks:
+            - **pytest**: `failure`
+        """),
+        {"status": "complete", "summary": "fixed", "blockers": ["- None"], "decisions": ["- Kept diff minimal."]},
+        commit_hash="abc123",
+        task_started_at=datetime(2026, 3, 20, 10, 0, tzinfo=timezone.utc),
+    )
+
+    assert result["status"] == "partial"
+    assert result["blocker_code"] == "test_failure"
+    assert result["ci_rerun_reason"] == "rerun_failed"
+    assert "pytest" in result["summary"]
+
+
+def test_verify_pr_ci_debug_completion_accepts_green_rerun_for_prior_failed_job(monkeypatch):
+    def fake_gh_json(args):
+        if args == ["api", "repos/owner/repo/actions/runs?branch=agent/task-71&per_page=20"]:
+            return {
+                "workflow_runs": [
+                    {
+                        "id": 202,
+                        "head_branch": "agent/task-71",
+                        "head_sha": "abc123",
+                        "status": "completed",
+                        "created_at": "2026-03-20T10:15:00Z",
+                    }
+                ]
+            }
+        if args == ["api", "repos/owner/repo/actions/runs/202/jobs?per_page=100"]:
+            return {
+                "jobs": [
+                    {"name": "pytest", "conclusion": "success"},
+                ]
+            }
+        raise AssertionError(args)
+
+    monkeypatch.setattr("orchestrator.queue.gh_json", fake_gh_json)
+    original = {
+        "status": "complete",
+        "summary": "fixed",
+        "blockers": ["- None"],
+        "decisions": ["- Kept diff minimal."],
+    }
+
+    result = verify_pr_ci_debug_completion(
+        {
+            "task_type": "debugging",
+            "github_repo": "owner/repo",
+            "github_issue_title": "Fix CI failure on PR #71",
+            "branch": "agent/task-71",
+        },
+        textwrap.dedent("""\
+            # Context
+
+            - PR: https://github.com/owner/repo/pull/71
+            - Failed checks:
+            - **pytest**: `failure`
+        """),
+        original,
+        commit_hash="abc123",
+        task_started_at=datetime(2026, 3, 20, 10, 0, tzinfo=timezone.utc),
+    )
+
+    assert result is original
 
 
 def test_parse_agent_result_manual_steps():
