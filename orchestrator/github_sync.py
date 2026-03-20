@@ -33,6 +33,7 @@ def sync_result(meta: dict, result: dict, commit_hash: str | None):
     status = result.get("status", "blocked")
     summary = redact_text(result.get("summary", "No summary."))
     next_step = redact_text(result.get("next_step", "None"))
+    blocker_code = str(result.get("blocker_code", "")).strip()
     manual_steps = result.get("manual_steps", "").strip()
     has_manual = bool(manual_steps and manual_steps.lower() not in ("- none", "none", ""))
     public_manual_steps = redact_text(manual_steps)
@@ -50,6 +51,9 @@ def sync_result(meta: dict, result: dict, commit_hash: str | None):
 ### Next step
 {next_step}
 """
+
+    if blocker_code:
+        comment += f"\n### Blocker code\n`{blocker_code}`\n"
 
     pr_url = None
     if status == "complete":

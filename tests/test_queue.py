@@ -18,6 +18,7 @@ from orchestrator.queue import (
     parse_agent_result,
     parse_bullets,
     rescue_git_progress,
+    run_tests,
     save_telegram_action,
     split_section,
     telegram_action_expired,
@@ -185,6 +186,9 @@ def test_parse_agent_result_complete():
         _write_result(tmp, textwrap.dedent("""\
             STATUS: complete
 
+            BLOCKER_CODE:
+            none
+
             SUMMARY:
             Implemented the feature.
 
@@ -217,6 +221,7 @@ def test_parse_agent_result_complete():
         """))
         result = parse_agent_result(tmp)
         assert result["status"] == "complete"
+        assert result["blocker_code"] == ""
         assert "Implemented the feature" in result["summary"]
         assert result["files_changed"] == ["- src/foo.py"]
 
@@ -225,6 +230,7 @@ def test_parse_agent_result_missing_file():
     with tempfile.TemporaryDirectory() as d:
         result = parse_agent_result(Path(d))
         assert result["status"] == "blocked"
+        assert result["blocker_code"] == "invalid_result_contract"
         assert "No .agent_result.md" in result["summary"]
 
 
@@ -234,6 +240,57 @@ def test_parse_agent_result_invalid_status_normalised():
         _write_result(tmp, "STATUS: weirdvalue\n\nSUMMARY:\nOops.\n")
         result = parse_agent_result(tmp)
         assert result["status"] == "blocked"
+        assert result["blocker_code"] == "invalid_result_contract"
+
+
+def test_parse_agent_result_blocked_requires_blocker_code():
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d)
+        _write_result(tmp, textwrap.dedent("""\
+            STATUS: blocked
+
+            SUMMARY:
+            Missing spec details.
+
+            DONE:
+            - Investigated the repo
+
+            BLOCKERS:
+            - Missing API contract
+
+            NEXT_STEP:
+            Ask for the missing API contract.
+        """))
+        result = parse_agent_result(tmp)
+        assert result["status"] == "blocked"
+        assert result["blocker_code"] == "invalid_result_contract"
+        assert "must include a valid BLOCKER_CODE" in result["blockers"][0]
+
+
+def test_parse_agent_result_partial_accepts_valid_blocker_code():
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d)
+        _write_result(tmp, textwrap.dedent("""\
+            STATUS: partial
+
+            BLOCKER_CODE:
+            missing_context
+
+            SUMMARY:
+            Made progress but the API contract is missing.
+
+            DONE:
+            - Implemented the scaffolding
+
+            BLOCKERS:
+            - API response schema is undocumented
+
+            NEXT_STEP:
+            Add the schema details and continue.
+        """))
+        result = parse_agent_result(tmp)
+        assert result["status"] == "partial"
+        assert result["blocker_code"] == "missing_context"
 
 
 def test_parse_agent_result_manual_steps():
@@ -241,6 +298,9 @@ def test_parse_agent_result_manual_steps():
         tmp = Path(d)
         _write_result(tmp, textwrap.dedent("""\
             STATUS: complete
+
+            BLOCKER_CODE:
+            none
 
             SUMMARY:
             Done.
@@ -274,6 +334,36 @@ def test_parse_agent_result_manual_steps():
         """))
         result = parse_agent_result(tmp)
         assert "Add cron" in result["manual_steps"]
+
+
+def test_run_tests_marks_complete_result_partial_with_test_failure_code(tmp_path):
+    result_path = tmp_path / ".agent_result.md"
+    result_path.write_text(textwrap.dedent("""\
+        STATUS: complete
+
+        BLOCKER_CODE:
+        none
+
+        SUMMARY:
+        Done.
+
+        DONE:
+        - Implemented it
+
+        BLOCKERS:
+        - None
+
+        NEXT_STEP:
+        None
+    """), encoding="utf-8")
+
+    cfg = {"test_command": "pytest", "test_timeout_minutes": 1}
+    run_tests(cfg, tmp_path, tmp_path, tmp_path / "queue.log", tmp_path / "summary.log")
+
+    updated = result_path.read_text(encoding="utf-8")
+    assert "STATUS: partial" in updated
+    assert "BLOCKER_CODE:\ntest_failure" in updated
+    assert "Tests failed: pytest" in updated
 
 
 def test_build_escalation_message_contains_required_fields():

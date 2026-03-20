@@ -129,6 +129,7 @@ Every agent must write `.agent_result.md` before exiting — the universal contr
 
 ```
 STATUS: complete | partial | blocked
+BLOCKER_CODE: none | missing_context | missing_credentials | environment_failure | dependency_blocked | quota_limited | runner_failure | timeout | test_failure | manual_intervention_required | fallback_exhausted | invalid_result_contract
 SUMMARY: ...
 DONE: ...
 BLOCKERS: ...
@@ -142,6 +143,8 @@ MANUAL_STEPS: ...
 ```
 
 This file is what makes multi-agent collaboration work. When an agent is blocked, the next agent in the fallback chain receives everything the first one tried, what failed, and what to do next. No context is lost between handoffs.
+
+`BLOCKER_CODE` is required whenever `STATUS` is `partial` or `blocked`; `complete` outcomes should use `none`.
 
 `MANUAL_STEPS` (cron entries, config changes, secrets) are surfaced back to GitHub for agent continuity, with secret values redacted.
 
