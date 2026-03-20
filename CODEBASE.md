@@ -16,6 +16,16 @@
 
 ## Recent Changes
 
+### 2026-03-20 — [task-20260320-120812-consume-escalation-note-retry-decisions-in-task-di] (#53 kai-linux/agent-os)
+Implemented structured escalation retry-decision parsing in the dispatcher and wired retry, reroute, and stop actions to the originating blocked task record with traceability fields and bounded GitHub status updates.
+
+**Files:** `- orchestrator/github_dispatcher.py`, `- tests/test_github_dispatcher.py`, `- .agent_result.md`
+
+**Decisions:**
+  - - Kept the change bounded to dispatcher-side parsing and task/action wiring instead of redesigning the escalation note producer
+  - - Stored action and reason directly on the originating task frontmatter and marked notes as applied to preserve traceability and avoid repeated execution
+
+
 ### 2026-03-20 — [task-20260320-113613-fix-ci-failure-on-pr-71] (#73 kai-linux/agent-os)
 Repaired the PR #71 CI failure in the worktree by resolving committed merge-conflict markers in `orchestrator/github_dispatcher.py` and `tests/test_github_dispatcher.py`, preserving both intended behaviors: fallback branch-field retention and outcome-check propagation; local verification is green, but commit/push is blocked by sandbox denial on the worktree Git admin directory. Orchestrator rescued and pushed the worktree changes.
 
