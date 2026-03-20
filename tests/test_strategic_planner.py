@@ -770,7 +770,7 @@ def test_has_active_sprint_work_ignores_blocked_issue_with_stale_active_labels(m
 def test_maybe_refresh_backlog_for_early_cycle_runs_groomer_when_due(monkeypatch, tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
-    monkeypatch.setattr("orchestrator.strategic_planner.is_due", lambda *args, **kwargs: (True, "due"))
+    monkeypatch.setattr("orchestrator.strategic_planner._backlog_issues", lambda *args, **kwargs: [])
     calls = []
     monkeypatch.setattr(
         "orchestrator.strategic_planner.groom_repo",
@@ -788,6 +788,26 @@ def test_maybe_refresh_backlog_for_early_cycle_runs_groomer_when_due(monkeypatch
     assert reason == "early-complete with groomer refresh (created)"
     assert calls == [("owner/repo", repo)]
     assert recorded == [("backlog_groomer", "owner/repo")]
+
+
+def test_maybe_refresh_backlog_for_early_cycle_uses_existing_backlog(monkeypatch, tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setattr(
+        "orchestrator.strategic_planner._backlog_issues",
+        lambda *args, **kwargs: [{"number": 39}, {"number": 40}],
+    )
+    groom_calls = []
+    monkeypatch.setattr(
+        "orchestrator.strategic_planner.groom_repo",
+        lambda cfg, slug, path: groom_calls.append((slug, path)) or {"status": "created"},
+    )
+
+    should_plan, reason = _maybe_refresh_backlog_for_early_cycle({}, "owner/repo", repo)
+
+    assert should_plan is True
+    assert reason == "early-complete with existing backlog (2 candidates)"
+    assert groom_calls == []
 
 
 def test_read_planning_principles_falls_back_to_default(tmp_path):
