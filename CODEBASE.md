@@ -16,6 +16,16 @@
 
 ## Recent Changes
 
+### 2026-03-20 — [task-20260320-100911-require-structured-blocker-codes-on-blocked-task-o] (#54 kai-linux/agent-os)
+Added bounded `BLOCKER_CODE` validation and persistence for blocked and partial task outcomes, updated queue-generated fallback outcomes to emit valid codes, and documented the contract without breaking existing readers that ignore unknown fields.
+
+**Files:** `- orchestrator/queue.py`, `- orchestrator/github_sync.py`, `- tests/test_queue.py`, `- README.md`
+
+**Decisions:**
+  - - Kept the change bounded to the queue contract and downstream persistence points instead of introducing a separate schema module
+  - - Used `invalid_result_contract` as the enforcement path when a blocked or partial outcome omits or misstates `BLOCKER_CODE`
+
+
 ### 2026-03-20 — [task-20260320-100812-persist-worker-prompt-snapshots-for-each-dispatche] (#51 kai-linux/agent-os)
 Persisted each task run's exact final worker prompt to a stable `runtime/prompts/<task_id>.txt` artifact and linked that artifact from task frontmatter so blocked and partial runs keep a reproducible prompt snapshot without agent-specific handling.
 
