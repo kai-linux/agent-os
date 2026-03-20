@@ -1698,8 +1698,9 @@ def main():
             log(f"Metrics recording warning: {e}", logfile, queue_summary_log=QUEUE_SUMMARY_LOG)
 
         # Sync back to GitHub if this task originated from an issue.
+        sync_info = {}
         try:
-            sync_result(meta, final_result, commit_hash)
+            sync_info = sync_result(meta, final_result, commit_hash) or {}
         except Exception as e:
             log(f"GitHub sync warning: {e}", logfile, queue_summary_log=QUEUE_SUMMARY_LOG)
 
@@ -1728,46 +1729,57 @@ def main():
                     QUEUE_SUMMARY_LOG,
                 )
         elif final_result["status"] in ("partial", "blocked"):
-            followup = create_followup_task(
-                meta,
-                body,
-                final_result,
-                logfile,
-                cfg["default_max_attempts"],
-                model_attempts,
-                INBOX,
-                QUEUE_SUMMARY_LOG,
-            )
-            if followup is not None:
+            github_followup_url = sync_info.get("followup_issue_url")
+            if github_followup_url:
                 log("Final queue state: blocked", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
                 shutil.move(str(processing), str(BLOCKED / processing.name))
                 send_telegram(
                     cfg,
-                    f"⏸️ Partial/Blocked\nTask: {task_id}\nRepo: {repo.name}\nBranch: {branch}\nLast model: {final_agent}\nModels tried: {', '.join(model_attempts)}\nNext: {final_result['next_step']}\nFollow-up: {followup.name}",
+                    f"⏸️ Partial/Blocked\nTask: {task_id}\nRepo: {repo.name}\nBranch: {branch}\nLast model: {final_agent}\nModels tried: {', '.join(model_attempts)}\nNext: {final_result['next_step']}\nFollow-up: {github_followup_url}",
                     logfile,
                     QUEUE_SUMMARY_LOG,
                 )
             else:
-                esc = create_escalation_note(meta, body, final_result, logfile, model_attempts, ESCALATED, QUEUE_SUMMARY_LOG)
-                log("No follow-up created. Final queue state: escalated", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
-                shutil.move(str(processing), str(ESCALATED / processing.name))
-                chat_id = str(cfg.get("telegram_chat_id", "")).strip()
-                action = None
-                reply_markup = None
-                if chat_id and meta.get("github_repo") and meta.get("github_issue_number") and meta.get("github_project_key"):
-                    action = create_escalation_action(meta, final_result, esc, chat_id)
-                    save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
-                    reply_markup = escalation_reply_markup(action["action_id"])
-                message_id = send_telegram(
-                    cfg,
-                    build_escalation_message(meta, final_result, esc),
+                followup = create_followup_task(
+                    meta,
+                    body,
+                    final_result,
                     logfile,
+                    cfg["default_max_attempts"],
+                    model_attempts,
+                    INBOX,
                     QUEUE_SUMMARY_LOG,
-                    reply_markup=reply_markup,
                 )
-                if action is not None:
-                    action["message_id"] = message_id
-                    save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
+                if followup is not None:
+                    log("Final queue state: blocked", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
+                    shutil.move(str(processing), str(BLOCKED / processing.name))
+                    send_telegram(
+                        cfg,
+                        f"⏸️ Partial/Blocked\nTask: {task_id}\nRepo: {repo.name}\nBranch: {branch}\nLast model: {final_agent}\nModels tried: {', '.join(model_attempts)}\nNext: {final_result['next_step']}\nFollow-up: {followup.name}",
+                        logfile,
+                        QUEUE_SUMMARY_LOG,
+                    )
+                else:
+                    esc = create_escalation_note(meta, body, final_result, logfile, model_attempts, ESCALATED, QUEUE_SUMMARY_LOG)
+                    log("No follow-up created. Final queue state: escalated", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
+                    shutil.move(str(processing), str(ESCALATED / processing.name))
+                    chat_id = str(cfg.get("telegram_chat_id", "")).strip()
+                    action = None
+                    reply_markup = None
+                    if chat_id and meta.get("github_repo") and meta.get("github_issue_number") and meta.get("github_project_key"):
+                        action = create_escalation_action(meta, final_result, esc, chat_id)
+                        save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
+                        reply_markup = escalation_reply_markup(action["action_id"])
+                    message_id = send_telegram(
+                        cfg,
+                        build_escalation_message(meta, final_result, esc),
+                        logfile,
+                        QUEUE_SUMMARY_LOG,
+                        reply_markup=reply_markup,
+                    )
+                    if action is not None:
+                        action["message_id"] = message_id
+                        save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
         else:
             log("Final queue state: failed", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
             shutil.move(str(processing), str(FAILED / processing.name))
