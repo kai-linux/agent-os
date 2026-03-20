@@ -16,6 +16,16 @@
 
 ## Recent Changes
 
+### 2026-03-20 — [task-20260320-133911-preflight-git-push-readiness-before-dispatching-pu] (#50 kai-linux/agent-os)
+Added a pre-dispatch push-readiness check for publish-requiring issues so the dispatcher blocks those tasks with a dedicated machine-readable `push_not_ready` classification when the runtime or repo is not push-capable.
+
+**Files:** `- orchestrator/github_dispatcher.py`, `- tests/test_github_dispatcher.py`, `- .agent_result.md`
+
+**Decisions:**
+  - - Reused the existing dispatcher skip comment and blocked-label path instead of introducing a new persistence mechanism.
+  - - Kept push readiness bounded to minimum local prerequisites: push enabled, git available, local repo present, git metadata writable, and `origin` configured.
+
+
 ### 2026-03-20 — [task-20260320-133809-add-ci-artifact-capture-for-failing-pr-jobs] (#45 kai-linux/agent-os)
 Updated the existing CI workflow so pull request job failures upload a temporary artifact bundle containing dependency-install, lint, and pytest logs plus a pytest JUnit report when available.
 
