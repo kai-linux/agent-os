@@ -41,6 +41,7 @@ def runtime_paths(cfg: dict):
         "BLOCKED": mailbox / "blocked",
         "ESCALATED": mailbox / "escalated",
         "LOGS": logs,
+        "PROMPTS": ROOT / "runtime" / "prompts",
         "QUEUE_SUMMARY_LOG": logs / "queue-summary.log",
         "TELEGRAM_ACTIONS": ROOT / "runtime" / "telegram_actions",
         "TELEGRAM_OFFSET": ROOT / "runtime" / "telegram_update_offset.txt",
@@ -54,6 +55,7 @@ def runtime_paths(cfg: dict):
         paths["BLOCKED"],
         paths["ESCALATED"],
         paths["LOGS"],
+        paths["PROMPTS"],
         paths["TELEGRAM_ACTIONS"],
     ]:
         p.mkdir(parents=True, exist_ok=True)

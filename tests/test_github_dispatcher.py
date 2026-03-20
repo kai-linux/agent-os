@@ -142,9 +142,10 @@ agent/task-123
     }
 
     monkeypatch.setattr(gd, "format_task", lambda title, body, model=None: None)
-    _task_id, task_md = gd.build_mailbox_task(cfg, "proj", repo_cfg, issue)
+    task_id, task_md = gd.build_mailbox_task(cfg, "proj", repo_cfg, issue)
     assert "base_branch: agent/task-123" in task_md
     assert "branch: agent/task-123" in task_md
+    assert f"prompt_snapshot_path: {Path.cwd() / 'runtime' / 'prompts' / f'{task_id}.txt'}" in task_md
 
 
 def test_dispatch_item_blocks_publish_task_without_push_capability(tmp_path, monkeypatch):
