@@ -607,6 +607,90 @@ def test_planning_signals_context_refreshes_and_writes_artifact(tmp_path, monkey
     assert "Planning Use: included" in context
 
 
+def test_production_feedback_context_auto_generates_from_runtime_substrate(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    metrics_dir = tmp_path / "runtime" / "metrics"
+    metrics_dir.mkdir(parents=True)
+    (metrics_dir / "agent_stats.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "timestamp": "2026-03-19T08:00:00+00:00",
+                        "task_id": "task-blocked",
+                        "repo": "owner/repo",
+                        "agent": "codex",
+                        "status": "blocked",
+                        "blocker_code": "missing_credentials",
+                        "attempt_count": 1,
+                    }
+                ),
+                json.dumps(
+                    {
+                        "timestamp": "2026-03-19T09:00:00+00:00",
+                        "task_id": "task-recovered",
+                        "repo": "owner/repo",
+                        "agent": "claude",
+                        "status": "partial",
+                        "blocker_code": "environment_failure",
+                        "attempt_count": 1,
+                    }
+                ),
+                json.dumps(
+                    {
+                        "timestamp": "2026-03-19T10:00:00+00:00",
+                        "task_id": "task-recovered",
+                        "repo": "owner/repo",
+                        "agent": "claude",
+                        "status": "complete",
+                        "attempt_count": 2,
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (metrics_dir / "outcome_attribution.jsonl").write_text(
+        json.dumps(
+            {
+                "timestamp": "2026-03-19T11:00:00+00:00",
+                "repo": "owner/repo",
+                "interpretation": "improved",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    cfg = {"root_dir": str(tmp_path)}
+
+    context = _production_feedback_context(cfg, "owner/repo", repo)
+    artifact = repo / PRODUCTION_FEEDBACK_ARTIFACT_DEFAULT
+
+    assert artifact.exists()
+    assert "## Recent Failures" in context
+    assert "## Blocked-Task Patterns" in context
+    assert "## Repeat-Recovery Signals" in context
+    assert "missing_credentials: 1" in context
+    assert "completed after retry: 1" in context
+    assert "improved: 1" in context
+
+
+def test_production_feedback_context_writes_no_signals_artifact_when_substrate_empty(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    cfg = {"root_dir": str(tmp_path)}
+
+    context = _production_feedback_context(cfg, "owner/repo", repo)
+    artifact = repo / PRODUCTION_FEEDBACK_ARTIFACT_DEFAULT
+
+    assert artifact.exists()
+    assert "No recent failures were recorded" in context
+    assert "No repeated blocked-task pattern was detected" in context
+    assert "No repeat-recovery signals were recorded" in context
+
+
 def test_build_plan_prompt_includes_production_feedback():
     prompt = _build_plan_prompt(
         plan_size=3,

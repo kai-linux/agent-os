@@ -87,6 +87,7 @@ RESEARCH_FETCH_TIMEOUT_SECONDS = 20
 FEEDBACK_MAX_INPUTS = 6
 FEEDBACK_MAX_SOURCE_CHARS = 4000
 FEEDBACK_CONTEXT_MAX_CHARS = 6000
+PRODUCTION_FEEDBACK_DEFAULT_REFRESH_HOURS = 24
 SIGNAL_INPUT_TYPES = FEEDBACK_SIGNAL_CLASSES
 SIGNALS_MAX_INPUTS = FEEDBACK_MAX_INPUTS
 SIGNALS_MAX_SOURCE_CHARS = FEEDBACK_MAX_SOURCE_CHARS
@@ -824,6 +825,14 @@ def _feedback_artifact_default(feedback_cfg: dict) -> str:
     return PRODUCTION_FEEDBACK_ARTIFACT_DEFAULT
 
 
+def _default_production_feedback_config() -> dict:
+    return {
+        "enabled": True,
+        "max_age_hours": PRODUCTION_FEEDBACK_DEFAULT_REFRESH_HOURS,
+        "_auto_substrate": True,
+    }
+
+
 def _repo_production_feedback_config(cfg: dict, github_slug: str) -> dict:
     """Return merged production feedback config for a repo."""
     feedback_cfg = dict(cfg.get("production_feedback") or {})
@@ -1060,20 +1069,218 @@ def _write_production_feedback_artifact(
     )
 
 
+def _production_feedback_repo_matches(repo_value: str | None, github_slug: str, repo_path: Path) -> bool:
+    value = str(repo_value or "").strip().lower()
+    if not value:
+        return False
+    repo_name = repo_path.name.strip().lower()
+    repo_full_path = str(repo_path).strip().lower()
+    return value in {github_slug.lower(), repo_name, repo_full_path}
+
+
+def _format_feedback_observed_at(value: datetime | None) -> str:
+    return value.strftime("%Y-%m-%d %H:%M UTC") if value else "unspecified"
+
+
+def _format_count_items(counts: dict[str, int], *, empty: str, limit: int = 3) -> list[str]:
+    items = [(name, count) for name, count in counts.items() if name and count > 0]
+    if not items:
+        return [empty]
+    items.sort(key=lambda item: (-item[1], item[0]))
+    return [f"{name}: {count}" for name, count in items[:limit]]
+
+
+def _build_substrate_production_feedback_sections(
+    cfg: dict,
+    github_slug: str,
+    repo_path: Path,
+    window_days: int,
+) -> list[dict]:
+    root = Path(cfg.get("root_dir", ".")).expanduser()
+    metrics_file = root / "runtime" / "metrics" / "agent_stats.jsonl"
+    metric_records = [
+        rec
+        for rec in load_recent_metrics(metrics_file, window_days=window_days)
+        if _production_feedback_repo_matches(rec.get("repo"), github_slug, repo_path)
+    ]
+    outcome_records = [
+        rec
+        for rec in load_outcome_records(cfg, window_days=window_days)
+        if _production_feedback_repo_matches(rec.get("repo"), github_slug, repo_path)
+    ]
+
+    status_counts: dict[str, int] = defaultdict(int)
+    blocker_counts: dict[str, int] = defaultdict(int)
+    agent_failure_counts: dict[str, int] = defaultdict(int)
+    recovery_counts: dict[str, int] = defaultdict(int)
+    outcome_counts: dict[str, int] = defaultdict(int)
+    latest_event: datetime | None = None
+    task_statuses: dict[str, set[str]] = defaultdict(set)
+
+    for rec in metric_records:
+        parsed = _parse_signal_timestamp(rec.get("timestamp"))
+        if parsed and (latest_event is None or parsed > latest_event):
+            latest_event = parsed
+        status = str(rec.get("status") or "").strip().lower()
+        task_id = str(rec.get("task_id") or "").strip()
+        if task_id and status:
+            task_statuses[task_id].add(status)
+        if status in {"partial", "blocked"}:
+            status_counts[status] += 1
+            blocker_code = str(rec.get("blocker_code") or "unspecified").strip().lower() or "unspecified"
+            blocker_counts[blocker_code] += 1
+            agent = str(rec.get("agent") or "unknown").strip().lower() or "unknown"
+            agent_failure_counts[agent] += 1
+        if status == "complete":
+            attempt_count = int(rec.get("attempt_count") or 1)
+            if attempt_count > 1:
+                recovery_counts["completed after retry"] += 1
+
+    for task_id, statuses in task_statuses.items():
+        if "complete" in statuses and ({"partial", "blocked"} & statuses):
+            recovery_counts["completed after prior blocker"] += 1
+
+    for rec in outcome_records:
+        parsed = _parse_signal_timestamp(rec.get("timestamp"))
+        if parsed and (latest_event is None or parsed > latest_event):
+            latest_event = parsed
+        interpretation = str(rec.get("interpretation") or "").strip().lower()
+        if interpretation in OUTCOME_INTERPRETATIONS:
+            outcome_counts[interpretation] += 1
+
+    freshness = _format_freshness_hours(latest_event)
+    observed_at = _format_feedback_observed_at(latest_event)
+    cadence_label = f"last {window_days} day{'s' if window_days != 1 else ''}"
+
+    recent_failures_total = sum(status_counts.values())
+    if recent_failures_total:
+        failure_summary = (
+            f"{recent_failures_total} blocked or partial execution outcomes were recorded for {github_slug} in the {cadence_label}, "
+            f"split across {status_counts.get('blocked', 0)} blocked and {status_counts.get('partial', 0)} partial runs."
+        )
+        failure_implications = [
+            "Treat the dominant blocker classes below as current sprint planning pressure.",
+            "Bias selection toward reliability work that removes the highest-frequency execution interruptions.",
+        ]
+    else:
+        failure_summary = (
+            f"No recent failures were recorded for {github_slug} in the {cadence_label}; the current sprint window shows no blocked or partial execution outcomes."
+        )
+        failure_implications = ["No immediate failure-driven intervention is required from the current sprint window."]
+
+    blocked_patterns_total = sum(blocker_counts.values())
+    if blocked_patterns_total:
+        blocked_summary = (
+            f"Blocked-task patterns are concentrated in {len(blocker_counts)} blocker code(s), with repeat pressure visible in the most common categories below."
+        )
+        blocked_implications = [
+            "Prefer fixes that eliminate repeated blocker codes over one-off task-specific workarounds.",
+        ]
+    else:
+        blocked_summary = (
+            f"No repeated blocked-task pattern was detected for {github_slug} in the {cadence_label}."
+        )
+        blocked_implications = ["No blocker cluster currently stands out as a sprint-planning theme."]
+
+    recovery_total = sum(recovery_counts.values())
+    if recovery_total or outcome_counts:
+        recovery_summary = (
+            f"Recovery signals show {recovery_total} retry-driven completion(s) in the {cadence_label}"
+            + (f", alongside {sum(outcome_counts.values())} recent outcome interpretation snapshot(s)." if outcome_counts else ".")
+        )
+        recovery_implications = [
+            "Keep recovery-path improvements bounded to patterns that recur across multiple tasks or retries.",
+        ]
+    else:
+        recovery_summary = (
+            f"No repeat-recovery signals were recorded for {github_slug} in the {cadence_label}."
+        )
+        recovery_implications = ["The current sprint window does not show evidence of repeated recovery loops."]
+
+    return [
+        {
+            "name": "Recent Failures",
+            "signal_class": "runtime_failure",
+            "location": "runtime/metrics/agent_stats.jsonl",
+            "observed_at": observed_at,
+            "freshness": freshness,
+            "freshness_policy": f"refresh each sprint cycle from the last {window_days}d of runtime metrics",
+            "provenance": "normalized production feedback substrate from runtime metrics",
+            "trust_note": "Repo-local orchestrator metrics generated by the control plane",
+            "privacy_note": "Operational summary only; no raw secrets or user content",
+            "trust_level": "high",
+            "privacy_level": "public",
+            "planning_use": "included",
+            "summary": failure_summary,
+            "key_evidence": [
+                f"Blocked outcomes: {status_counts.get('blocked', 0)}",
+                f"Partial outcomes: {status_counts.get('partial', 0)}",
+                *_format_count_items(agent_failure_counts, empty="No failing agent concentration detected."),
+            ],
+            "planning_implications": failure_implications,
+            "guardrail_note": "included in planning context",
+        },
+        {
+            "name": "Blocked-Task Patterns",
+            "signal_class": "blocked_pattern",
+            "location": "runtime/metrics/agent_stats.jsonl",
+            "observed_at": observed_at,
+            "freshness": freshness,
+            "freshness_policy": f"refresh each sprint cycle from the last {window_days}d of runtime metrics",
+            "provenance": "normalized production feedback substrate from blocker-coded task outcomes",
+            "trust_note": "Derived from persisted task status and blocker-code records",
+            "privacy_note": "Operational summary only; no raw task body content",
+            "trust_level": "high",
+            "privacy_level": "public",
+            "planning_use": "included",
+            "summary": blocked_summary,
+            "key_evidence": _format_count_items(
+                blocker_counts,
+                empty="No blocker-code repetitions were observed in the current sprint window.",
+            ),
+            "planning_implications": blocked_implications,
+            "guardrail_note": "included in planning context",
+        },
+        {
+            "name": "Repeat-Recovery Signals",
+            "signal_class": "recovery_signal",
+            "location": "runtime/metrics/agent_stats.jsonl + runtime/metrics/outcome_attribution.jsonl",
+            "observed_at": observed_at,
+            "freshness": freshness,
+            "freshness_policy": f"refresh each sprint cycle from the last {window_days}d of runtime metrics and outcome records",
+            "provenance": "normalized production feedback substrate from retry metrics and outcome attribution snapshots",
+            "trust_note": "Derived from persisted retry counts and outcome interpretation records",
+            "privacy_note": "Operational summary only; no raw external analytics payloads",
+            "trust_level": "high",
+            "privacy_level": "public",
+            "planning_use": "included",
+            "summary": recovery_summary,
+            "key_evidence": [
+                *_format_count_items(recovery_counts, empty="No retry-driven recoveries were recorded."),
+                *_format_count_items(outcome_counts, empty="No outcome interpretation snapshots were recorded."),
+            ],
+            "planning_implications": recovery_implications,
+            "guardrail_note": "included in planning context",
+        },
+    ]
+
+
 def _production_feedback_context(cfg: dict, github_slug: str, repo_path: Path) -> str:
     """Return normalized production feedback, refreshing the artifact when stale."""
     feedback_cfg = _repo_production_feedback_config(cfg, github_slug)
+    if not feedback_cfg:
+        feedback_cfg = _default_production_feedback_config()
     if not feedback_cfg.get("enabled"):
         return "(production feedback disabled)"
 
     inputs = feedback_cfg.get("inputs", [])
-    if not isinstance(inputs, list) or not inputs:
-        return "(production feedback enabled but no inputs configured)"
+    if not isinstance(inputs, list):
+        inputs = []
 
     artifact_name = str(
         feedback_cfg.get("artifact_file", _feedback_artifact_default(feedback_cfg))
     ).strip() or _feedback_artifact_default(feedback_cfg)
-    refresh_hours = float(feedback_cfg.get("max_age_hours", 24))
+    refresh_hours = float(feedback_cfg.get("max_age_hours", PRODUCTION_FEEDBACK_DEFAULT_REFRESH_HOURS))
     max_inputs = max(1, min(int(feedback_cfg.get("max_inputs", FEEDBACK_MAX_INPUTS)), FEEDBACK_MAX_INPUTS))
     artifact_path = _artifact_path(repo_path, artifact_name)
 
@@ -1083,7 +1290,13 @@ def _production_feedback_context(cfg: dict, github_slug: str, repo_path: Path) -
             content = artifact_path.read_text(encoding="utf-8", errors="replace").strip()
             return content[:FEEDBACK_CONTEXT_MAX_CHARS] if content else "(empty production feedback artifact)"
 
-    sections = []
+    _, sprint_cadence_days = _repo_planner_config(cfg, github_slug)
+    sections = _build_substrate_production_feedback_sections(
+        cfg,
+        github_slug,
+        repo_path,
+        max(1, int(round(sprint_cadence_days))),
+    )
     for signal in inputs[:max_inputs]:
         if not isinstance(signal, dict):
             continue
