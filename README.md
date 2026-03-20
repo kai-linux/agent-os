@@ -20,8 +20,8 @@ Every startup needs roles. Agent OS fills them all:
 | **Project Manager** | `github_dispatcher.py` | Triages the backlog, assigns work, reformats sloppy tickets | Every minute |
 | **Tech Lead** | `queue.py` | Picks the right engineer for the job, manages retries and handoffs | Per task |
 | **Code Reviewer** | `pr_monitor.py` | Watches CI, approves merges, resolves conflicts | Every 5 min |
-| **Analyst** | `log_analyzer.py` | Reviews last week's failures, files bugs against the system itself | Monday 07:00 |
-| **Performance Lead** | `agent_scorer.py` | Scores each engineer's success rate, flags underperformers | Monday 07:00 |
+| **Analyst** | `log_analyzer.py` | Synthesizes one remediation backlog from operational evidence and files issues | Monday 07:00 |
+| **Performance Lead** | `agent_scorer.py` | Scores each engineer's success rate and emits structured degradation findings for the analyzer | Monday 07:00 |
 | **Backlog Groomer** | `backlog_groomer.py` | Prunes stale work, surfaces risks, generates new tasks | Config-driven cadence |
 | **Institutional Memory** | `CODEBASE.md` | Records what was done, why, and what broke — readable by all agents | After every task |
 
@@ -78,9 +78,9 @@ This is the part that makes Agent OS different from a task runner.
 
 Every Monday at 07:00, two things happen automatically:
 
-1. **`log_analyzer.py`** reads the last 7 days of execution metrics and queue logs. It sends them to Claude Haiku and asks: *"What are the top 3 failure patterns?"* For each pattern, it files a GitHub issue with a structured task spec — goal, success criteria, constraints. Those issues land in the backlog.
+1. **`agent_scorer.py`** computes per-model success rates and writes structured degradation findings to `runtime/analysis/agent_scorer_findings.json`. It does not open issues directly.
 
-2. **`agent_scorer.py`** computes per-model success rates. If any agent drops below 60%, it files an issue: *"Agent X degraded (42% success rate)"*. The system investigates its own underperforming workers.
+2. **`log_analyzer.py`** reads the last 7 days of execution metrics, the queue summary log, and the scorer findings artifact. It synthesizes exactly one remediation backlog from that evidence, deduplicates overlapping signals, and files GitHub issues with explicit `## Evidence` and `## Reasoning` sections.
 
 Every Saturday at 20:00:
 
@@ -103,6 +103,11 @@ Execution uses the same context model with different depth:
 That keeps context dynamic without collapsing high-level product direction, sprint-local strategy, bounded research, and code-level memory into a single bloated document.
 
 These generated issues are indistinguishable from human-written ones. They enter the same queue, get dispatched to the same agents, go through the same CI → merge pipeline. The system literally engineers itself.
+
+Ownership is intentionally split:
+- `agent_scorer.py` measures agent performance and emits structured findings only.
+- `log_analyzer.py` owns evidence synthesis, prioritization, deduplication, and remediation issue creation.
+- `backlog_groomer.py` owns backlog hygiene and repo-context-driven task generation, not operational incident synthesis.
 
 ---
 
@@ -309,7 +314,7 @@ agent-os/
 │   ├── codebase_memory.py       # CODEBASE.md read/write per repo
 │   ├── task_formatter.py        # LLM-powered issue → structured task
 │   ├── log_analyzer.py          # Weekly failure analysis → new issues
-│   ├── agent_scorer.py          # Weekly model performance scoring
+│   ├── agent_scorer.py          # Weekly model scoring -> structured findings
 │   ├── backlog_groomer.py       # Weekly backlog hygiene + task generation
 │   └── paths.py                 # Config, path resolution
 ├── bin/                         # Shell entry points for cron
