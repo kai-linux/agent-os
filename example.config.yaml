@@ -1,8 +1,27 @@
 root_dir: "~/agent-os"
 
+# Prefer running from a config copy outside the git repo, for example:
+#   ~/.config/agent-os/config.yaml
+# Then keep repo-specific business objectives in:
+#   ~/.config/agent-os/objectives/<repo>.yaml
+# Keep raw analytics snapshots and other external evidence outside repo control, for example:
+#   ~/.local/share/agent-os/evidence/<repo>/*.json
+
 mailbox_dir: "~/agent-os/runtime/mailbox"
 logs_dir: "~/agent-os/runtime/logs"
 worktrees_dir: "/path/to/worktrees"
+objectives_dir: "~/.config/agent-os/objectives"
+evidence_dir: "~/.local/share/agent-os/evidence"
+
+# Optional explicit overrides when the default objectives_dir lookup is not enough.
+# repo_objectives:
+#   yourname/repo1: "~/.config/agent-os/objectives/repo1.yaml"
+#
+# Objective files define the real business target outside the managed repo, for example:
+# - traffic
+# - conversion
+# - retention
+# - ARPU
 
 allowed_repos:
   - /path/to/repo1
@@ -75,6 +94,7 @@ production_feedback:
   minimum_trust_level: "medium"    # Guardrail: low-trust inputs stay inspectable but do not drive planning
   allowed_privacy_levels:          # Guardrail: restricted inputs stay visible but are excluded from planning use
     - public
+    - internal
   max_inputs: 6                    # Hard cap; keep the first version bounded
   max_source_chars: 4000           # Per-input fetch/read cap before normalization
   allowed_domains:                 # Only used for type=web inputs; host must match
@@ -84,6 +104,8 @@ production_feedback:
     - app.example.com
   artifact_file: "PRODUCTION_FEEDBACK.md"
   inputs:
+    # Objective-defined metrics can be injected automatically from ~/.config/agent-os/objectives/*.yaml.
+    # Keep only additional bounded signals here that are not already part of the objective spec.
     - name: "Weekly activation funnel"
       type: "web"
       signal_class: "analytics"
@@ -131,6 +153,8 @@ outcome_attribution:
   allowed_domains:
     - analytics.example.com
   checks:
+    # Outcome checks can also be injected automatically from the external objective file.
+    # Keep explicit entries here for non-objective checks or legacy setups.
     - id: "activation_rate"
       name: "Activation rate"
       type: "web"
@@ -171,6 +195,8 @@ github_projects:
         sprint_cadence_days: 1      # Daily planning for this repo
         planner_allow_early_refresh: true  # Optional per-repo override
         groomer_cadence_days: 0.5   # Groom every 12 hours for this repo; requires cron to run at least every 12 hours
+        # Pair this repo with ~/.config/agent-os/objectives/repo1.yaml
+        # so planning and scoring are anchored to external business outcomes.
         planning_research:
           enabled: true
           allowed_domains:
@@ -183,6 +209,9 @@ github_projects:
         production_feedback:
           enabled: true
           stale_after_hours: 48
+          allowed_privacy_levels:
+            - public
+            - internal
           allowed_domains:
             - analytics.example.com
           inputs:

@@ -21,7 +21,7 @@ Every startup needs roles. Agent OS fills them all:
 | **Tech Lead** | `queue.py` | Picks the right engineer for the job, manages retries and handoffs | Per task |
 | **Code Reviewer** | `pr_monitor.py` | Watches CI, approves merges, resolves conflicts | Every 5 min |
 | **Analyst** | `log_analyzer.py` | Synthesizes one remediation backlog from operational evidence and files issues | Monday 07:00 |
-| **Performance Lead** | `agent_scorer.py` | Scores each engineer's success rate and emits structured degradation findings for the analyzer | Monday 07:00 |
+| **Performance Lead** | `agent_scorer.py` | Scores execution reliability and business-outcome movement from external objectives, then emits structured findings for the analyzer | Monday 07:00 |
 | **Backlog Groomer** | `backlog_groomer.py` | Prunes stale work, surfaces risks, generates new tasks | Config-driven cadence |
 | **Institutional Memory** | `CODEBASE.md` | Records what was done, why, and what broke — readable by all agents | After every task |
 
@@ -78,7 +78,7 @@ This is the part that makes Agent OS different from a task runner.
 
 Every Monday at 07:00, two things happen automatically:
 
-1. **`agent_scorer.py`** computes per-model success rates and writes structured degradation findings to `runtime/analysis/agent_scorer_findings.json`. It does not open issues directly.
+1. **`agent_scorer.py`** computes execution degradation signals plus weighted business-outcome findings from external repo objectives and writes them to `runtime/analysis/agent_scorer_findings.json`. It does not open issues directly.
 
 2. **`log_analyzer.py`** reads the last 7 days of execution metrics, the queue summary log, and the scorer findings artifact. It synthesizes exactly one remediation backlog from that evidence, deduplicates overlapping signals, and files GitHub issues with explicit `## Evidence` and `## Reasoning` sections.
 
@@ -91,6 +91,123 @@ The planner and groomer are safe to invoke frequently from cron. Each repo has i
 Strategic planning also supports an explicit early-refresh policy. `planner_allow_early_refresh: true` lets a repo refresh its sprint before the next cadence tick when the current sprint has gone idle; `false` enforces strict cadence. The setting can be defined globally, per project, or per repo, with repo overrides winning.
 
 The `bin/` entrypoints bootstrap common user-local CLI install paths themselves, so cron usually does not need per-provider `PATH` or `CLAUDE_BIN` overrides.
+
+Configuration is intentionally split from repo-controlled code. In production, Agent OS should load `~/.config/agent-os/config.yaml` rather than a tracked `config.yaml` inside the repository. Per-repo business objectives live alongside it in `~/.config/agent-os/objectives/<repo>.yaml`, while raw analytics and other external evidence should live in a separate external directory such as `~/.local/share/agent-os/evidence/`. That keeps the true reward surface and private metric sources outside the surfaces agents can push to GitHub.
+
+## Objective Loop
+
+Use this setup for a business-driven repo such as a private web app.
+
+### 1. What To Create
+
+You need 3 things:
+
+1. `~/.config/agent-os/config.yaml`
+2. `~/.config/agent-os/objectives/<repo>.yaml`
+3. external evidence files in `~/.local/share/agent-os/evidence/<repo>/`
+
+### 2. What Each File Does
+
+`config.yaml`
+- tells agent-os where repos are
+- enables planning, production feedback, and outcome attribution
+- points to the objectives directory and evidence directory
+
+`objectives/<repo>.yaml`
+- defines the business objective
+- defines which metrics matter
+- defines their weights
+- defines where the evidence for those metrics lives
+- defines how post-merge outcomes are judged
+
+`evidence/<repo>/*.yaml`
+- contains metric snapshots from GA4 or other external systems
+- is written by your external exporter, not by agent-os
+
+### 3. How To Define The Objective
+
+In `~/.config/agent-os/objectives/<repo>.yaml`, define:
+
+- `primary_outcome`
+- `evaluation_window_days`
+- `metrics`
+
+Each metric should have:
+
+- `id`
+- `name`
+- `weight`
+- `direction`
+- `source`
+- `outcome_check`
+
+For a web app, start with exactly these 4 metrics:
+
+- `traffic`
+- `conversion`
+- `retention`
+- `arpu`
+
+### 4. How To Define Evidence
+
+For each metric, create:
+
+- one `*_latest.yaml` file for planning
+- one `*_post_merge.yaml` file for post-merge outcome measurement
+
+Example minimal set:
+
+- `ga4_traffic_latest.yaml`
+- `ga4_conversion_latest.yaml`
+- `ga4_retention_latest.yaml`
+- `ga4_arpu_latest.yaml`
+
+Add these when you want closed-loop post-merge scoring:
+
+- `ga4_traffic_post_merge.yaml`
+- `ga4_conversion_post_merge.yaml`
+- `ga4_retention_post_merge.yaml`
+- `ga4_arpu_post_merge.yaml`
+
+### 5. How Reward Works
+
+Reward is the weighted business score implied by the objective file.
+
+Example:
+
+- traffic weight: `0.20`
+- conversion weight: `0.35`
+- retention weight: `0.25`
+- arpu weight: `0.20`
+
+If outcomes improve, the score goes positive. If outcomes stay flat, it stays near zero. If outcomes regress, it goes negative.
+
+### 6. How Penalty Works
+
+Penalty is not loss of autonomy. Penalty is negative value in the score.
+
+Current interpretation mapping:
+
+- `improved: 1.0`
+- `unchanged: 0.0`
+- `regressed: -1.0`
+- `inconclusive: -0.35`
+
+So penalty means:
+
+- work shipped
+- measured business outcomes did not improve, or got worse
+- future planning and scoring should treat that direction as less valuable
+
+### 7. Minimal First Version
+
+Start with only:
+
+- [example.config.yaml](/Users/kai/agent-os/example.config.yaml)
+- [example.objective.yaml](/Users/kai/agent-os/example.objective.yaml)
+- 4 GA4 evidence files for `traffic`, `conversion`, `retention`, and `arpu`
+
+Ignore extra signals until the core loop is working.
 
 Sprint selection is guided by three layers of context:
 - `README.md` for the public product goal
@@ -107,7 +224,7 @@ That keeps context dynamic without collapsing high-level product direction, spri
 These generated issues are indistinguishable from human-written ones. They enter the same queue, get dispatched to the same agents, go through the same CI → merge pipeline. The system literally engineers itself.
 
 Ownership is intentionally split:
-- `agent_scorer.py` measures agent performance and emits structured findings only.
+- `agent_scorer.py` measures execution degradation plus business-outcome movement and emits structured findings only.
 - `log_analyzer.py` owns evidence synthesis, prioritization, deduplication, and remediation issue creation.
 - `backlog_groomer.py` owns backlog hygiene and repo-context-driven task generation, not operational incident synthesis.
 
@@ -214,7 +331,7 @@ production_feedback:
   max_age_hours: 24
   stale_after_hours: 72
   minimum_trust_level: medium
-  allowed_privacy_levels: [public]
+  allowed_privacy_levels: [public, internal]
   max_inputs: 6
   max_source_chars: 4000
   allowed_domains: [analytics.example.com, community.example.com, status.example.com, app.example.com]
@@ -292,11 +409,11 @@ Strategic planning uses its own narrow fallback chain (`planner_agents`) so the 
 
 Repos can opt into bounded pre-planning research with `planning_research`. Before sprint selection, the planner refreshes `PLANNING_RESEARCH.md` only when it is older than `max_age_hours`; otherwise it reuses the existing artifact. Research is intentionally constrained to explicitly configured `https` URLs on allowed domains plus relative repo or repo-adjacent files. There is no search step and no open-ended browsing path.
 
-Repos can also opt into bounded `production_feedback`. The first version supports explicit signal classes for `analytics`, `user_feedback`, `product_inspection`, and `incident_slo` (with legacy `planning_signals` config still accepted for backward compatibility). Before sprint selection, the planner refreshes `PRODUCTION_FEEDBACK.md` from configured web or file sources, normalizes each entry with source, observed time, freshness, provenance, trust, privacy, and planning implications, and injects that artifact into strategic planning, backlog grooming, and evidence-heavy execution prompts.
+Repos can also opt into bounded `production_feedback`. The first version supports explicit signal classes for `analytics`, `user_feedback`, `product_inspection`, and `incident_slo` (with legacy `planning_signals` config still accepted for backward compatibility). Before sprint selection, the planner refreshes `PRODUCTION_FEEDBACK.md` from configured web or file sources, plus any objective-derived business metrics, normalizes each entry with source, observed time, freshness, provenance, trust, privacy, and planning implications, and injects that artifact into strategic planning, backlog grooming, and evidence-heavy execution prompts.
 
 Guardrails are explicit and inspectable. Each feedback entry carries `trust_level`, `privacy`, `trust_note`, and `privacy_note`, while repo config sets `minimum_trust_level`, `allowed_privacy_levels`, and `stale_after_hours`. Entries that are stale, too low-trust, or too privacy-sensitive remain visible in the artifact but are marked `Planning Use: guarded`, so they do not silently influence prioritization.
 
-Repos can opt into bounded post-merge measurement with `outcome_attribution`. Issues attach one or more configured check IDs in an `## Outcome Checks` section, for example `- activation_rate`. When the task PR is opened and later merged, Agent OS records the task, issue, PR, and check IDs in `runtime/metrics/outcome_attribution.jsonl`. During planning and retrospectives, the planner refreshes due snapshots from the configured file or public-safe web sources, records a timestamped interpretation (`improved`, `unchanged`, `regressed`, or `inconclusive`), and surfaces that evidence alongside shipped work. If no measurable external metric is attached, the merge is still tracked explicitly as `inconclusive`.
+Repos can opt into bounded post-merge measurement with `outcome_attribution`. Issues attach one or more configured check IDs in an `## Outcome Checks` section, for example `- activation_rate`. When the task PR is opened and later merged, Agent OS records the task, issue, PR, and check IDs in `runtime/metrics/outcome_attribution.jsonl`. During planning and retrospectives, the planner refreshes due snapshots from the configured file or public-safe web sources, records a timestamped interpretation (`improved`, `unchanged`, `regressed`, or `inconclusive`), and surfaces that evidence alongside shipped work. External objective files can inject these checks automatically so merged work is evaluated against business metrics instead of repo-local completion proxies. If no measurable external metric is attached, the merge is still tracked explicitly as `inconclusive`.
 
 Issues can specify a preferred agent. The dispatcher can auto-detect task type. Priority labels (`prio:high`, `prio:normal`, `prio:low`) influence scheduling order.
 
@@ -316,8 +433,9 @@ agent-os/
 │   ├── codebase_memory.py       # CODEBASE.md read/write per repo
 │   ├── task_formatter.py        # LLM-powered issue → structured task
 │   ├── log_analyzer.py          # Weekly failure analysis → new issues
-│   ├── agent_scorer.py          # Weekly model scoring -> structured findings
+│   ├── agent_scorer.py          # Weekly execution + business scoring -> structured findings
 │   ├── backlog_groomer.py       # Weekly backlog hygiene + task generation
+│   ├── objectives.py            # External repo objective loading + scoring
 │   └── paths.py                 # Config, path resolution
 ├── bin/                         # Shell entry points for cron
 ├── tests/                       # Pytest suite (CI runs on every push/PR)
@@ -359,6 +477,7 @@ agent-os/
 | Mechanism | What it prevents |
 |---|---|
 | **Repo allowlist** | Agents can't touch repos not in config |
+| **External config/objectives** | Reward surface and private evidence sources stay outside pushable repo state |
 | **Isolated worktrees** | No shared mutable state between tasks |
 | **Attempt ceilings** | `max_attempts=4` + per-model tracking stops loops |
 | **Structured escalation** | System writes a note and stops — never thrashes |
@@ -376,9 +495,11 @@ git clone https://github.com/yourname/agent-os && cd agent-os
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# 2. Configure
-cp example.config.yaml config.yaml
-# Edit: github_owner, project_number, repo paths, Telegram token
+# 2. Configure outside the repo
+mkdir -p ~/.config/agent-os/objectives ~/.local/share/agent-os/evidence
+cp example.config.yaml ~/.config/agent-os/config.yaml
+cp example.objective.yaml ~/.config/agent-os/objectives/repo1.yaml
+# Edit: github_owner, project_number, repo paths, Telegram token, and the 4 objective metrics
 
 # 3. Authenticate
 gh auth login && gh auth refresh -s project
@@ -386,7 +507,7 @@ gh auth login && gh auth refresh -s project
 
 # 4. Create GitHub Project
 # Add Status field: Backlog · Ready · In Progress · Blocked · Done
-# Note the project number from the URL (/projects/N) → put in config.yaml
+# Note the project number from the URL (/projects/N) → put in ~/.config/agent-os/config.yaml
 
 # 5. Set up cron
 crontab -e

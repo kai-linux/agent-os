@@ -11,6 +11,8 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from orchestrator.objectives import load_repo_objective, objective_metrics, score_objective_snapshots
+from orchestrator.outcome_attribution import load_outcome_records
 from orchestrator.paths import load_config
 
 
@@ -27,6 +29,7 @@ BLOCKER_CAUSE_MAP = {
     "workflow_validation_failed": "environment",
     "test_failure": "environment",
 }
+BUSINESS_SCORE_THRESHOLD = -0.15
 
 
 def load_recent_metrics(metrics_file: Path, window_days: int = WINDOW_DAYS) -> list[dict]:
@@ -334,6 +337,67 @@ def findings_path(root: Path) -> Path:
     return root / "runtime" / "analysis" / FINDINGS_FILENAME
 
 
+def configured_repos(cfg: dict) -> list[tuple[str, Path]]:
+    repos: list[tuple[str, Path]] = []
+    seen: set[tuple[str, str]] = set()
+    for project_cfg in cfg.get("github_projects", {}).values():
+        if not isinstance(project_cfg, dict):
+            continue
+        for repo_cfg in project_cfg.get("repos", []):
+            if not isinstance(repo_cfg, dict):
+                continue
+            github_repo = str(repo_cfg.get("github_repo") or "").strip()
+            local_repo = str(repo_cfg.get("path") or repo_cfg.get("local_repo") or "").strip()
+            if not github_repo or not local_repo:
+                continue
+            key = (github_repo, local_repo)
+            if key in seen:
+                continue
+            seen.add(key)
+            repos.append((github_repo, Path(local_repo).expanduser()))
+    return repos
+
+
+def build_business_objective_findings(cfg: dict) -> list[dict]:
+    findings: list[dict] = []
+    for github_slug, repo_path in configured_repos(cfg):
+        objective = load_repo_objective(cfg, github_slug, repo_path)
+        if not objective or not objective_metrics(objective):
+            continue
+        snapshots = load_outcome_records(
+            cfg,
+            repo=github_slug,
+            window_days=max(7, int(objective.get("evaluation_window_days", WINDOW_DAYS))),
+        )
+        score = score_objective_snapshots(objective, snapshots)
+        if score["score"] > BUSINESS_SCORE_THRESHOLD:
+            continue
+        primary = str(objective.get("primary_outcome") or objective.get("north_star") or "business growth").strip()
+        findings.append({
+            "id": f"business_objective:{github_slug}",
+            "source": "agent_scorer",
+            "kind": "business_objective_regressed",
+            "repo": github_slug,
+            "title_hint": f"Improve measured business outcomes in {github_slug.rsplit('/', 1)[-1]}",
+            "summary": (
+                f"Weighted business outcome score for {github_slug} is {score['score']:+.2f} over the last "
+                f"{score['window_days']} days against the external objective `{primary}`."
+            ),
+            "objective": primary,
+            "metrics": {
+                "score": score["score"],
+                "window_days": score["window_days"],
+                "counts": score["counts"],
+            },
+            "evidence": [
+                f"external objective config: {objective.get('_objective_path', '(unknown)')}",
+                f"weighted_outcome_score={score['score']:+.2f}",
+                f"regressed={score['counts'].get('regressed', 0)}, inconclusive={score['counts'].get('inconclusive', 0)}",
+            ],
+        })
+    return findings
+
+
 def write_findings(path: Path, findings: list[dict]):
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -362,6 +426,7 @@ def run():
         print(f"  {agent}: {pct}% ({stats['successes']}/{stats['total']})")
 
     findings = build_degradation_findings(records)
+    findings.extend(build_business_objective_findings(cfg))
     artifact = findings_path(root)
     write_findings(artifact, findings)
 
