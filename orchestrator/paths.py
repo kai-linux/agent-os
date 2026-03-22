@@ -1,15 +1,43 @@
-from pathlib import Path
 import os
+from pathlib import Path
+
 import yaml
 
 ROOT = Path(os.environ.get("ORCH_ROOT", Path(__file__).resolve().parents[1]))
-CONFIG_PATH = ROOT / "config.yaml"
+CONFIG_ENV_VAR = "AGENT_OS_CONFIG"
+CONFIG_DIR_ENV_VAR = "AGENT_OS_CONFIG_DIR"
+DEFAULT_CONFIG_DIR = Path.home() / ".config" / "agent-os"
+DEFAULT_CONFIG_NAME = "config.yaml"
+
+
+def _config_candidates() -> list[Path]:
+    explicit = os.environ.get(CONFIG_ENV_VAR, "").strip()
+    if explicit:
+        return [Path(explicit).expanduser()]
+
+    explicit_dir = os.environ.get(CONFIG_DIR_ENV_VAR, "").strip()
+    if explicit_dir:
+        return [Path(explicit_dir).expanduser() / DEFAULT_CONFIG_NAME]
+
+    return [
+        DEFAULT_CONFIG_DIR / DEFAULT_CONFIG_NAME,
+        ROOT / DEFAULT_CONFIG_NAME,
+    ]
+
+
+def resolve_config_path() -> Path:
+    for candidate in _config_candidates():
+        if candidate.exists():
+            return candidate
+    return _config_candidates()[0]
 
 
 def load_config():
-    with CONFIG_PATH.open("r", encoding="utf-8") as f:
+    config_path = resolve_config_path()
+    with config_path.open("r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f) or {}
 
+    config_dir = config_path.parent
     cfg.setdefault("root_dir", str(ROOT))
     cfg.setdefault("mailbox_dir", str(ROOT / "runtime" / "mailbox"))
     cfg.setdefault("logs_dir", str(ROOT / "runtime" / "logs"))
@@ -23,16 +51,22 @@ def load_config():
     cfg.setdefault("default_max_attempts", 4)
     cfg.setdefault("github_owner", "")
     cfg.setdefault("github_projects", {})
+    cfg.setdefault("config_dir", str(config_dir))
+    cfg.setdefault("objectives_dir", str(config_dir / "objectives"))
+    cfg.setdefault("evidence_dir", str(Path.home() / ".local" / "share" / "agent-os" / "evidence"))
+    cfg["_config_path"] = str(config_path)
+    cfg["_config_dir"] = str(config_dir)
     return cfg
 
 
 def runtime_paths(cfg: dict):
     mailbox = Path(cfg["mailbox_dir"])
     logs = Path(cfg["logs_dir"])
+    config_path = Path(cfg.get("_config_path") or resolve_config_path())
 
     paths = {
         "ROOT": ROOT,
-        "CONFIG": CONFIG_PATH,
+        "CONFIG": config_path,
         "MAILBOX": mailbox,
         "INBOX": mailbox / "inbox",
         "PROCESSING": mailbox / "processing",

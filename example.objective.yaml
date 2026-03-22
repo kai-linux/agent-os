@@ -1,0 +1,85 @@
+version: 1
+repo: "yourname/repo1"
+product_name: "Example Web App"
+primary_outcome: "Grow profitable user acquisition and monetization"
+evaluation_window_days: 28
+
+# These scores are used when post-merge outcome snapshots are interpreted.
+interpretation_scores:
+  improved: 1.0
+  unchanged: 0.0
+  regressed: -1.0
+  inconclusive: -0.35
+
+metrics:
+  - id: "traffic"
+    name: "Qualified traffic"
+    weight: 0.20
+    direction: "increase"
+    source:
+      type: "file"
+      signal_class: "analytics"
+      path: "~/.local/share/agent-os/evidence/repo1/ga4_traffic_latest.yaml"
+      observed_at: "2026-03-22T08:00:00Z"
+      provenance: "GA4 export written by an external snapshot job"
+      trust_level: "high"
+      privacy: "internal"
+    outcome_check:
+      type: "file"
+      path: "~/.local/share/agent-os/evidence/repo1/ga4_traffic_post_merge.yaml"
+      measurement_window_days: 28
+      comparison_window: "Compare the latest 28-day qualified traffic snapshot against the prior 28-day window."
+
+  - id: "conversion"
+    name: "Signup conversion"
+    weight: 0.35
+    direction: "increase"
+    source:
+      type: "file"
+      signal_class: "analytics"
+      path: "~/.local/share/agent-os/evidence/repo1/ga4_conversion_latest.yaml"
+      observed_at: "2026-03-22T08:00:00Z"
+      provenance: "GA4 export written by an external snapshot job"
+      trust_level: "high"
+      privacy: "internal"
+    outcome_check:
+      type: "file"
+      path: "~/.local/share/agent-os/evidence/repo1/ga4_conversion_post_merge.yaml"
+      measurement_window_days: 14
+      comparison_window: "Compare signup conversion over 14 days after merge versus the prior 14 days."
+
+  - id: "retention"
+    name: "D30 retention"
+    weight: 0.25
+    direction: "increase"
+    source:
+      type: "file"
+      signal_class: "analytics"
+      path: "~/.local/share/agent-os/evidence/repo1/ga4_retention_latest.yaml"
+      observed_at: "2026-03-22T08:00:00Z"
+      provenance: "GA4 export written by an external snapshot job"
+      trust_level: "high"
+      privacy: "internal"
+    outcome_check:
+      type: "file"
+      path: "~/.local/share/agent-os/evidence/repo1/ga4_retention_post_merge.yaml"
+      measurement_window_days: 30
+      comparison_window: "Compare D30 retention for cohorts after the change versus the prior comparable cohort."
+
+  - id: "arpu"
+    name: "ARPU"
+    weight: 0.20
+    direction: "increase"
+    source:
+      type: "file"
+      signal_class: "analytics"
+      path: "~/.local/share/agent-os/evidence/repo1/ga4_arpu_latest.yaml"
+      observed_at: "2026-03-22T08:00:00Z"
+      provenance: "GA4 export written by an external snapshot job"
+      trust_level: "high"
+      privacy: "internal"
+    outcome_check:
+      type: "file"
+      path: "~/.local/share/agent-os/evidence/repo1/ga4_arpu_post_merge.yaml"
+      measurement_window_days: 28
+      comparison_window: "Compare ARPU over the last 28 days against the prior 28-day window."

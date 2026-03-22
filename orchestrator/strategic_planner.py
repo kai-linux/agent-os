@@ -31,6 +31,12 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 from orchestrator.paths import load_config, runtime_paths
+from orchestrator.objectives import (
+    build_objective_scorecard_section,
+    load_repo_objective,
+    objective_feedback_inputs,
+    objective_outcome_checks,
+)
 from orchestrator.agent_scorer import load_recent_metrics
 from orchestrator.gh_project import query_project, set_item_status, edit_issue_labels, ensure_labels
 from orchestrator.queue import (
@@ -1313,13 +1319,23 @@ def _production_feedback_context(cfg: dict, github_slug: str, repo_path: Path) -
             return content[:FEEDBACK_CONTEXT_MAX_CHARS] if content else "(empty production feedback artifact)"
 
     _, sprint_cadence_days = _repo_planner_config(cfg, github_slug)
+    objective = load_repo_objective(cfg, github_slug, repo_path)
     sections = _build_substrate_production_feedback_sections(
         cfg,
         github_slug,
         repo_path,
         max(1, int(round(sprint_cadence_days))),
     )
-    for signal in inputs[:max_inputs]:
+    objective_scorecard = build_objective_scorecard_section(
+        objective,
+        load_outcome_records(cfg, repo=github_slug, window_days=max(1, int(round(sprint_cadence_days)) * 4)),
+    )
+    if objective_scorecard:
+        sections.insert(0, objective_scorecard)
+
+    merged_inputs = objective_feedback_inputs(objective)
+    merged_inputs.extend(list(inputs))
+    for signal in merged_inputs[:max_inputs]:
         if not isinstance(signal, dict):
             continue
         signal_class = str(signal.get("signal_class") or signal.get("input_type") or "").strip().lower()
@@ -1374,18 +1390,43 @@ def _planning_signals_context(cfg: dict, github_slug: str, repo_path: Path) -> s
 
 def _repo_outcome_config(cfg: dict, github_slug: str) -> dict:
     outcome_cfg = dict(cfg.get("outcome_attribution") or {})
+    matched_repo_path: Path | None = None
     for project_cfg in cfg.get("github_projects", {}).values():
         if not isinstance(project_cfg, dict):
             continue
         for repo_cfg in project_cfg.get("repos", []):
             if repo_cfg.get("github_repo") != github_slug:
                 continue
+            local_repo = str(repo_cfg.get("path") or repo_cfg.get("local_repo") or "").strip()
+            if local_repo:
+                matched_repo_path = Path(local_repo).expanduser()
             override = repo_cfg.get("outcome_attribution")
             if isinstance(override, dict):
                 merged = dict(outcome_cfg)
                 merged.update(override)
                 outcome_cfg = merged
-            return outcome_cfg
+            break
+        else:
+            continue
+        break
+    if matched_repo_path is not None:
+        objective = load_repo_objective(cfg, github_slug, matched_repo_path)
+        objective_checks = objective_outcome_checks(objective)
+        if objective_checks:
+            merged = dict(outcome_cfg)
+            existing_checks = [
+                check for check in merged.get("checks", [])
+                if isinstance(check, dict)
+            ]
+            existing_by_id = {
+                str(check.get("id", "")).strip().lower(): check
+                for check in existing_checks
+                if str(check.get("id", "")).strip()
+            }
+            for check in objective_checks:
+                existing_by_id.setdefault(str(check.get("id", "")).strip().lower(), check)
+            merged["checks"] = list(existing_by_id.values())
+            outcome_cfg = merged
     return outcome_cfg
 
 

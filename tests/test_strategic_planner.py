@@ -40,6 +40,7 @@ from orchestrator.strategic_planner import (
     _planning_research_context,
     _production_feedback_context,
     _planning_signals_context,
+    _repo_outcome_config,
     _repo_production_feedback_config,
     _recent_outcome_summary,
     _repo_signals_config,
@@ -753,6 +754,48 @@ def test_production_feedback_context_guards_stale_low_trust_private_inputs(tmp_p
     assert "Guarded:" in context
     assert "trust below minimum" in context
     assert "privacy level restricted not allowed" in context
+
+
+def test_repo_outcome_config_includes_external_objective_checks(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    objectives_dir = tmp_path / "objectives"
+    objectives_dir.mkdir()
+    (objectives_dir / "repo.yaml").write_text(
+        textwrap.dedent("""\
+            repo: owner/repo
+            evaluation_window_days: 28
+            metrics:
+              - id: conversion
+                name: Signup conversion
+                source:
+                  type: file
+                  path: /tmp/conversion-latest.json
+                outcome_check:
+                  type: file
+                  path: /tmp/conversion-post.json
+        """),
+        encoding="utf-8",
+    )
+    cfg = {
+        "objectives_dir": str(objectives_dir),
+        "github_projects": {
+            "demo": {
+                "repos": [
+                    {
+                        "github_repo": "owner/repo",
+                        "path": str(repo),
+                        "outcome_attribution": {"enabled": True, "checks": []},
+                    }
+                ]
+            }
+        },
+    }
+
+    outcome_cfg = _repo_outcome_config(cfg, "owner/repo")
+
+    assert outcome_cfg["enabled"] is True
+    assert outcome_cfg["checks"][0]["id"] == "conversion"
 
 
 def test_recent_outcome_summary_refreshes_snapshot(tmp_path, monkeypatch):
