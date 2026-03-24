@@ -403,6 +403,126 @@ outcome_attribution:
       comparison_window: Compare the post-release comment volume against the prior 3 days
 ```
 
+## Self-improvement
+
+What Each File Does
+
+config.yaml
+
+tells agent-os where repos are
+enables planning, feedback, and outcome attribution
+points to the objectives directory and evidence directory
+objectives/<repo>.yaml
+
+defines the business objective
+defines which metrics matter
+defines their weights
+defines where the evidence for those metrics lives
+defines how post-merge outcomes are judged
+evidence/<repo>/*.yaml
+
+contains the actual metric snapshots from GA4 or other systems
+is written by your external exporter, not by agent-os
+How To Define The Objective
+
+In ~/.config/agent-os/objectives/repo1.yaml, define:
+
+primary_outcome
+Example: Grow profitable user acquisition and monetization
+
+evaluation_window_days
+Example: 28
+
+metrics
+Each metric needs:
+
+id
+name
+weight
+direction
+source
+outcome_check
+For your web app, start with exactly these 4:
+
+traffic
+conversion
+retention
+arpu
+How To Define Evidence
+
+For each metric, create one “latest” evidence file and optionally one “post-merge” evidence file.
+
+Examples:
+
+~/.local/share/agent-os/evidence/repo1/ga4_traffic_latest.yaml
+~/.local/share/agent-os/evidence/repo1/ga4_conversion_latest.yaml
+~/.local/share/agent-os/evidence/repo1/ga4_retention_latest.yaml
+~/.local/share/agent-os/evidence/repo1/ga4_arpu_latest.yaml
+These are for planning.
+
+Then:
+
+~/.local/share/agent-os/evidence/repo1/ga4_traffic_post_merge.yaml
+~/.local/share/agent-os/evidence/repo1/ga4_conversion_post_merge.yaml
+~/.local/share/agent-os/evidence/repo1/ga4_retention_post_merge.yaml
+~/.local/share/agent-os/evidence/repo1/ga4_arpu_post_merge.yaml
+These are for outcome attribution after changes ship.
+
+How Reward Works
+
+Reward is not a separate file.
+Reward is the weighted score implied by the objective.
+
+Example:
+
+traffic weight: 0.20
+conversion weight: 0.35
+retention weight: 0.25
+arpu weight: 0.20
+If outcomes improve:
+
+positive score
+If outcomes stay flat:
+
+near zero
+If outcomes regress:
+
+negative score
+So reward = weighted movement in business metrics.
+
+How Penalty Works
+
+Penalty is also not a separate file.
+Penalty comes from negative interpretations in the objective scoring.
+
+Current interpretation mapping is:
+
+improved: 1.0
+unchanged: 0.0
+regressed: -1.0
+inconclusive: -0.35
+So penalty means:
+
+work shipped
+measured business outcomes did not improve, or got worse
+planner/scorer should treat that direction as less valuable
+This is the correct kind of punishment here:
+not “remove autonomy”
+but “assign negative value to unproductive work”.
+
+What You Actually Do Step By Step
+
+Copy example.config.yaml to ~/.config/agent-os/config.yaml
+Copy example.objective.yaml to ~/.config/agent-os/objectives/repo1.yaml
+Edit the objective so the 4 metrics match your business
+Write a small exporter that dumps GA4 snapshots into ~/.local/share/agent-os/evidence/repo1/
+Enable production_feedback
+Enable outcome_attribution
+Let planner use *_latest.yaml
+Let scorer use *_post_merge.yaml
+
+## Fallbacks
+
 DeepSeek has its own provider fallback: `openrouter → nanogpt → chutes`. It is kept last in the chain by default because it depends on extra provider configuration and should not consume retries when those providers are unavailable.
 
 Strategic planning uses its own narrow fallback chain (`planner_agents`) so the control plane does not stall on a single Claude quota event and does not spray planning work across every model.
