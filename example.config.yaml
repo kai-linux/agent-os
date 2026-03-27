@@ -13,6 +13,8 @@ worktrees_dir: "/path/to/worktrees"
 objectives_dir: "~/.config/agent-os/objectives"
 evidence_dir: "~/.local/share/agent-os/evidence"
 
+automation_mode: full # choose dispatcher_only to skip the sprint loop
+
 # Optional explicit overrides when the default objectives_dir lookup is not enough.
 # repo_objectives:
 #   yourname/repo1: "~/.config/agent-os/objectives/repo1.yaml"
