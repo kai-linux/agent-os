@@ -32,6 +32,7 @@ max_runtime_minutes: 40
 default_base_branch: main
 default_allow_push: true
 default_max_attempts: 4
+automation_mode: full                # full=planner/review/self-healing enabled, dispatcher_only=manual Ready -> dispatch -> PR only
 max_parallel_workers: 1
 test_timeout_minutes: 5             # Timeout for test commands (default: 5)
 
@@ -191,6 +192,7 @@ github_projects:
     repos:
       - github_repo: "yourname/repo1"
         path: "/path/to/repo1"
+        automation_mode: dispatcher_only  # Optional: disable planner/groomer/analyzer/pr_monitor automation for this repo
         plan_size: 3
         sprint_cadence_days: 1      # Daily planning for this repo
         planner_allow_early_refresh: true  # Optional per-repo override

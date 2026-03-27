@@ -21,6 +21,7 @@ from orchestrator.github_sync import sync_result
 from orchestrator.codebase_memory import read_codebase_context, update_codebase_memory
 from orchestrator.gh_project import add_issue_comment, gh, gh_json, query_project, set_item_status
 from orchestrator.repo_context import build_execution_context
+from orchestrator.repo_modes import is_dispatcher_only_repo
 
 
 TELEGRAM_ACTION_TTL_HOURS = 48
@@ -816,6 +817,11 @@ def maybe_emit_self_improvement_events(
             queue_summary_log=queue_summary_log,
         )
     return []
+
+
+def _is_dispatcher_only_task(cfg: dict, meta: dict) -> bool:
+    github_repo = str(meta.get("github_repo", "")).strip()
+    return bool(github_repo) and is_dispatcher_only_repo(cfg, github_repo)
 
 
 def get_issue_title_and_body(repo: str, issue_number: int) -> tuple[str, str]:
@@ -1977,6 +1983,7 @@ def main():
         task_type = meta.get("task_type", cfg["default_task_type"])
         model_attempts = list(meta.get("model_attempts", []))
         prior_results = []
+        dispatcher_only_mode = _is_dispatcher_only_task(cfg, meta)
 
         _priority_label = meta.get("priority", "prio:normal")
         _weights = cfg.get("priority_weights", {"prio:high": 30, "prio:normal": 10, "prio:low": 0})
@@ -2232,14 +2239,16 @@ def main():
         except Exception as e:
             log(f"GitHub sync warning: {e}", logfile, queue_summary_log=QUEUE_SUMMARY_LOG)
 
-        recovery_rerun = maybe_requeue_prompt_inspection_recovery(
-            paths,
-            meta,
-            body,
-            final_result,
-            logfile,
-            QUEUE_SUMMARY_LOG,
-        )
+        recovery_rerun = None
+        if not dispatcher_only_mode:
+            recovery_rerun = maybe_requeue_prompt_inspection_recovery(
+                paths,
+                meta,
+                body,
+                final_result,
+                logfile,
+                QUEUE_SUMMARY_LOG,
+            )
 
         # Update CODEBASE.md memory on the main repo branch after completion.
         if final_result["status"] == "complete":
@@ -2273,7 +2282,22 @@ def main():
                 shutil.move(str(processing), str(BLOCKED / processing.name))
                 send_telegram(
                     cfg,
-                    f"⏸️ Partial/Blocked\nTask: {task_id}\nRepo: {repo.name}\nBranch: {branch}\nLast model: {final_agent}\nModels tried: {', '.join(model_attempts)}\nNext: {final_result['next_step']}\nFollow-up: {github_followup_url}",
+                        f"⏸️ Partial/Blocked\nTask: {task_id}\nRepo: {repo.name}\nBranch: {branch}\nLast model: {final_agent}\nModels tried: {', '.join(model_attempts)}\nNext: {final_result['next_step']}\nFollow-up: {github_followup_url}",
+                        logfile,
+                        QUEUE_SUMMARY_LOG,
+                    )
+            elif dispatcher_only_mode:
+                log(
+                    "Dispatcher-only repo: skipping automated follow-up/escalation for partial/blocked outcome.",
+                    logfile,
+                    also_summary=True,
+                    queue_summary_log=QUEUE_SUMMARY_LOG,
+                )
+                log("Final queue state: blocked", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
+                shutil.move(str(processing), str(BLOCKED / processing.name))
+                send_telegram(
+                    cfg,
+                    f"⏸️ Partial/Blocked\nTask: {task_id}\nRepo: {repo.name}\nBranch: {branch}\nLast model: {final_agent}\nModels tried: {', '.join(model_attempts)}\nNext: {final_result['next_step']}\nAutomation: dispatcher_only (manual requeue required)",
                     logfile,
                     QUEUE_SUMMARY_LOG,
                 )

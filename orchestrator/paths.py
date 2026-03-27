@@ -49,6 +49,7 @@ def load_config():
     cfg.setdefault("default_base_branch", "main")
     cfg.setdefault("default_allow_push", True)
     cfg.setdefault("default_max_attempts", 4)
+    cfg.setdefault("automation_mode", "full")
     cfg.setdefault("github_owner", "")
     cfg.setdefault("github_projects", {})
     cfg.setdefault("config_dir", str(config_dir))

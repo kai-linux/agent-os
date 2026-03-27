@@ -21,6 +21,7 @@ from orchestrator.agent_scorer import (
     load_recent_metrics,
 )
 from orchestrator.paths import load_config, runtime_paths
+from orchestrator.repo_modes import is_dispatcher_only_repo
 
 ANALYSIS_MODEL = "haiku"
 TOP_N = 3
@@ -362,6 +363,10 @@ def run():
     records = load_recent_metrics(metrics_file)
     log_text = _read_log_tail(log_file)
     findings = collect_structured_findings(root, records, default_repo)
+    findings = [
+        finding for finding in findings
+        if not is_dispatcher_only_repo(cfg, str(finding.get("repo") or default_repo).strip() or default_repo)
+    ]
 
     if not records and log_text in ("(no queue log found)", "(empty log)") and not findings:
         print("No data found; skipping analysis.")
@@ -391,6 +396,11 @@ def run():
         title = str(issue.get("title", "")).strip()
         repo = str(issue.get("repo") or default_repo).strip() or default_repo
         labels = [str(label).strip() for label in issue.get("labels", []) if str(label).strip()]
+
+        if is_dispatcher_only_repo(cfg, repo):
+            print(f"Skipping synthesized issue for {repo}: automation_mode=dispatcher_only")
+            skipped.append(title or repo)
+            continue
 
         if not title:
             print("Warning: issue with empty title, skipping")

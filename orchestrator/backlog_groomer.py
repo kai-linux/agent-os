@@ -31,6 +31,7 @@ from orchestrator.repo_context import (
     read_strategy_context,
 )
 from orchestrator.scheduler_state import is_due, record_run, job_lock
+from orchestrator.repo_modes import is_dispatcher_only_repo
 from orchestrator.trust import is_trusted
 
 WINDOW_DAYS = 30
@@ -913,6 +914,11 @@ def run():
         notify = False
 
         for github_slug, repo_path in repos:
+            if is_dispatcher_only_repo(cfg, github_slug):
+                print(f"  Skipping {github_slug}: automation_mode=dispatcher_only")
+                status_counts["skipped"] = status_counts.get("skipped", 0) + 1
+                summaries.append(f"{github_slug}: skipped (automation_mode=dispatcher_only)")
+                continue
             cadence_days = _repo_groomer_cadence_days(cfg, github_slug)
             due, reason = is_due(
                 cfg,

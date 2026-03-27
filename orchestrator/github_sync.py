@@ -15,6 +15,7 @@ from orchestrator.gh_project import (
 )
 from orchestrator.outcome_attribution import append_outcome_record, extract_pr_number
 from orchestrator.privacy import redact_text
+from orchestrator.repo_modes import is_dispatcher_only_repo
 
 
 def _find_repo_project(cfg: dict, repo: str) -> tuple[dict, dict] | tuple[None, None]:
@@ -94,6 +95,8 @@ def _maybe_create_partial_debug_followup(meta: dict, result: dict, cfg: dict) ->
     task_id = meta.get("task_id")
     next_step = str(result.get("next_step", "")).strip()
     if not repo or not issue_number or not task_id or not next_step or next_step.lower() == "none":
+        return None
+    if is_dispatcher_only_repo(cfg, str(repo)):
         return None
 
     title = f"Follow up partial debug for {task_id}"

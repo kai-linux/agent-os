@@ -23,6 +23,7 @@ from orchestrator.gh_project import (
     gh_json,
 )
 from orchestrator.privacy import redact_text
+from orchestrator.repo_modes import is_dispatcher_only_repo
 
 MAX_MERGE_ATTEMPTS = 3
 STATE_FILE_NAME = "pr_monitor_state.json"
@@ -751,7 +752,7 @@ def monitor_prs():
     for project_cfg in cfg.get("github_projects", {}).values():
         for repo_cfg in project_cfg.get("repos", []):
             r = repo_cfg.get("github_repo")
-            if r:
+            if r and not is_dispatcher_only_repo(cfg, r):
                 repos.add(r)
 
     if not repos:

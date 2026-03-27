@@ -199,6 +199,92 @@ def test_sync_result_partial_pr_ci_recovery_keeps_branch_handoff_and_ready_follo
     assert comments and "### Follow-up issue\nhttps://github.com/owner/repo/issues/88" in comments[0][2]
 
 
+def test_sync_result_dispatcher_only_skips_partial_debug_followup(monkeypatch):
+    comments = []
+    label_calls = []
+    project_status_calls = []
+
+    monkeypatch.setattr(github_sync, "load_config", lambda: {
+        "github_owner": "owner",
+        "github_projects": {
+            "proj": {
+                "project_number": 1,
+                "repos": [
+                    {
+                        "github_repo": "owner/repo",
+                        "local_repo": "/tmp/repo",
+                        "automation_mode": "dispatcher_only",
+                    }
+                ],
+                "blocked_value": "Blocked",
+            }
+        },
+    })
+    monkeypatch.setattr(
+        github_sync,
+        "edit_issue_labels",
+        lambda repo, issue, add=None, remove=None: label_calls.append(
+            {"repo": repo, "issue": issue, "add": add, "remove": remove}
+        ),
+    )
+    monkeypatch.setattr(github_sync, "create_pr_for_branch", lambda *args, **kwargs: None)
+    monkeypatch.setattr(github_sync, "add_issue_comment", lambda repo, number, body: comments.append((repo, number, body)))
+    monkeypatch.setattr(
+        github_sync,
+        "query_project",
+        lambda *args, **kwargs: {
+            "project_id": "proj-id",
+            "status_field_id": "status-field",
+            "status_options": {"Blocked": "blocked-option"},
+            "items": [{"url": "https://github.com/owner/repo/issues/73", "item_id": "item-73"}],
+        },
+    )
+    monkeypatch.setattr(
+        github_sync,
+        "set_item_status",
+        lambda project_id, item_id, field_id, option_id: project_status_calls.append((item_id, option_id)),
+    )
+    monkeypatch.setattr(github_sync, "_create_issue", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("follow-up issue should not be created")))
+
+    meta = {
+        "task_id": "task-123",
+        "task_type": "debugging",
+        "branch": "agent/task-123",
+        "base_branch": "main",
+        "github_project_key": "proj",
+        "github_repo": "owner/repo",
+        "github_issue_number": 73,
+        "github_issue_url": "https://github.com/owner/repo/issues/73",
+    }
+    result = {
+        "status": "partial",
+        "summary": "Still failing.",
+        "next_step": "Retry after narrowing the parser failure.",
+        "blocker_code": "test_failure",
+        "done": ["- Added logs."],
+        "blockers": ["- Repro still unstable."],
+        "files_changed": ["- orchestrator/queue.py"],
+        "tests_run": ["- pytest -> failed"],
+        "attempted_approaches": ["- Broader logging."],
+        "manual_steps": "- None",
+    }
+
+    sync = github_sync.sync_result(meta, result, None)
+
+    assert sync["followup_issue_url"] is None
+    assert label_calls == [
+        {
+            "repo": "owner/repo",
+            "issue": 73,
+            "add": ["blocked"],
+            "remove": ["in-progress", "ready", "agent-dispatched"],
+        }
+    ]
+    assert project_status_calls == [("item-73", "blocked-option")]
+    assert comments
+    assert "### Follow-up issue" not in comments[0][2]
+
+
 def _cfg() -> dict:
     return {
         "github_owner": "kai-linux",
