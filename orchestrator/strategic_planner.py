@@ -53,6 +53,7 @@ from orchestrator.outcome_attribution import (
     append_outcome_record,
     load_outcome_records,
 )
+from orchestrator.repo_modes import is_dispatcher_only_repo
 from orchestrator.repo_context import read_north_star
 from orchestrator.trust import is_trusted
 
@@ -2757,6 +2758,9 @@ def run():
             print("Planning order: " + " -> ".join(github_slug for github_slug, _ in repos))
 
         for github_slug, repo_path in repos:
+            if is_dispatcher_only_repo(cfg, github_slug):
+                print(f"  Skipping {github_slug}: automation_mode=dispatcher_only")
+                continue
             _, sprint_cadence_days = _repo_planner_config(cfg, github_slug)
             pending_action = _repo_pending_plan_action(paths["TELEGRAM_ACTIONS"], github_slug)
             if sprint_cadence_days <= 0:

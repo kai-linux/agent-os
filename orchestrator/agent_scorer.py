@@ -14,6 +14,7 @@ from pathlib import Path
 from orchestrator.objectives import load_repo_objective, objective_metrics, score_objective_snapshots
 from orchestrator.outcome_attribution import load_outcome_records
 from orchestrator.paths import load_config
+from orchestrator.repo_modes import is_dispatcher_only_repo
 
 
 DEGRADED_THRESHOLD = 0.60
@@ -350,6 +351,8 @@ def configured_repos(cfg: dict) -> list[tuple[str, Path]]:
             local_repo = str(repo_cfg.get("path") or repo_cfg.get("local_repo") or "").strip()
             if not github_repo or not local_repo:
                 continue
+            if is_dispatcher_only_repo(cfg, github_repo):
+                continue
             key = (github_repo, local_repo)
             if key in seen:
                 continue
@@ -415,6 +418,15 @@ def run():
     metrics_file = root / "runtime" / "metrics" / "agent_stats.jsonl"
 
     records = load_recent_metrics(metrics_file)
+    eligible_repos = {github_slug for github_slug, _repo_path in configured_repos(cfg)}
+    if eligible_repos:
+        filtered_records = []
+        for rec in records:
+            repo_slug = _repo_slug(rec)
+            if repo_slug and repo_slug not in eligible_repos:
+                continue
+            filtered_records.append(rec)
+        records = filtered_records
     if not records:
         print(f"No metrics found in {metrics_file} for the past {WINDOW_DAYS} days.")
         return

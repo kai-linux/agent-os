@@ -90,6 +90,8 @@ The planner and groomer are safe to invoke frequently from cron. Each repo has i
 
 Strategic planning also supports an explicit early-refresh policy. `planner_allow_early_refresh: true` lets a repo refresh its sprint before the next cadence tick when the current sprint has gone idle; `false` enforces strict cadence. The setting can be defined globally, per project, or per repo, with repo overrides winning.
 
+Repos can also opt into a manual execution lane with `automation_mode: dispatcher_only`. In that mode, Agent OS still accepts human-created issues, dispatches work when you move an issue to `Ready`, and opens PRs on completion, but it skips the planner, backlog groomer, weekly analyzer/scorer issue generation, PR auto-merge/CI remediation, and queue-generated self-healing follow-up tasks for that repo.
+
 The `bin/` entrypoints bootstrap common user-local CLI install paths themselves, so cron usually does not need per-provider `PATH` or `CLAUDE_BIN` overrides.
 
 Configuration is intentionally split from repo-controlled code. In production, Agent OS should load `~/.config/agent-os/config.yaml` rather than a tracked `config.yaml` inside the repository. Per-repo business objectives live alongside it in `~/.config/agent-os/objectives/<repo>.yaml`, while raw analytics and other external evidence should live in a separate external directory such as `~/.local/share/agent-os/evidence/`. That keeps the true reward surface and private metric sources outside the surfaces agents can push to GitHub.
@@ -237,6 +239,8 @@ Ownership is intentionally split:
 A human (or the system) creates a GitHub Issue. It can be a polished spec or a one-line note — the dispatcher's LLM formatter will restructure it into a proper task with goal, success criteria, constraints, and agent preference.
 
 Set the Project status to **Ready** (or add the `ready` label — either triggers dispatch).
+
+If you want only this manual `Ready -> dispatch -> PR` flow for a repo, set that repo's `automation_mode` to `dispatcher_only` in config.
 
 ### 2. Execution
 
