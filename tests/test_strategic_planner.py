@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import textwrap
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -614,12 +615,13 @@ def test_production_feedback_context_auto_generates_from_runtime_substrate(tmp_p
     repo.mkdir()
     metrics_dir = tmp_path / "runtime" / "metrics"
     metrics_dir.mkdir(parents=True)
+    base = datetime.now(tz=timezone.utc) - timedelta(hours=4)
     (metrics_dir / "agent_stats.jsonl").write_text(
         "\n".join(
             [
                 json.dumps(
                     {
-                        "timestamp": "2026-03-19T08:00:00+00:00",
+                        "timestamp": base.isoformat(),
                         "task_id": "task-blocked",
                         "repo": "owner/repo",
                         "agent": "codex",
@@ -630,7 +632,7 @@ def test_production_feedback_context_auto_generates_from_runtime_substrate(tmp_p
                 ),
                 json.dumps(
                     {
-                        "timestamp": "2026-03-19T09:00:00+00:00",
+                        "timestamp": (base + timedelta(hours=1)).isoformat(),
                         "task_id": "task-recovered",
                         "repo": "owner/repo",
                         "agent": "claude",
@@ -641,7 +643,7 @@ def test_production_feedback_context_auto_generates_from_runtime_substrate(tmp_p
                 ),
                 json.dumps(
                     {
-                        "timestamp": "2026-03-19T10:00:00+00:00",
+                        "timestamp": (base + timedelta(hours=2)).isoformat(),
                         "task_id": "task-recovered",
                         "repo": "owner/repo",
                         "agent": "claude",
@@ -657,7 +659,7 @@ def test_production_feedback_context_auto_generates_from_runtime_substrate(tmp_p
     (metrics_dir / "outcome_attribution.jsonl").write_text(
         json.dumps(
             {
-                "timestamp": "2026-03-19T11:00:00+00:00",
+                "timestamp": (base + timedelta(hours=3)).isoformat(),
                 "repo": "owner/repo",
                 "interpretation": "improved",
             }
