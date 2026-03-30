@@ -638,6 +638,7 @@ crontab -e
 ```
 
 ```cron
+* * * * *   /path/to/agent-os/bin/run_autopull.sh      >> logs/autopull.log 2>&1
 * * * * *   /path/to/agent-os/bin/run_dispatcher.sh  >> runtime/logs/dispatcher.log 2>&1
 * * * * *   /path/to/agent-os/bin/run_queue.sh        >> runtime/logs/cron.log 2>&1
 */5 * * * * /path/to/agent-os/bin/run_pr_monitor.sh   >> runtime/logs/pr_monitor.log 2>&1
@@ -646,6 +647,8 @@ crontab -e
 0 7 * * 1   /path/to/agent-os/bin/run_log_analyzer.sh >> runtime/logs/log_analyzer.log 2>&1
 0 7 * * 1   /path/to/agent-os/bin/run_agent_scorer.sh >> runtime/logs/agent_scorer.log 2>&1
 ```
+
+Each wrapper writes a timestamp banner to stderr before execution, so the log file for each cron job gets a clear per-run datetime marker automatically.
 
 Create your first issue. Set it to Ready. Watch the system work.
 

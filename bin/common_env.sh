@@ -59,3 +59,8 @@ export CODEX_BIN="${CODEX_BIN:-$(pick_bin "${CODEX_BIN:-}" codex)}"
 export CLAUDE_BIN="${CLAUDE_BIN:-$(pick_bin "${CLAUDE_BIN:-}" claude)}"
 export GEMINI_BIN="${GEMINI_BIN:-$(pick_bin "${GEMINI_BIN:-}" gemini)}"
 export CLINE_BIN="${CLINE_BIN:-$(pick_bin "${CLINE_BIN:-}" cline)}"
+
+log_cron_start() {
+  local job_name="${1:-$(basename "$0")}"
+  printf '[%s] %s start\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$job_name" >&2
+}
