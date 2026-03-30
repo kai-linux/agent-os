@@ -10,7 +10,7 @@ Make sure `PATH` includes the directories for `gh`, `codex`, `claude`, `gemini`,
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 # Auto-pull latest orchestrator code
-* * * * * cd /path/to/agent-os && git pull > /path/to/agent-os/logs/autopull.log 2>&1
+* * * * * /path/to/agent-os/bin/run_autopull.sh >> /path/to/agent-os/logs/autopull.log 2>&1
 
 # Dispatch ready issues from GitHub Project → mailbox
 * * * * * /path/to/agent-os/bin/run_dispatcher.sh >> /path/to/agent-os/runtime/logs/dispatcher.log 2>&1
@@ -44,6 +44,8 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # cron must also run at least every 15 min.
 0 * * * * /path/to/agent-os/bin/run_strategic_planner.sh >> /path/to/agent-os/runtime/logs/strategic_planner.log 2>&1
 ```
+
+Each wrapper emits a timestamp banner like `[2026-03-30T12:34:56+0200] queue start` to stderr before running, so the existing `>> ... 2>&1` redirection captures one timestamped entry per cron invocation.
 
 ## What each job does
 

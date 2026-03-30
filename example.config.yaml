@@ -186,7 +186,8 @@ github_project_blocked_value: "Blocked"
 github_project_done_value: "Done"
 
 github_repos:
-  repo1: "repo1"
+  repo1: "yourname/repo1"
+  repo2: "yourname/repo2"
 
 github_projects:
   example-project:
@@ -194,7 +195,7 @@ github_projects:
     repos:
       - github_repo: "yourname/repo1"
         path: "/path/to/repo1"
-        automation_mode: dispatcher_only  # Optional: disable planner/groomer/analyzer/pr_monitor automation for this repo
+        automation_mode: full             # Full automation: planner/groomer/analyzer/pr_monitor stay enabled
         plan_size: 3
         sprint_cadence_days: 1      # Daily planning for this repo
         planner_allow_early_refresh: true  # Optional per-repo override
@@ -236,6 +237,20 @@ github_projects:
               url: "https://analytics.example.com/repo1-post-merge"
               measurement_window_days: 7
               comparison_window: "Compare 7 days after merge vs 7 days before merge"
+      - github_repo: "yourname/repo2"
+        path: "/path/to/repo2"
+        automation_mode: dispatcher_only  # Dispatch only: manual Ready -> dispatch -> PR, no planner/groomer/analyzer/pr_monitor
+        plan_size: 5
+        sprint_cadence_days: 0            # Dormant because this repo is dispatch-only
+        groomer_cadence_days: 0           # Dormant because this repo is dispatch-only
+        # Pair this repo with ~/.config/agent-os/objectives/repo2.yaml if you still want
+        # external objective scoring for manually dispatched work.
+        planning_research:
+          enabled: false
+        production_feedback:
+          enabled: false
+        outcome_attribution:
+          enabled: false
 
 telegram_bot_token: "YOUR_TELEGRAM_BOT_TOKEN"
 telegram_chat_id: "YOUR_CHAT_ID"

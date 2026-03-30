@@ -8,6 +8,8 @@ set -euo pipefail
 export DEEPSEEK_RUNNER="$ROOT/bin/run_deepseek.sh"
 export GEMINI_MODEL="gemini-2.5-flash"
 
+log_cron_start "queue"
+
 cd "$ROOT"
 
 flock -n /tmp/agent_os_queue.lock \

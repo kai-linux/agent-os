@@ -9,5 +9,7 @@ set -euo pipefail
 # shellcheck source=bin/common_env.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common_env.sh"
 
+log_cron_start "log_analyzer"
+
 cd "$ROOT"
 "$ROOT/.venv/bin/python3" -m orchestrator.log_analyzer
