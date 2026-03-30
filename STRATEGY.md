@@ -4,15 +4,20 @@
 
 ## Product Vision
 
-# Agent OS
+Agent OS should win by being the most credible autonomous software
+organization for technical founders and solo builders.
 
-> What if you could hire an entire engineering team that works 24/7, never calls in sick, debugs its own failures, writes its own improvement tickets, and gets better every week — without you ever opening a laptop?
+The strategic target is not raw GitHub stars. Stars matter, but only as a
+lagging public signal. The real objective is trusted adoption: more builders
+trying Agent OS, getting to first value quickly, watching it ship useful work,
+and believing it can improve itself without collapsing into operational noise.
 
-Agent OS is that team.
+That means sprint selection should favor work that increases:
 
-It's not a copilot. It's not a chatbot. It's a **fully autonomous software organization** — staffed by AI agents, managed by cron, coordinated through GitHub, and designed to run indefinitely without human input.
-
-You give it a backlog. It ships pr
+- execution reliability and recovery quality
+- evidence-driven planning and measurable post-merge learning
+- onboarding clarity, demos, and public proof that the system works
+- sustained operator trust, not just short-term attention spikes
 
 ## Current Focus Areas
 
@@ -22,8 +27,9 @@ You give it a backlog. It ships pr
 
 <!-- auto-focus-areas -->
 - Harden execution reliability by reducing CI, publish, and control-plane failure modes before tasks run or close
+- Improve activation and product credibility through clearer strategy, stronger docs, and public proof of shipped autonomous work
 - Close the loop on blocked and partial work with structured recovery, reruns, quarantines, and bounded follow-ups
-- Strengthen evidence-driven planning through automated research, production-feedback, and sprint-derived strategy artifacts
+- Strengthen evidence-driven planning through automated research, production-feedback, objective scoring, and sprint-derived strategy artifacts
 - Improve observability and auditability with prompt snapshots, outcome attribution, blocker codes, and failure artifact capture
 - Advance agent autonomy through better task decomposition, dependency handling, adaptive routing, and multi-repo planning
 
@@ -256,5 +262,4 @@ PRs merged:
 
 **Plan:**
 - [prio:high] Bootstrap STRATEGY.md from repo state: This week should establish product foundations, and an auto-generated initial strategy closes the biggest planning gap by giving the strategic planner a durable source of direction instead of operating without a strategy document.
-
 
