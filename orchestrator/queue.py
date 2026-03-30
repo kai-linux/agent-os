@@ -1550,9 +1550,20 @@ def parse_agent_result(worktree: Path):
     }
 
 
+def _repo_agent_fallbacks(meta: dict, cfg: dict) -> dict:
+    project_key = str(meta.get("github_project_key", "")).strip()
+    if project_key:
+        project_cfg = cfg.get("github_projects", {}).get(project_key, {})
+        if isinstance(project_cfg, dict):
+            fallbacks = project_cfg.get("agent_fallbacks", {})
+            if isinstance(fallbacks, dict):
+                return fallbacks
+    return {}
+
+
 def get_agent_chain(meta: dict, cfg: dict) -> list[str]:
     task_type = meta.get("task_type", cfg["default_task_type"])
-    fallback_map = cfg.get("agent_fallbacks", {})
+    fallback_map = _repo_agent_fallbacks(meta, cfg) or cfg.get("agent_fallbacks", {})
     task_chain = list(fallback_map.get(task_type, fallback_map.get(cfg["default_task_type"], ["codex", "claude", "gemini", "deepseek"])))
 
     requested = str(meta.get("agent", cfg["default_agent"])).strip().lower()

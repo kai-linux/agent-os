@@ -118,6 +118,35 @@ def test_get_agent_chain_skips_unavailable_deepseek(monkeypatch):
     assert chain == ["claude", "codex"]
 
 
+def test_get_agent_chain_prefers_repo_specific_fallbacks():
+    cfg = {
+        **_cfg(
+            {
+                "implementation": ["claude", "codex", "gemini", "deepseek"],
+                "debugging": ["claude", "codex", "gemini", "deepseek"],
+            }
+        ),
+        "github_projects": {
+            "agent-os": {
+                "agent_fallbacks": {
+                    "implementation": ["codex", "claude", "gemini", "deepseek"],
+                    "debugging": ["codex", "claude", "gemini", "deepseek"],
+                }
+            }
+        },
+    }
+
+    from unittest.mock import patch
+
+    with patch("orchestrator.queue.agent_available", return_value=(True, None)):
+        chain = get_agent_chain(
+            {"task_type": "debugging", "github_project_key": "agent-os"},
+            cfg,
+        )
+
+    assert chain == ["codex", "claude", "gemini", "deepseek"]
+
+
 def test_write_prompt_includes_layered_repo_context(tmp_path):
     root = tmp_path / "root"
     worktree = tmp_path / "repo"
