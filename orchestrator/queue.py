@@ -1561,12 +1561,18 @@ def _repo_agent_fallbacks(meta: dict, cfg: dict) -> dict:
     return {}
 
 
+VALID_ASSIGNABLE_AGENTS = {"auto", "claude", "codex", "gemini", "deepseek"}
+VALID_FALLBACK_AGENTS = VALID_ASSIGNABLE_AGENTS - {"auto"}
+
+
 def get_agent_chain(meta: dict, cfg: dict) -> list[str]:
     task_type = meta.get("task_type", cfg["default_task_type"])
     fallback_map = _repo_agent_fallbacks(meta, cfg) or cfg.get("agent_fallbacks", {})
     task_chain = list(fallback_map.get(task_type, fallback_map.get(cfg["default_task_type"], ["codex", "claude", "gemini", "deepseek"])))
 
     requested = str(meta.get("agent", cfg["default_agent"])).strip().lower()
+    if requested not in VALID_ASSIGNABLE_AGENTS:
+        return []
 
     if requested in {"", "auto"}:
         chain = task_chain
@@ -1575,6 +1581,8 @@ def get_agent_chain(meta: dict, cfg: dict) -> list[str]:
 
     filtered = []
     for agent in chain:
+        if agent not in VALID_FALLBACK_AGENTS:
+            continue
         available, _reason = agent_available(agent)
         if available:
             filtered.append(agent)
