@@ -502,13 +502,13 @@ def test_dispatch_item_blocks_publish_task_when_push_not_ready(tmp_path, monkeyp
     }
 
 
-def test_dispatch_item_blocks_task_when_no_agents_available(tmp_path, monkeypatch):
+def test_dispatch_item_blocks_task_when_agent_fallbacks_are_invalid(tmp_path, monkeypatch):
     cfg = {
         "default_agent": "auto",
         "default_task_type": "implementation",
         "default_allow_push": True,
         "github_owner": "owner",
-        "agent_fallbacks": {"implementation": ["codex", "claude"]},
+        "agent_fallbacks": {"implementation": ["bogus-agent"]},
     }
     paths = {"INBOX": tmp_path}
     info = {
@@ -542,7 +542,6 @@ def test_dispatch_item_blocks_task_when_no_agents_available(tmp_path, monkeypatc
     monkeypatch.setattr(gd, "_resolve_issue_dependencies", lambda *args, **kwargs: {"status": "clear"})
     monkeypatch.setattr(gd, "_try_decompose", lambda *args, **kwargs: None)
     monkeypatch.setattr(gd, "format_task", lambda title, body, model=None: None)
-    monkeypatch.setattr(gd, "_agent_available", lambda agent: (False, f"{agent} unavailable"))
     monkeypatch.setattr(gd, "add_issue_comment", lambda repo, number, body: comments.append((repo, number, body)))
     monkeypatch.setattr(
         gd,
@@ -571,9 +570,8 @@ def test_dispatch_item_blocks_task_when_no_agents_available(tmp_path, monkeypatc
     assert json.loads(payload) == {
         "code": gd.AGENT_UNAVAILABLE_CODE,
         "detail": (
-            "No available agents matched task requirements "
-            "(requested_agent='auto', task_type='implementation', candidates=['codex', 'claude']). "
-            "codex: codex unavailable; claude: claude unavailable"
+            "Unsupported agent fallback(s) for task_type='implementation': "
+            "bogus-agent. Expected only: claude, codex, deepseek, gemini."
         ),
     }
 

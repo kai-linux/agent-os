@@ -45,6 +45,7 @@ VALID_REROUTE_AGENTS = {"auto", "claude", "codex", "gemini", "deepseek"}
 UNASSIGNED_BLOCKED_SEEN_AT = "unassigned_blocked_seen_at"
 =======
 VALID_ASSIGNABLE_AGENTS = {"auto", "claude", "codex", "gemini", "deepseek"}
+VALID_FALLBACK_AGENTS = VALID_ASSIGNABLE_AGENTS - {"auto"}
 AGENT_UNAVAILABLE_LABEL = "dispatch:agent-unavailable"
 AGENT_UNAVAILABLE_CODE = "agent_unavailable"
 >>>>>>> d6521b7 (agent task-20260331-105417-prevent-invalid-agent-assignments-in-task-dispatch)
@@ -91,12 +92,6 @@ def parse_issue_dependencies(body: str) -> list[int]:
     return deps
 
 
-def _agent_available(agent: str) -> tuple[bool, str | None]:
-    from orchestrator.queue import agent_available
-
-    return agent_available(agent)
-
-
 def _repo_agent_fallbacks(cfg: dict, project_key: str) -> dict:
     project_cfg = cfg.get("github_projects", {}).get(project_key, {})
     if isinstance(project_cfg, dict):
@@ -137,24 +132,21 @@ def _validated_agent_assignment(cfg: dict, project_key: str, task_type: str, req
         )
 
     chain = _build_requested_agent_chain(cfg, project_key, task_type, requested_agent)
+    invalid_candidates = [agent for agent in chain if agent not in VALID_FALLBACK_AGENTS]
+    if invalid_candidates:
+        raise ValueError(
+            f"Unsupported agent fallback(s) for task_type={task_type!r}: "
+            + ", ".join(invalid_candidates)
+            + f". Expected only: {', '.join(sorted(VALID_FALLBACK_AGENTS))}."
+        )
+
     if not chain:
         raise ValueError(
             f"No agents configured for task_type={task_type!r} "
             f"(project_key={project_key!r}, requested_agent={requested_agent!r})."
         )
 
-    unavailable_reasons: list[str] = []
-    for agent in chain:
-        available, reason = _agent_available(agent)
-        if available:
-            return requested_agent
-        unavailable_reasons.append(f"{agent}: {reason or 'unavailable'}")
-
-    raise ValueError(
-        "No available agents matched task requirements "
-        f"(requested_agent={requested_agent!r}, task_type={task_type!r}, candidates={chain}). "
-        + "; ".join(unavailable_reasons)
-    )
+    return requested_agent
 
 
 def build_mailbox_task(cfg: dict, project_key: str, repo_cfg: dict, issue: dict) -> tuple[str, str]:
