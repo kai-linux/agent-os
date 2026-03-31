@@ -101,6 +101,21 @@ def _extract_preserved_ci_context(body: str) -> str:
     return "\n".join(lines).strip()
 
 
+def _merge_context_lines(*parts: str) -> str:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for part in parts:
+        for line in str(part or "").splitlines():
+            normalized = line.strip()
+            if not normalized:
+                continue
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            merged.append(line.rstrip())
+    return "\n".join(merged).strip()
+
+
 def _get_issue_body(repo: str, issue_number: int) -> str:
     try:
         payload = gh_json(["issue", "view", str(issue_number), "-R", repo, "--json", "body"]) or {}
@@ -134,10 +149,9 @@ def _maybe_create_partial_debug_followup(meta: dict, result: dict, cfg: dict) ->
     branch = meta.get("branch", "")
     base_branch = meta.get("base_branch", "main")
     preserved_ci_context = _extract_preserved_ci_context(_get_issue_body(str(repo), int(issue_number)))
-    preserved_ci_block = (
-        f"\n## Preserved CI Context\n{preserved_ci_context}\n"
-        if preserved_ci_context
-        else ""
+    context_block = _merge_context_lines(
+        f"Original issue: #{issue_number}",
+        preserved_ci_context,
     )
     bullets = {
         "done": "\n".join(result.get("done", ["- None"])),
@@ -164,8 +178,7 @@ debugging
 {branch or f"agent/{task_id}"}
 
 ## Context
-Original issue: #{issue_number}
-{preserved_ci_block}
+{context_block}
 
 ## Original Task ID
 {task_id}

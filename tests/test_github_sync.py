@@ -96,7 +96,7 @@ def test_sync_result_partial_debug_creates_single_deduped_followup(monkeypatch):
     assert "## Original Task ID\ntask-123" in created[0][2]
     assert "## Remaining Failure\nStill failing in the parser" in created[0][2]
     assert "## Goal\nReproduce the parser failure with fixture B enabled" in created[0][2]
-    assert "## Preserved CI Context\n- PR: https://github.com/owner/repo/pull/71\n- Failed checks:\n- **pytest**: `failure`" in created[0][2]
+    assert "## Context\nOriginal issue: #7\n- PR: https://github.com/owner/repo/pull/71\n- Failed checks:\n- **pytest**: `failure`" in created[0][2]
     assert created[0][3] == ["ready", "prio:high"]
     assert any("Follow-up issue" in body for _, _, body in comments)
 
@@ -196,8 +196,7 @@ def test_sync_result_partial_pr_ci_recovery_keeps_branch_handoff_and_ready_follo
     assert "## Goal\nResolve the committed merge-conflict markers on the existing PR branch" in created[0][2]
     assert "## Base Branch\nagent/task-20260320-101116-add-post-merge-outcome-attribution-for-issue-pr-an" in created[0][2]
     assert "## Branch\nagent/task-20260320-101116-add-post-merge-outcome-attribution-for-issue-pr-an" in created[0][2]
-    assert "Original issue: #73" in created[0][2]
-    assert "## Preserved CI Context\n- PR: https://github.com/owner/repo/pull/71\n- Failed checks:\n- **pytest**: `failure`" in created[0][2]
+    assert "## Context\nOriginal issue: #73\n- PR: https://github.com/owner/repo/pull/71\n- Failed checks:\n- **pytest**: `failure`" in created[0][2]
     assert created[0][3] == ["ready", "prio:high"]
     assert label_calls == [
         {
