@@ -41,6 +41,7 @@ RETRY_DECISION_SECTION = "retry decision"
 RETRY_DECISION_APPLIED_MARKER = "<!-- agent-os-retry-decision-applied -->"
 VALID_RETRY_ACTIONS = {"retry", "reroute", "stop"}
 VALID_REROUTE_AGENTS = {"auto", "claude", "codex", "gemini", "deepseek"}
+UNASSIGNED_BLOCKED_SEEN_AT = "unassigned_blocked_seen_at"
 
 
 def slugify(text: str) -> str:
@@ -281,6 +282,99 @@ def _parse_mailbox_task(path: Path) -> tuple[dict, str]:
     if not match:
         raise ValueError(f"Invalid task format in {path}")
     return yaml.safe_load(match.group(1)) or {}, match.group(2).strip()
+
+
+def _build_unassigned_blocked_escalation_note(meta: dict, body: str) -> str:
+    parent_task_id = meta.get("parent_task_id", meta.get("task_id", "unknown"))
+    return f"""# Escalation Note
+
+## Parent Task ID
+{parent_task_id}
+
+## Branch
+{meta.get("branch", "unknown")}
+
+## Repo
+{meta.get("repo", "unknown")}
+
+## Task Type
+{meta.get("task_type", "unknown")}
+
+## Models Tried
+None
+
+## Final Status
+blocked
+
+## Blocker Code
+manual_intervention_required
+
+## Summary
+Blocked task has no assigned agent after one scheduler cycle.
+
+## Original Task
+{body}
+
+## Completed
+- None
+
+## Blockers
+- Task remains blocked with `agent=none`.
+- Current blocker context: no assigned agent is available to take the next attempt.
+
+## Next Suggested Step
+Assign a valid agent or add an escalation retry decision so automation can resume safely.
+
+## Files Changed
+- None
+
+## Tests Run
+- None
+
+## Decisions
+- Scheduler escalated a blocked unassigned task after one cycle to avoid silent stalls.
+
+## Risks
+- Without reassignment or a retry decision, the task will remain escalated.
+
+## Attempted Approaches
+- Observed the blocked task for one scheduler cycle before escalation.
+"""
+
+
+def _escalate_unassigned_blocked_tasks(paths: dict) -> bool:
+    for task_path in sorted(paths["BLOCKED"].glob("*.md")):
+        try:
+            meta, body = _parse_mailbox_task(task_path)
+        except Exception:
+            continue
+
+        if str(meta.get("agent", "")).strip().lower() != "none":
+            continue
+
+        if not meta.get(UNASSIGNED_BLOCKED_SEEN_AT):
+            meta = dict(meta)
+            meta[UNASSIGNED_BLOCKED_SEEN_AT] = _now_iso()
+            task_path.write_text(_render_mailbox_task(meta, body), encoding="utf-8")
+            print(f"Marked blocked unassigned task for escalation next cycle: {meta.get('task_id', task_path.stem)}")
+            return True
+
+        meta = dict(meta)
+        parent_task_id = meta.get("parent_task_id", meta.get("task_id", task_path.stem))
+        note_path = paths["ESCALATED"] / f"{parent_task_id}-escalation.md"
+        if not note_path.exists():
+            note_path.write_text(_build_unassigned_blocked_escalation_note(meta, body), encoding="utf-8")
+
+        meta["escalation_note"] = note_path.name
+        meta["escalated_at"] = _now_iso()
+        destination = paths["ESCALATED"] / task_path.name
+        destination.write_text(_render_mailbox_task(meta, body), encoding="utf-8")
+        if destination != task_path:
+            task_path.unlink()
+        print(f"Escalated blocked unassigned task: {meta.get('task_id', task_path.stem)}")
+        return True
+
+    return False
 
 
 def _normalize_retry_decision_payload(payload: dict) -> dict | None:
@@ -983,6 +1077,8 @@ def dispatch_one():
 
     issue_lookup = _build_issue_lookup(queried)
     _requeue_unblocked_items(queried, repo_to_project, issue_lookup)
+    if _escalate_unassigned_blocked_tasks(paths):
+        return
     if _consume_retry_decisions(cfg, paths, queried):
         return
 
