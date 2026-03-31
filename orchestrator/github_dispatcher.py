@@ -41,14 +41,16 @@ RETRY_DECISION_SECTION = "retry decision"
 RETRY_DECISION_APPLIED_MARKER = "<!-- agent-os-retry-decision-applied -->"
 VALID_RETRY_ACTIONS = {"retry", "reroute", "stop"}
 VALID_REROUTE_AGENTS = {"auto", "claude", "codex", "gemini", "deepseek"}
-<<<<<<< HEAD
 UNASSIGNED_BLOCKED_SEEN_AT = "unassigned_blocked_seen_at"
-=======
 VALID_ASSIGNABLE_AGENTS = {"auto", "claude", "codex", "gemini", "deepseek"}
 VALID_FALLBACK_AGENTS = VALID_ASSIGNABLE_AGENTS - {"auto"}
 AGENT_UNAVAILABLE_LABEL = "dispatch:agent-unavailable"
 AGENT_UNAVAILABLE_CODE = "agent_unavailable"
->>>>>>> d6521b7 (agent task-20260331-105417-prevent-invalid-agent-assignments-in-task-dispatch)
+CI_CONTEXT_LINE_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"^\s*-\s+PR:\s+.+$", re.IGNORECASE),
+    re.compile(r"^\s*-\s+Failed checks:\s*$", re.IGNORECASE),
+    re.compile(r"^\s*-\s+\*\*.+?\*\*:\s*`.+?`\s*(?:- .+)?$", re.IGNORECASE),
+)
 
 
 def slugify(text: str) -> str:
@@ -81,6 +83,29 @@ def parse_issue_body(body: str) -> dict:
         "base_branch": sections.get("base branch", "").strip(),
         "branch": sections.get("branch", "").strip(),
     }
+
+
+def _preserve_ci_context(raw_context: str, formatted_context: str) -> str:
+    raw = str(raw_context or "").strip()
+    formatted = str(formatted_context or "").strip()
+    if not raw:
+        return formatted
+
+    preserved_lines = [
+        line.rstrip()
+        for line in raw.splitlines()
+        if any(pattern.match(line) for pattern in CI_CONTEXT_LINE_PATTERNS)
+    ]
+    if not preserved_lines:
+        return formatted or raw
+
+    merged_lines = formatted.splitlines() if formatted else []
+    existing = {line.strip() for line in merged_lines if line.strip()}
+    for line in preserved_lines:
+        if line.strip() not in existing:
+            merged_lines.append(line)
+            existing.add(line.strip())
+    return "\n".join(merged_lines).strip() or raw
 
 
 def parse_issue_dependencies(body: str) -> list[int]:
@@ -166,6 +191,10 @@ def build_mailbox_task(cfg: dict, project_key: str, repo_cfg: dict, issue: dict)
         for key, value in raw_parsed.items():
             if value and not parsed.get(key):
                 parsed[key] = value
+    parsed["context"] = _preserve_ci_context(
+        raw_parsed.get("context", ""),
+        parsed.get("context", ""),
+    )
 
     criteria = parsed["success_criteria"] or "- Match the issue goal\n- Keep the diff minimal\n- Leave a valid .agent_result.md"
     constraints = parsed["constraints"] or "- Work only inside the repo\n- Prefer minimal diffs"

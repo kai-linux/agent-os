@@ -41,6 +41,10 @@ def test_sync_result_partial_debug_creates_single_deduped_followup(monkeypatch):
 
     def fake_gh_json(cmd):
         searches.append(cmd)
+        if cmd == ["issue", "view", "7", "-R", "owner/repo", "--json", "body"]:
+            return {
+                "body": "## Context\n- PR: https://github.com/owner/repo/pull/71\n- Failed checks:\n- **pytest**: `failure`\n"
+            }
         if len(searches) == 1:
             return []
         return [{
@@ -92,6 +96,7 @@ def test_sync_result_partial_debug_creates_single_deduped_followup(monkeypatch):
     assert "## Original Task ID\ntask-123" in created[0][2]
     assert "## Remaining Failure\nStill failing in the parser" in created[0][2]
     assert "## Goal\nReproduce the parser failure with fixture B enabled" in created[0][2]
+    assert "## Preserved CI Context\n- PR: https://github.com/owner/repo/pull/71\n- Failed checks:\n- **pytest**: `failure`" in created[0][2]
     assert created[0][3] == ["ready", "prio:high"]
     assert any("Follow-up issue" in body for _, _, body in comments)
 
@@ -144,7 +149,14 @@ def test_sync_result_partial_pr_ci_recovery_keeps_branch_handoff_and_ready_follo
         "gh",
         lambda args, check=True: gh_calls.append(args) or '{"id":"item-99"}',
     )
-    monkeypatch.setattr(github_sync, "gh_json", lambda cmd: [])
+    def fake_gh_json(cmd):
+        if cmd == ["issue", "view", "73", "-R", "owner/repo", "--json", "body"]:
+            return {
+                "body": "## Context\n- PR: https://github.com/owner/repo/pull/71\n- Failed checks:\n- **pytest**: `failure`\n"
+            }
+        return []
+
+    monkeypatch.setattr(github_sync, "gh_json", fake_gh_json)
 
     def fake_create_issue(repo, title, body, labels):
         created.append((repo, title, body, labels))
@@ -185,6 +197,7 @@ def test_sync_result_partial_pr_ci_recovery_keeps_branch_handoff_and_ready_follo
     assert "## Base Branch\nagent/task-20260320-101116-add-post-merge-outcome-attribution-for-issue-pr-an" in created[0][2]
     assert "## Branch\nagent/task-20260320-101116-add-post-merge-outcome-attribution-for-issue-pr-an" in created[0][2]
     assert "Original issue: #73" in created[0][2]
+    assert "## Preserved CI Context\n- PR: https://github.com/owner/repo/pull/71\n- Failed checks:\n- **pytest**: `failure`" in created[0][2]
     assert created[0][3] == ["ready", "prio:high"]
     assert label_calls == [
         {

@@ -219,6 +219,63 @@ Measure adoption
     assert parsed["outcome_checks"] == ["activation_rate", "signup_completion"]
 
 
+def test_build_mailbox_task_preserves_failed_ci_check_context_when_formatter_summarizes(monkeypatch):
+    cfg = {
+        "default_agent": "auto",
+        "default_task_type": "implementation",
+        "default_base_branch": "main",
+        "default_allow_push": True,
+        "default_max_attempts": 4,
+        "max_runtime_minutes": 40,
+        "formatter_model": None,
+    }
+    repo_cfg = {"local_repo": "/tmp/repo", "github_repo": "owner/repo"}
+    issue = {
+        "number": 42,
+        "title": "Fix CI failure on PR #71",
+        "url": "https://github.com/owner/repo/issues/42",
+        "labels": [],
+        "body": """
+## Goal
+Repair CI.
+
+## Task Type
+debugging
+
+## Branch
+agent/task-71
+
+## Context
+- PR: https://github.com/owner/repo/pull/71
+- Failed checks:
+- **pytest**: `failure`
+""",
+    }
+
+    monkeypatch.setattr(
+        gd,
+        "format_task",
+        lambda title, body, model=None: {
+            "goal": "Repair CI.",
+            "success_criteria": "- Make CI green",
+            "task_type": "debugging",
+            "agent_preference": "auto",
+            "outcome_checks": [],
+            "constraints": "- Prefer minimal diffs",
+            "context": "- Investigate the failing workflow rerun.",
+            "base_branch": "",
+            "branch": "agent/task-71",
+        },
+    )
+
+    _task_id, mailbox = gd.build_mailbox_task(cfg, "proj", repo_cfg, issue)
+
+    assert "- Investigate the failing workflow rerun." in mailbox
+    assert "- PR: https://github.com/owner/repo/pull/71" in mailbox
+    assert "- Failed checks:" in mailbox
+    assert "- **pytest**: `failure`" in mailbox
+
+
 def test_build_mailbox_task_preserves_custom_branch(monkeypatch):
     cfg = {
         "default_agent": "auto",
