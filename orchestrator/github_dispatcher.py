@@ -42,6 +42,15 @@ RETRY_DECISION_APPLIED_MARKER = "<!-- agent-os-retry-decision-applied -->"
 VALID_RETRY_ACTIONS = {"retry", "reroute", "stop"}
 VALID_REROUTE_AGENTS = {"auto", "claude", "codex", "gemini", "deepseek"}
 UNASSIGNED_BLOCKED_SEEN_AT = "unassigned_blocked_seen_at"
+VALID_ASSIGNABLE_AGENTS = {"auto", "claude", "codex", "gemini", "deepseek"}
+VALID_FALLBACK_AGENTS = VALID_ASSIGNABLE_AGENTS - {"auto"}
+AGENT_UNAVAILABLE_LABEL = "dispatch:agent-unavailable"
+AGENT_UNAVAILABLE_CODE = "agent_unavailable"
+CI_CONTEXT_LINE_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"^\s*-\s+PR:\s+.+$", re.IGNORECASE),
+    re.compile(r"^\s*-\s+Failed checks:\s*$", re.IGNORECASE),
+    re.compile(r"^\s*-\s+\*\*.+?\*\*:\s*`.+?`\s*(?:- .+)?$", re.IGNORECASE),
+)
 
 
 def slugify(text: str) -> str:
@@ -76,6 +85,29 @@ def parse_issue_body(body: str) -> dict:
     }
 
 
+def _preserve_ci_context(raw_context: str, formatted_context: str) -> str:
+    raw = str(raw_context or "").strip()
+    formatted = str(formatted_context or "").strip()
+    if not raw:
+        return formatted
+
+    preserved_lines = [
+        line.rstrip()
+        for line in raw.splitlines()
+        if any(pattern.match(line) for pattern in CI_CONTEXT_LINE_PATTERNS)
+    ]
+    if not preserved_lines:
+        return formatted or raw
+
+    merged_lines = formatted.splitlines() if formatted else []
+    existing = {line.strip() for line in merged_lines if line.strip()}
+    for line in preserved_lines:
+        if line.strip() not in existing:
+            merged_lines.append(line)
+            existing.add(line.strip())
+    return "\n".join(merged_lines).strip() or raw
+
+
 def parse_issue_dependencies(body: str) -> list[int]:
     deps = []
     for match in DEPENDENCY_RE.findall(body or ""):
@@ -83,6 +115,63 @@ def parse_issue_dependencies(body: str) -> list[int]:
         if number not in deps:
             deps.append(number)
     return deps
+
+
+def _repo_agent_fallbacks(cfg: dict, project_key: str) -> dict:
+    project_cfg = cfg.get("github_projects", {}).get(project_key, {})
+    if isinstance(project_cfg, dict):
+        fallbacks = project_cfg.get("agent_fallbacks", {})
+        if isinstance(fallbacks, dict):
+            return fallbacks
+    return {}
+
+
+def _build_requested_agent_chain(cfg: dict, project_key: str, task_type: str, requested_agent: str) -> list[str]:
+    fallback_map = _repo_agent_fallbacks(cfg, project_key) or cfg.get("agent_fallbacks", {})
+    default_task_type = cfg["default_task_type"]
+    task_chain = list(
+        fallback_map.get(
+            task_type,
+            fallback_map.get(default_task_type, ["codex", "claude", "gemini", "deepseek"]),
+        )
+    )
+    if requested_agent in {"", "auto"}:
+        chain = task_chain
+    else:
+        chain = [requested_agent] + [agent for agent in task_chain if agent != requested_agent]
+
+    deduped: list[str] = []
+    for agent in chain:
+        normalized = str(agent).strip().lower()
+        if normalized and normalized not in deduped:
+            deduped.append(normalized)
+    return deduped
+
+
+def _validated_agent_assignment(cfg: dict, project_key: str, task_type: str, requested_agent: str) -> str:
+    requested_agent = str(requested_agent or cfg["default_agent"]).strip().lower()
+    if requested_agent not in VALID_ASSIGNABLE_AGENTS:
+        raise ValueError(
+            f"Unsupported agent preference: {requested_agent}. "
+            f"Expected one of: {', '.join(sorted(VALID_ASSIGNABLE_AGENTS))}."
+        )
+
+    chain = _build_requested_agent_chain(cfg, project_key, task_type, requested_agent)
+    invalid_candidates = [agent for agent in chain if agent not in VALID_FALLBACK_AGENTS]
+    if invalid_candidates:
+        raise ValueError(
+            f"Unsupported agent fallback(s) for task_type={task_type!r}: "
+            + ", ".join(invalid_candidates)
+            + f". Expected only: {', '.join(sorted(VALID_FALLBACK_AGENTS))}."
+        )
+
+    if not chain:
+        raise ValueError(
+            f"No agents configured for task_type={task_type!r} "
+            f"(project_key={project_key!r}, requested_agent={requested_agent!r})."
+        )
+
+    return requested_agent
 
 
 def build_mailbox_task(cfg: dict, project_key: str, repo_cfg: dict, issue: dict) -> tuple[str, str]:
@@ -102,6 +191,10 @@ def build_mailbox_task(cfg: dict, project_key: str, repo_cfg: dict, issue: dict)
         for key, value in raw_parsed.items():
             if value and not parsed.get(key):
                 parsed[key] = value
+    parsed["context"] = _preserve_ci_context(
+        raw_parsed.get("context", ""),
+        parsed.get("context", ""),
+    )
 
     criteria = parsed["success_criteria"] or "- Match the issue goal\n- Keep the diff minimal\n- Leave a valid .agent_result.md"
     constraints = parsed["constraints"] or "- Work only inside the repo\n- Prefer minimal diffs"
@@ -123,12 +216,14 @@ def build_mailbox_task(cfg: dict, project_key: str, repo_cfg: dict, issue: dict)
         if lbl in valid_agents:
             agent = lbl
             break
+    task_type = parsed["task_type"] or cfg["default_task_type"]
+    agent = _validated_agent_assignment(cfg, project_key, task_type, agent)
 
     frontmatter = {
         "task_id": task_id,
         "repo": repo_cfg["local_repo"],
         "agent": agent,
-        "task_type": parsed["task_type"] or cfg["default_task_type"],
+        "task_type": task_type,
         "branch": parsed.get("branch") or f"agent/{task_id}",
         "base_branch": parsed.get("base_branch") or cfg["default_base_branch"],
         "allow_push": cfg["default_allow_push"],
@@ -745,6 +840,46 @@ def _skip_push_not_ready(
     )
 
 
+def _skip_agent_unavailable(
+    repo_full: str,
+    item: dict,
+    info: dict | None,
+    project_cfg: dict,
+    error: Exception,
+):
+    blocked_value = project_cfg.get("blocked_value", "Blocked")
+    if info is not None and item.get("item_id"):
+        try:
+            _set_project_status(info, item["item_id"], blocked_value)
+        except Exception as e:
+            print(f"Warning: failed to set project status: {e}")
+
+    edit_issue_labels(
+        repo_full,
+        item["number"],
+        add=["blocked", AGENT_UNAVAILABLE_LABEL],
+        remove=["ready", "in-progress", "agent-dispatched"],
+    )
+
+    payload = json.dumps(
+        {
+            "code": AGENT_UNAVAILABLE_CODE,
+            "detail": str(error),
+        },
+        sort_keys=True,
+    )
+    add_issue_comment(
+        repo_full,
+        item["number"],
+        "\n".join([
+            "<!-- agent-os-dispatch-skip",
+            payload,
+            "-->",
+            "Blocked automatically: no available agent matched this task's requirements.",
+        ]),
+    )
+
+
 def _requeue_unblocked_items(queried, repo_to_project, issue_lookup):
     for info, _ready_items in queried.values():
         for item in info.get("items", []):
@@ -943,7 +1078,12 @@ def _dispatch_item(cfg, paths, owner, repo_to_project, info, ready_items, issue_
                 "url": first_child["url"],
                 "labels": [{"name": l} for l in item["labels"]],
             }
-            task_id, task_md = build_mailbox_task(cfg, pk, rcfg, child_issue)
+            try:
+                task_id, task_md = build_mailbox_task(cfg, pk, rcfg, child_issue)
+            except ValueError as exc:
+                _skip_agent_unavailable(repo_full, first_child, info, pcfg, exc)
+                print(f"Skipped {repo_full}#{first_child['number']} — {AGENT_UNAVAILABLE_CODE}: {exc}")
+                continue
             task_path = paths["INBOX"] / f"{task_id}.md"
             task_path.write_text(task_md, encoding="utf-8")
 
@@ -967,7 +1107,12 @@ def _dispatch_item(cfg, paths, owner, repo_to_project, info, ready_items, issue_
             "labels": [{"name": l} for l in item["labels"]],
         }
 
-        task_id, task_md = build_mailbox_task(cfg, pk, rcfg, issue)
+        try:
+            task_id, task_md = build_mailbox_task(cfg, pk, rcfg, issue)
+        except ValueError as exc:
+            _skip_agent_unavailable(repo_full, item, info, pcfg, exc)
+            print(f"Skipped {repo_full}#{item['number']} — {AGENT_UNAVAILABLE_CODE}: {exc}")
+            continue
         task_path = paths["INBOX"] / f"{task_id}.md"
         task_path.write_text(task_md, encoding="utf-8")
 
@@ -1127,7 +1272,12 @@ def dispatch_one():
                                 f"{PUSH_NOT_READY_CODE}: {reason_codes}"
                             )
                             continue
-                    task_id, task_md = build_mailbox_task(cfg, project_key, repo_cfg, issue)
+                    try:
+                        task_id, task_md = build_mailbox_task(cfg, project_key, repo_cfg, issue)
+                    except ValueError as exc:
+                        _skip_agent_unavailable(repo_full, issue, None, project_cfg, exc)
+                        print(f"Skipped {repo_full}#{issue['number']} — {AGENT_UNAVAILABLE_CODE}: {exc}")
+                        continue
                     task_path = paths["INBOX"] / f"{task_id}.md"
                     task_path.write_text(task_md, encoding="utf-8")
                     edit_issue_labels(
