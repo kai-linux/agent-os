@@ -5,8 +5,6 @@ import yaml
 
 ROOT = Path(os.environ.get("ORCH_ROOT", Path(__file__).resolve().parents[1]))
 CONFIG_ENV_VAR = "AGENT_OS_CONFIG"
-CONFIG_DIR_ENV_VAR = "AGENT_OS_CONFIG_DIR"
-DEFAULT_CONFIG_DIR = Path.home() / ".config" / "agent-os"
 DEFAULT_CONFIG_NAME = "config.yaml"
 
 
@@ -15,14 +13,7 @@ def _config_candidates() -> list[Path]:
     if explicit:
         return [Path(explicit).expanduser()]
 
-    explicit_dir = os.environ.get(CONFIG_DIR_ENV_VAR, "").strip()
-    if explicit_dir:
-        return [Path(explicit_dir).expanduser() / DEFAULT_CONFIG_NAME]
-
-    return [
-        DEFAULT_CONFIG_DIR / DEFAULT_CONFIG_NAME,
-        ROOT / DEFAULT_CONFIG_NAME,
-    ]
+    return [ROOT / DEFAULT_CONFIG_NAME]
 
 
 def resolve_config_path() -> Path:
