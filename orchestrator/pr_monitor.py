@@ -896,6 +896,32 @@ def _try_merge(repo: str, pr_number: int) -> bool:
         return False
 
 
+def _purge_stale_inbox_tasks(paths: dict, repo: str, pr: dict):
+    """Move inbox tasks for a merged issue to done so they don't run stale."""
+    import shutil
+    import yaml
+    issue_number = _extract_issue_number(pr.get("body", ""))
+    if not issue_number:
+        return
+    inbox = Path(paths["INBOX"])
+    done = Path(paths["DONE"])
+    for task_file in inbox.glob("*.md"):
+        try:
+            text = task_file.read_text(encoding="utf-8")
+            m = re.match(r"^---\s*\n(.*?)\n---\s*\n", text, flags=re.DOTALL)
+            if not m:
+                continue
+            meta = yaml.safe_load(m.group(1)) or {}
+            if str(meta.get("github_repo", "")) != repo:
+                continue
+            if int(meta.get("github_issue_number", 0)) != issue_number:
+                continue
+            shutil.move(str(task_file), str(done / task_file.name))
+            print(f"  Purged stale inbox task {task_file.name} (issue #{issue_number} already merged)")
+        except Exception:
+            continue
+
+
 def monitor_prs():
     cfg = load_config()
     paths = runtime_paths(cfg)
@@ -1016,6 +1042,7 @@ def monitor_prs():
                 state.pop(pr_url, None)
                 _save_state(paths, state)
                 _cleanup_merged_pr_issues(cfg, repo, pr)
+                _purge_stale_inbox_tasks(paths, repo, pr)
             else:
                 print(f"  PR #{pr_number}: merge failed")
 

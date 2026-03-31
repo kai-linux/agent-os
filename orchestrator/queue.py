@@ -18,6 +18,7 @@ import yaml
 
 from orchestrator.paths import load_config, runtime_paths
 from orchestrator.github_sync import sync_result
+from orchestrator.gh_project import gh_json as _gh_json
 from orchestrator.codebase_memory import read_codebase_context, update_codebase_memory
 from orchestrator.gh_project import add_issue_comment, gh, gh_json, query_project, set_item_status
 from orchestrator.repo_context import build_execution_context
@@ -2023,6 +2024,30 @@ def main():
 
         if not repo.exists():
             raise RuntimeError(f"Repo does not exist: {repo}")
+
+        # Skip tasks whose linked GitHub issue is already closed/done
+        _gh_repo = meta.get("github_repo")
+        _gh_issue = meta.get("github_issue_number")
+        if _gh_repo and _gh_issue:
+            try:
+                _snapshot = _gh_json([
+                    "issue", "view", str(_gh_issue), "-R", str(_gh_repo),
+                    "--json", "state,labels",
+                ]) or {}
+                _state = str(_snapshot.get("state", "")).upper()
+                _labels = {
+                    (l.get("name", "") if isinstance(l, dict) else str(l)).strip().lower()
+                    for l in (_snapshot.get("labels") or [])
+                }
+                if _state == "CLOSED" or "done" in _labels:
+                    log(
+                        f"[{worker_id}] Skipping task {task_id}: linked issue #{_gh_issue} is already {_state} (labels: {_labels}). Moving to done.",
+                        logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG,
+                    )
+                    shutil.move(str(processing), str(DONE / processing.name))
+                    return
+            except Exception as e:
+                log(f"Warning: could not check issue #{_gh_issue} state: {e}", logfile, queue_summary_log=QUEUE_SUMMARY_LOG)
 
         # Per-repo lock: prevent concurrent access to the same repository
         repo_key = hashlib.md5(str(repo.resolve()).encode()).hexdigest()[:12]
