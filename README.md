@@ -94,7 +94,7 @@ Repos can also opt into a manual execution lane with `automation_mode: dispatche
 
 The `bin/` entrypoints bootstrap common user-local CLI install paths themselves, so cron usually does not need per-provider `PATH` or `CLAUDE_BIN` overrides.
 
-Configuration is intentionally split from repo-controlled code. In production, Agent OS should load `~/.config/agent-os/config.yaml` rather than a tracked `config.yaml` inside the repository. Per-repo business objectives live alongside it in `~/.config/agent-os/objectives/<repo>.yaml`, while raw analytics and other external evidence should live in a separate external directory such as `~/.local/share/agent-os/evidence/`. That keeps the true reward surface and private metric sources outside the surfaces agents can push to GitHub.
+Configuration now defaults to the repo-local [config.yaml](/Users/kai/agent-os/config.yaml). Per-repo business objectives should live alongside it in an `objectives/` directory inside the repo, while raw analytics and other external evidence can still live in a separate external directory such as `~/.local/share/agent-os/evidence/`. This keeps the operational config obvious while still allowing external metric snapshots and private evidence stores.
 
 ## Objective Loop
 
@@ -104,8 +104,8 @@ Use this setup for a business-driven repo such as a private web app.
 
 You need 3 things:
 
-1. `~/.config/agent-os/config.yaml`
-2. `~/.config/agent-os/objectives/<repo>.yaml`
+1. `config.yaml`
+2. `objectives/<repo>.yaml`
 3. external evidence files in `~/.local/share/agent-os/evidence/<repo>/`
 
 ### 2. What Each File Does
@@ -128,7 +128,7 @@ You need 3 things:
 
 ### 3. How To Define The Objective
 
-In `~/.config/agent-os/objectives/<repo>.yaml`, define:
+In `objectives/<repo>.yaml`, define:
 
 - `primary_outcome`
 - `evaluation_window_days`
@@ -429,7 +429,7 @@ contains the actual metric snapshots from GA4 or other systems
 is written by your external exporter, not by agent-os
 How To Define The Objective
 
-In ~/.config/agent-os/objectives/repo1.yaml, define:
+In objectives/repo1.yaml, define:
 
 primary_outcome
 Example: Grow profitable user acquisition and monetization
@@ -516,8 +516,8 @@ but “assign negative value to unproductive work”.
 
 What You Actually Do Step By Step
 
-Copy example.config.yaml to ~/.config/agent-os/config.yaml
-Copy example.objective.yaml to ~/.config/agent-os/objectives/repo1.yaml
+Copy example.config.yaml to config.yaml
+Copy example.objective.yaml to objectives/repo1.yaml
 Edit the objective so the 4 metrics match your business
 Write a small exporter that dumps GA4 snapshots into ~/.local/share/agent-os/evidence/repo1/
 Enable production_feedback
@@ -601,7 +601,7 @@ agent-os/
 | Mechanism | What it prevents |
 |---|---|
 | **Repo allowlist** | Agents can't touch repos not in config |
-| **External config/objectives** | Reward surface and private evidence sources stay outside pushable repo state |
+| **Repo-local config/objectives** | One visible source of truth for orchestration and planning inputs |
 | **Isolated worktrees** | No shared mutable state between tasks |
 | **Attempt ceilings** | `max_attempts=4` + per-model tracking stops loops |
 | **Structured escalation** | System writes a note and stops — never thrashes |
@@ -619,10 +619,10 @@ git clone https://github.com/yourname/agent-os && cd agent-os
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# 2. Configure outside the repo
-mkdir -p ~/.config/agent-os/objectives ~/.local/share/agent-os/evidence
-cp example.config.yaml ~/.config/agent-os/config.yaml
-cp example.objective.yaml ~/.config/agent-os/objectives/repo1.yaml
+# 2. Configure the repo
+mkdir -p objectives ~/.local/share/agent-os/evidence
+cp example.config.yaml config.yaml
+cp example.objective.yaml objectives/repo1.yaml
 # Edit: github_owner, project_number, repo paths, Telegram token, and the 4 objective metrics
 
 # 3. Authenticate
@@ -631,7 +631,7 @@ gh auth login && gh auth refresh -s project
 
 # 4. Create GitHub Project
 # Add Status field: Backlog · Ready · In Progress · Blocked · Done
-# Note the project number from the URL (/projects/N) → put in ~/.config/agent-os/config.yaml
+# Note the project number from the URL (/projects/N) → put in config.yaml
 
 # 5. Set up cron
 crontab -e
