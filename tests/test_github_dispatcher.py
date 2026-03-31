@@ -346,6 +346,41 @@ Improve activation.
     assert "- activation_rate" in task_md
 
 
+def test_build_mailbox_task_rejects_invalid_agent_preference(monkeypatch):
+    cfg = {
+        "default_agent": "auto",
+        "default_task_type": "implementation",
+        "default_base_branch": "main",
+        "default_allow_push": True,
+        "default_max_attempts": 4,
+        "max_runtime_minutes": 40,
+        "formatter_model": None,
+        "agent_fallbacks": {"implementation": ["codex", "claude"]},
+    }
+    repo_cfg = {"local_repo": "/tmp/repo", "github_repo": "owner/repo"}
+    issue = {
+        "number": 42,
+        "title": "Improve dispatch validation",
+        "url": "https://github.com/owner/repo/issues/42",
+        "labels": [{"name": "prio:high"}],
+        "body": """
+## Goal
+Improve dispatch validation.
+
+## Agent Preference
+none
+""",
+    }
+
+    monkeypatch.setattr(gd, "format_task", lambda title, body, model=None: None)
+
+    try:
+        gd.build_mailbox_task(cfg, "proj", repo_cfg, issue)
+        assert False, "expected build_mailbox_task() to reject agent preference 'none'"
+    except ValueError as exc:
+        assert str(exc) == "Unsupported agent preference: none. Expected one of: auto, claude, codex, deepseek, gemini."
+
+
 def test_check_push_readiness_reports_missing_origin_remote(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -464,6 +499,82 @@ def test_dispatch_item_blocks_publish_task_when_push_not_ready(tmp_path, monkeyp
         "push_readiness": [{"code": "allow_push_disabled", "detail": "default_allow_push is false"}],
         "requirements": ["git_commit", "git_push", "push_branch", "open_pr", "publish_changes"],
         "runtime_allow_push": False,
+    }
+
+
+def test_dispatch_item_blocks_task_when_no_agents_available(tmp_path, monkeypatch):
+    cfg = {
+        "default_agent": "auto",
+        "default_task_type": "implementation",
+        "default_allow_push": True,
+        "github_owner": "owner",
+        "agent_fallbacks": {"implementation": ["codex", "claude"]},
+    }
+    paths = {"INBOX": tmp_path}
+    info = {
+        "status_field_id": "status-field",
+        "status_options": {"Blocked": "blocked-option"},
+        "project_id": "project-1",
+    }
+    ready_items = [{
+        "item_id": "item-1",
+        "number": 42,
+        "title": "Dispatch task with no runnable agent",
+        "body": "Keep the diff minimal.",
+        "url": "https://github.com/owner/repo/issues/42",
+        "labels": {"ready", "prio:high"},
+        "repo": "owner/repo",
+        "author": "trusted-user",
+        "state": "OPEN",
+    }]
+    repo_to_project = {
+        "owner/repo": (
+            "proj",
+            {"blocked_value": "Blocked"},
+            {"local_repo": "/tmp/repo", "github_repo": "owner/repo"},
+        ),
+    }
+    comments = []
+    label_edits = []
+    status_updates = []
+
+    monkeypatch.setattr(gd, "is_trusted", lambda author, _cfg: True)
+    monkeypatch.setattr(gd, "_resolve_issue_dependencies", lambda *args, **kwargs: {"status": "clear"})
+    monkeypatch.setattr(gd, "_try_decompose", lambda *args, **kwargs: None)
+    monkeypatch.setattr(gd, "format_task", lambda title, body, model=None: None)
+    monkeypatch.setattr(gd, "_agent_available", lambda agent: (False, f"{agent} unavailable"))
+    monkeypatch.setattr(gd, "add_issue_comment", lambda repo, number, body: comments.append((repo, number, body)))
+    monkeypatch.setattr(
+        gd,
+        "edit_issue_labels",
+        lambda repo, number, add=None, remove=None: label_edits.append((repo, number, add, remove)),
+    )
+    monkeypatch.setattr(
+        gd,
+        "set_item_status",
+        lambda project_id, item_id, field_id, option_id: status_updates.append((project_id, item_id, field_id, option_id)),
+    )
+
+    dispatched = gd._dispatch_item(cfg, paths, "owner", repo_to_project, info, ready_items, {})
+
+    assert dispatched is False
+    assert not list(tmp_path.iterdir())
+    assert status_updates == [("project-1", "item-1", "status-field", "blocked-option")]
+    assert label_edits == [(
+        "owner/repo",
+        42,
+        ["blocked", gd.AGENT_UNAVAILABLE_LABEL],
+        ["ready", "in-progress", "agent-dispatched"],
+    )]
+    assert len(comments) == 1
+    payload = comments[0][2].splitlines()[1]
+    assert json.loads(payload) == {
+        "code": gd.AGENT_UNAVAILABLE_CODE,
+        "detail": (
+            "No available agents matched task requirements "
+            "(requested_agent='auto', task_type='implementation', candidates=['codex', 'claude']). "
+            "codex: codex unavailable; claude: claude unavailable"
+        ),
     }
 
 
