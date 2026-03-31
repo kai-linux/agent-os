@@ -16,6 +16,16 @@
 
 ## Recent Changes
 
+### 2026-03-31 — [task-20260331-105520-escalate-blocked-tasks-with-no-assigned-agent-with] (#57 kai-linux/agent-os)
+Added a dispatcher-cycle safeguard that marks blocked mailbox tasks with `agent=none` on first sight and escalates them on the next cycle with a structured escalation note carrying the task id and blocker context.
+
+**Files:** `- orchestrator/github_dispatcher.py`, `- tests/test_github_dispatcher.py`, `- .agent_result.md`
+
+**Decisions:**
+  - - Kept the change in the dispatcher cycle instead of the queue so existing blocked mailbox tasks can be recovered without widening worker behavior
+  - - Reused the existing `escalated/` mailbox state and escalation-note pattern rather than introducing a new persistence path
+
+
 ### 2026-03-31 — [task-20260331-105617-integrate-production-feedback-metrics-into-task-sc] (#95 kai-linux/agent-os)
 Integrated fresh PRODUCTION_FEEDBACK.md signals into strategic planner backlog ranking and post-plan prioritization so recent failures, blocker patterns, and recovery signals can reorder candidates, raise priority, and be cited directly in plan rationale.
 
