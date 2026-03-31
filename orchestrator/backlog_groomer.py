@@ -22,6 +22,7 @@ from pathlib import Path
 from orchestrator.paths import load_config, runtime_paths
 from orchestrator.agent_scorer import load_recent_metrics, findings_path as scorer_findings_path
 from orchestrator.gh_project import ensure_labels, query_project, set_item_status, gh
+from orchestrator.outcome_attribution import get_repo_outcome_check_ids, format_outcome_checks_section
 from orchestrator.repo_context import (
     read_production_feedback_artifact,
     read_north_star,
@@ -854,10 +855,11 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
     # 8. Dedup and create issues
     created_urls: list[str] = []
     skipped: list[str] = []
+    outcome_section = format_outcome_checks_section(get_repo_outcome_check_ids(cfg, github_slug))
 
     for issue in proposed[:MAX_ISSUES_PER_REPO]:
         title = (issue.get("title") or "").strip()
-        body = (issue.get("body") or "").strip()
+        body = (issue.get("body") or "").strip() + outcome_section
         labels = [str(l) for l in issue.get("labels", []) if l]
         priority = issue.get("priority", "prio:normal")
 

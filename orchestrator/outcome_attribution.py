@@ -31,6 +31,35 @@ def parse_outcome_check_ids(section_text: str) -> list[str]:
     return ids
 
 
+def get_repo_outcome_check_ids(cfg: dict, github_slug: str) -> list[str]:
+    """Return outcome check IDs configured for a repo (global + repo override)."""
+    outcome_cfg = dict(cfg.get("outcome_attribution") or {})
+    for project_cfg in cfg.get("github_projects", {}).values():
+        if not isinstance(project_cfg, dict):
+            continue
+        for repo_cfg in project_cfg.get("repos", []):
+            if repo_cfg.get("github_repo") != github_slug:
+                continue
+            override = repo_cfg.get("outcome_attribution")
+            if isinstance(override, dict):
+                merged = dict(outcome_cfg)
+                merged.update(override)
+                outcome_cfg = merged
+            break
+        else:
+            continue
+        break
+    checks = outcome_cfg.get("checks") or []
+    return [str(c.get("id", "")).strip() for c in checks if isinstance(c, dict) and str(c.get("id", "")).strip()]
+
+
+def format_outcome_checks_section(check_ids: list[str]) -> str:
+    """Return an '## Outcome Checks' markdown section, or empty string if no IDs."""
+    if not check_ids:
+        return ""
+    return "\n\n## Outcome Checks\n" + ", ".join(check_ids)
+
+
 def extract_pr_number(value: str | None) -> int | None:
     match = re.search(r"/pull/(\d+)\b", str(value or ""))
     return int(match.group(1)) if match else None
