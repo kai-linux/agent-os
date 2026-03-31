@@ -24,6 +24,13 @@ _CI_CONTEXT_LINE_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"^\s*-\s+Failed checks:\s*$", re.IGNORECASE),
     re.compile(r"^\s*-\s+\*\*.+?\*\*:\s*`.+?`\s*(?:- .+)?$", re.IGNORECASE),
 )
+_FOLLOWUP_TITLE_PREFIX = "Follow up partial debug for root issue #"
+_ROOT_ISSUE_RE = re.compile(r"^## Root Issue Number\s*\n(\d+)\s*$", re.MULTILINE)
+_ROOT_PR_RE = re.compile(r"^## Root PR Number\s*\n(\d+)\s*$", re.MULTILINE)
+_ROOT_BRANCH_RE = re.compile(r"^## Root Branch\s*\n(.+?)\s*$", re.MULTILINE)
+_BRANCH_RE = re.compile(r"^## Branch\s*\n(.+?)\s*$", re.MULTILINE)
+_ORIGINAL_ISSUE_RE = re.compile(r"Original issue:\s+#(\d+)", re.IGNORECASE)
+_PR_URL_RE = re.compile(r"/pull/(\d+)")
 
 
 def _find_repo_project(cfg: dict, repo: str) -> tuple[dict, dict] | tuple[None, None]:
@@ -71,24 +78,119 @@ def _set_issue_ready(cfg: dict, repo: str, issue_url: str):
         print(f"Warning: failed to set follow-up issue ready for {repo}: {e}")
 
 
-def _find_open_partial_followup(repo: str, task_id: str, title: str) -> dict | None:
+def _normalize_issue_labels(issue: dict | None) -> set[str]:
+    labels = issue.get("labels", []) if isinstance(issue, dict) else []
+    normalized: set[str] = set()
+    for label in labels:
+        if isinstance(label, dict):
+            name = label.get("name", "")
+        else:
+            name = str(label)
+        name = str(name).strip().lower()
+        if name:
+            normalized.add(name)
+    return normalized
+
+
+def _get_issue_snapshot(repo: str, issue_number: int) -> dict:
+    try:
+        return gh_json([
+            "issue", "view", str(issue_number), "-R", repo,
+            "--json", "number,state,body,labels,url",
+        ]) or {}
+    except Exception:
+        return {}
+
+
+def _issue_is_terminal(issue: dict | None) -> bool:
+    if not issue:
+        return False
+    state = str(issue.get("state", "")).upper()
+    labels = _normalize_issue_labels(issue)
+    return state == "CLOSED" or "done" in labels
+
+
+def _extract_root_issue_number(issue_number: int, body: str) -> int:
+    match = _ROOT_ISSUE_RE.search(body or "")
+    if match:
+        return int(match.group(1))
+    return issue_number
+
+
+def _extract_root_pr_number(body: str) -> int | None:
+    match = _ROOT_PR_RE.search(body or "")
+    if match:
+        return int(match.group(1))
+    pr_match = _PR_URL_RE.search(body or "")
+    if pr_match:
+        return int(pr_match.group(1))
+    return None
+
+
+def _extract_root_branch(body: str, branch: str) -> str:
+    for pattern in (_ROOT_BRANCH_RE, _BRANCH_RE):
+        match = pattern.search(body or "")
+        if match:
+            return match.group(1).strip()
+    return str(branch or "").strip()
+
+
+def _reconcile_terminal_issue_state(cfg: dict, project_cfg: dict, repo: str, issue_number: int, issue_url: str):
+    if not project_cfg:
+        return
+
+    edit_issue_labels(
+        repo,
+        issue_number,
+        add=["done"],
+        remove=["blocked", "ready", "in-progress", "agent-dispatched"],
+    )
+
+    try:
+        info = query_project(project_cfg["project_number"], cfg["github_owner"])
+        option_id = info["status_options"].get(project_cfg.get("done_value", "Done"))
+        if not info["status_field_id"] or not option_id:
+            return
+        for item in info["items"]:
+            if item["url"] == issue_url:
+                set_item_status(info["project_id"], item["item_id"], info["status_field_id"], option_id)
+                break
+    except Exception as e:
+        print(f"Warning: failed to reconcile terminal issue #{issue_number}: {e}")
+
+
+def _find_open_partial_followup(
+    repo: str,
+    *,
+    root_issue_number: int,
+    root_branch: str,
+    root_pr_number: int | None,
+    title: str,
+) -> dict | None:
     try:
         issues = gh_json([
             "issue", "list", "-R", repo, "--state", "open",
-            "--search", task_id,
+            "--search", title,
             "--json", "number,title,url,body",
             "--limit", "20",
         ]) or []
     except Exception:
         return None
 
-    task_marker = f"## Original Task ID\n{task_id}"
     for issue in issues:
         if (issue.get("title") or "").strip() != title.strip():
             continue
         body = issue.get("body") or ""
-        if task_marker in body:
-            return issue
+        issue_root = _extract_root_issue_number(root_issue_number, body)
+        issue_branch = _extract_root_branch(body, "")
+        issue_pr = _extract_root_pr_number(body)
+        if issue_root != root_issue_number:
+            continue
+        if root_branch and issue_branch and issue_branch != root_branch:
+            continue
+        if root_pr_number is not None and issue_pr is not None and issue_pr != root_pr_number:
+            continue
+        return issue
     return None
 
 
@@ -124,16 +226,28 @@ def _maybe_create_partial_debug_followup(meta: dict, result: dict, cfg: dict) ->
     if is_dispatcher_only_repo(cfg, str(repo)):
         return None
 
-    title = f"Follow up partial debug for {task_id}"
-    existing = _find_open_partial_followup(repo, task_id, title)
+    issue_snapshot = _get_issue_snapshot(str(repo), int(issue_number))
+    issue_body = str(issue_snapshot.get("body", "") or "")
+    branch = meta.get("branch", "")
+    base_branch = meta.get("base_branch", "main")
+    root_issue_number = _extract_root_issue_number(int(issue_number), issue_body)
+    root_branch = _extract_root_branch(issue_body, branch or base_branch)
+    root_pr_number = _extract_root_pr_number(issue_body)
+
+    title = f"{_FOLLOWUP_TITLE_PREFIX}{root_issue_number}"
+    existing = _find_open_partial_followup(
+        repo,
+        root_issue_number=root_issue_number,
+        root_branch=root_branch,
+        root_pr_number=root_pr_number,
+        title=title,
+    )
     if existing:
         return existing.get("url")
 
     summary = redact_text(result.get("summary", "No summary provided."))
     blocker_code = str(result.get("blocker_code", "")).strip() or "none"
-    branch = meta.get("branch", "")
-    base_branch = meta.get("base_branch", "main")
-    preserved_ci_context = _extract_preserved_ci_context(_get_issue_body(str(repo), int(issue_number)))
+    preserved_ci_context = _extract_preserved_ci_context(issue_body)
     preserved_ci_block = (
         f"\n## Preserved CI Context\n{preserved_ci_context}\n"
         if preserved_ci_context
@@ -162,6 +276,19 @@ debugging
 
 ## Branch
 {branch or f"agent/{task_id}"}
+
+## Root Issue Number
+{root_issue_number}
+
+## Root Branch
+{root_branch or branch or base_branch}
+"""
+    if root_pr_number is not None:
+        body += f"""
+## Root PR Number
+{root_pr_number}
+"""
+    body += f"""
 
 ## Context
 Original issue: #{issue_number}
@@ -220,6 +347,11 @@ def sync_result(meta: dict, result: dict, commit_hash: str | None):
     owner = cfg["github_owner"]
 
     status = result.get("status", "blocked")
+    current_issue = _get_issue_snapshot(str(repo), int(issue_number))
+    if status in ("partial", "blocked") and _issue_is_terminal(current_issue):
+        _reconcile_terminal_issue_state(cfg, project_cfg, str(repo), int(issue_number), str(issue_url))
+        return {"followup_issue_url": None, "skipped_terminal_issue": True}
+
     summary = redact_text(result.get("summary", "No summary."))
     next_step = redact_text(result.get("next_step", "None"))
     blocker_code = str(result.get("blocker_code", "")).strip()

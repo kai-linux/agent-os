@@ -28,6 +28,12 @@ from orchestrator.repo_modes import is_dispatcher_only_repo
 MAX_MERGE_ATTEMPTS = 3
 STATE_FILE_NAME = "pr_monitor_state.json"
 _CI_REMEDIATION_RE = re.compile(r"^Fix CI failure on PR #(\d+)$")
+_FOLLOWUP_TITLE_RE = re.compile(r"^Follow up partial debug for root issue #(\d+)$")
+_ROOT_ISSUE_RE = re.compile(r"^## Root Issue Number\s*\n(\d+)\s*$", re.MULTILINE)
+_ROOT_PR_RE = re.compile(r"^## Root PR Number\s*\n(\d+)\s*$", re.MULTILINE)
+_ROOT_BRANCH_RE = re.compile(r"^## Root Branch\s*\n(.+?)\s*$", re.MULTILINE)
+_BRANCH_RE = re.compile(r"^## Branch\s*\n(.+?)\s*$", re.MULTILINE)
+_ORIGINAL_ISSUE_RE = re.compile(r"Original issue:\s+#(\d+)", re.IGNORECASE)
 
 _FORK_PR_CLOSE_MSG = (
     "Closed automatically — this repository does not accept pull requests "
@@ -173,6 +179,26 @@ def _branch_has_commits_ahead_of_main(repo: str, branch: str, base: str = "main"
         return False
 
 
+def _find_merged_pr_for_task(repo: str, task_id: str) -> dict | None:
+    if not task_id:
+        return None
+    title = f"Agent: {task_id}"
+    try:
+        prs = gh_json([
+            "pr", "list", "-R", repo, "--state", "merged",
+            "--search", title,
+            "--json", "number,title,headRefName,url",
+            "--limit", "20",
+        ]) or []
+    except Exception:
+        return None
+
+    for pr in prs:
+        if (pr.get("title") or "").strip() == title:
+            return pr
+    return None
+
+
 def _create_prs_for_orphan_branches(repos: set[str]):
     """Open PRs for agent branches that have commits but no open PR yet."""
     for repo in sorted(repos):
@@ -194,6 +220,9 @@ def _create_prs_for_orphan_branches(repos: set[str]):
                 continue
             # Extract task_id slug from branch name (agent/<task_id>)
             task_id = branch[len("agent/"):]
+            if _find_merged_pr_for_task(repo, task_id):
+                print(f"  Skipping orphan branch {branch}: merged PR already exists for task {task_id}")
+                continue
             title = f"Agent: {task_id}"
             body = f"Automated changes from agent branch `{branch}`."
             pr_url = create_pr_for_branch(repo, branch, title, body)
@@ -322,6 +351,46 @@ def _find_issue_by_title(repo: str, title: str, *, state: str = "open") -> dict 
     return None
 
 
+def _list_followup_debug_issues(repo: str, *, state: str = "open") -> list[dict]:
+    try:
+        issues = gh_json([
+            "issue", "list", "-R", repo, "--state", state,
+            "--search", '"Follow up partial debug"',
+            "--json", "number,title,body,state,labels,url",
+            "--limit", "100",
+        ]) or []
+    except Exception:
+        return []
+    return [issue for issue in issues if _FOLLOWUP_TITLE_RE.match(issue.get("title", ""))]
+
+
+def _extract_followup_root_issue(issue: dict) -> int | None:
+    body = issue.get("body", "") or ""
+    match = _ROOT_ISSUE_RE.search(body)
+    if match:
+        return int(match.group(1))
+    legacy = _ORIGINAL_ISSUE_RE.search(body)
+    if legacy:
+        return int(legacy.group(1))
+    return None
+
+
+def _extract_followup_root_pr(issue: dict) -> int | None:
+    match = _ROOT_PR_RE.search(issue.get("body", "") or "")
+    if match:
+        return int(match.group(1))
+    return None
+
+
+def _extract_followup_branch(issue: dict) -> str:
+    body = issue.get("body", "") or ""
+    for pattern in (_ROOT_BRANCH_RE, _BRANCH_RE):
+        match = pattern.search(body)
+        if match:
+            return match.group(1).strip()
+    return ""
+
+
 def _set_project_issue_status(cfg: dict, repo: str, issue_number: int, status_value: str):
     owner = cfg.get("github_owner", "")
     _project_key, project_cfg, _repo_cfg = _find_repo_project(cfg, repo)
@@ -362,6 +431,66 @@ def _mark_issue_done(cfg: dict, repo: str, issue_number: int, *, close_issue: bo
             print(f"Warning: failed to close {repo}#{issue_number}: {e}")
     if project_cfg:
         _set_project_issue_status(cfg, repo, issue_number, project_cfg.get("done_value", "Done"))
+
+
+def _reconcile_issue_board_state(cfg: dict, repo: str, issue: dict):
+    issue_number = issue.get("number")
+    if not issue_number:
+        return
+    state = str(issue.get("state", "")).upper()
+    labels = {lbl.get("name", "").strip().lower() for lbl in issue.get("labels", []) if isinstance(lbl, dict)}
+    if state == "CLOSED" and ("blocked" in labels or "in-progress" in labels or "ready" in labels or "agent-dispatched" in labels):
+        _mark_issue_done(
+            cfg,
+            repo,
+            int(issue_number),
+            close_issue=False,
+            comment=None,
+        )
+
+
+def _cleanup_descendant_followup_issues(cfg: dict, repo: str, *, remediation_issue_number: int | None, pr_number: int, branch: str) -> int:
+    closed = 0
+    for issue in _list_followup_debug_issues(repo, state="open"):
+        followup_branch = _extract_followup_branch(issue)
+        followup_root_issue = _extract_followup_root_issue(issue)
+        followup_root_pr = _extract_followup_root_pr(issue)
+
+        matches_branch = bool(branch and followup_branch == branch)
+        matches_root_issue = remediation_issue_number is not None and followup_root_issue == remediation_issue_number
+        matches_root_pr = followup_root_pr == pr_number
+        if not (matches_branch or matches_root_issue or matches_root_pr):
+            continue
+
+        _mark_issue_done(
+            cfg,
+            repo,
+            int(issue["number"]),
+            close_issue=True,
+            comment=f"✅ Closed automatically after PR #{pr_number} merged and superseded this follow-up chain.",
+        )
+        closed += 1
+    return closed
+
+
+def _close_stale_redundant_agent_prs(repo: str) -> int:
+    closed = 0
+    for pr in _list_agent_prs(repo):
+        task_id = extract_task_id_from_pr_title(pr.get("title"))
+        if not task_id:
+            continue
+        merged = _find_merged_pr_for_task(repo, task_id)
+        if not merged or merged.get("number") == pr.get("number"):
+            continue
+        try:
+            gh([
+                "pr", "close", str(pr["number"]), "-R", repo,
+                "--comment", f"Closed automatically as stale automation drift; PR #{merged['number']} already merged for task `{task_id}`.",
+            ], check=False)
+            closed += 1
+        except Exception as e:
+            print(f"Warning: failed to close stale PR #{pr['number']} in {repo}: {e}")
+    return closed
 
 
 def _mark_issue_in_progress(cfg: dict, repo: str, issue_number: int, *, reopen_issue: bool, comment: str | None = None):
@@ -412,6 +541,7 @@ def _cleanup_merged_pr_issues(cfg: dict, repo: str, pr: dict):
     pr_number = pr["number"]
     issue_number = _extract_issue_number(pr.get("body", ""))
     task_id = extract_task_id_from_pr_title(pr.get("title"))
+    branch = str(pr.get("headRefName", "")).strip()
     prior_records = load_outcome_records(cfg, repo=repo)
     outcome_check_ids: list[str] = []
     merge_already_logged = False
@@ -454,16 +584,25 @@ def _cleanup_merged_pr_issues(cfg: dict, repo: str, pr: dict):
             comment=f"✅ PR #{pr_number} merged successfully. Clearing blocked state and marking the issue done.",
         )
 
+    remediation_issue_number = None
     remediation_title = f"Fix CI failure on PR #{pr_number}"
     remediation_issue = _find_open_issue_by_title(repo, remediation_title)
     if remediation_issue and remediation_issue.get("number"):
+        remediation_issue_number = int(remediation_issue["number"])
         _mark_issue_done(
             cfg,
             repo,
-            int(remediation_issue["number"]),
+            remediation_issue_number,
             close_issue=True,
             comment=f"✅ Resolved automatically after PR #{pr_number} merged.",
         )
+    _cleanup_descendant_followup_issues(
+        cfg,
+        repo,
+        remediation_issue_number=remediation_issue_number,
+        pr_number=pr_number,
+        branch=branch,
+    )
 
 
 def _reconcile_open_pr_state(cfg: dict, repo: str, pr: dict, checks: list[dict], state: dict) -> bool:
@@ -527,6 +666,20 @@ def _get_pr(repo: str, pr_number: int) -> dict | None:
 
 def _cleanup_stale_ci_remediation_issues(cfg: dict, repo: str, state: dict) -> bool:
     changed = False
+    try:
+        remediation_issues = gh_json([
+            "issue", "list", "-R", repo, "--state", "all",
+            "--search", '"Fix CI failure on PR #"',
+            "--json", "number,title,body,state,labels,url",
+            "--limit", "100",
+        ]) or []
+    except Exception:
+        remediation_issues = []
+    for issue in remediation_issues:
+        if _CI_REMEDIATION_RE.match(issue.get("title", "")):
+            _reconcile_issue_board_state(cfg, repo, issue)
+    for issue in _list_followup_debug_issues(repo, state="all"):
+        _reconcile_issue_board_state(cfg, repo, issue)
     for issue in _list_open_ci_remediation_issues(repo):
         match = _CI_REMEDIATION_RE.match(issue.get("title", ""))
         if not match:
@@ -762,6 +915,11 @@ def monitor_prs():
     # Housekeeping: close PRs from forks
     _close_fork_prs(repos)
 
+    stale_prs_closed = False
+    for repo in sorted(repos):
+        if _close_stale_redundant_agent_prs(repo):
+            stale_prs_closed = True
+
     # Open PRs for agent branches that completed but have no PR yet
     _create_prs_for_orphan_branches(repos)
 
@@ -770,7 +928,7 @@ def monitor_prs():
     for repo in sorted(repos):
         if _cleanup_stale_ci_remediation_issues(cfg, repo, state):
             state_changed = True
-    if state_changed:
+    if state_changed or stale_prs_closed:
         _save_state(paths, state)
 
     for repo in sorted(repos):

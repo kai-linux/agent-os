@@ -45,14 +45,24 @@ def test_sync_result_partial_debug_creates_single_deduped_followup(monkeypatch):
             return {
                 "body": "## Context\n- PR: https://github.com/owner/repo/pull/71\n- Failed checks:\n- **pytest**: `failure`\n"
             }
-        if len(searches) == 1:
-            return []
-        return [{
-            "number": 88,
-            "title": "Follow up partial debug for task-123",
-            "url": "https://github.com/owner/repo/issues/88",
-            "body": "## Original Task ID\ntask-123\n",
-        }]
+        if cmd == ["issue", "view", "7", "-R", "owner/repo", "--json", "number,state,body,labels,url"]:
+            return {
+                "number": 7,
+                "state": "OPEN",
+                "url": "https://github.com/owner/repo/issues/7",
+                "labels": [{"name": "in-progress"}],
+                "body": "## Context\n- PR: https://github.com/owner/repo/pull/71\n- Failed checks:\n- **pytest**: `failure`\n",
+            }
+        if cmd[:6] == ["issue", "list", "-R", "owner/repo", "--state", "open"]:
+            if sum(1 for entry in searches if entry[:6] == ["issue", "list", "-R", "owner/repo", "--state", "open"]) == 1:
+                return []
+            return [{
+                "number": 88,
+                "title": "Follow up partial debug for root issue #7",
+                "url": "https://github.com/owner/repo/issues/88",
+                "body": "## Root Issue Number\n7\n\n## Root PR Number\n71\n\n## Root Branch\nagent/task-123\n\n## Original Task ID\ntask-123\n",
+            }]
+        return {}
 
     monkeypatch.setattr(github_sync, "gh_json", fake_gh_json)
 
@@ -92,7 +102,10 @@ def test_sync_result_partial_debug_creates_single_deduped_followup(monkeypatch):
     assert first["followup_issue_url"] == "https://github.com/owner/repo/issues/88"
     assert second["followup_issue_url"] == "https://github.com/owner/repo/issues/88"
     assert len(created) == 1
-    assert created[0][1] == "Follow up partial debug for task-123"
+    assert created[0][1] == "Follow up partial debug for root issue #7"
+    assert "## Root Issue Number\n7" in created[0][2]
+    assert "## Root PR Number\n71" in created[0][2]
+    assert "## Root Branch\nagent/task-123" in created[0][2]
     assert "## Original Task ID\ntask-123" in created[0][2]
     assert "## Remaining Failure\nStill failing in the parser" in created[0][2]
     assert "## Goal\nReproduce the parser failure with fixture B enabled" in created[0][2]
@@ -154,6 +167,14 @@ def test_sync_result_partial_pr_ci_recovery_keeps_branch_handoff_and_ready_follo
             return {
                 "body": "## Context\n- PR: https://github.com/owner/repo/pull/71\n- Failed checks:\n- **pytest**: `failure`\n"
             }
+        if cmd == ["issue", "view", "73", "-R", "owner/repo", "--json", "number,state,body,labels,url"]:
+            return {
+                "number": 73,
+                "state": "OPEN",
+                "url": "https://github.com/owner/repo/issues/73",
+                "labels": [{"name": "in-progress"}],
+                "body": "## Context\n- PR: https://github.com/owner/repo/pull/71\n- Failed checks:\n- **pytest**: `failure`\n",
+            }
         return []
 
     monkeypatch.setattr(github_sync, "gh_json", fake_gh_json)
@@ -192,10 +213,12 @@ def test_sync_result_partial_pr_ci_recovery_keeps_branch_handoff_and_ready_follo
 
     assert sync["followup_issue_url"] == "https://github.com/owner/repo/issues/88"
     assert len(created) == 1
-    assert created[0][1] == "Follow up partial debug for task-20260320-105114-fix-ci-failure-on-pr-71"
+    assert created[0][1] == "Follow up partial debug for root issue #73"
     assert "## Goal\nResolve the committed merge-conflict markers on the existing PR branch" in created[0][2]
     assert "## Base Branch\nagent/task-20260320-101116-add-post-merge-outcome-attribution-for-issue-pr-an" in created[0][2]
     assert "## Branch\nagent/task-20260320-101116-add-post-merge-outcome-attribution-for-issue-pr-an" in created[0][2]
+    assert "## Root Issue Number\n73" in created[0][2]
+    assert "## Root PR Number\n71" in created[0][2]
     assert "Original issue: #73" in created[0][2]
     assert "## Preserved CI Context\n- PR: https://github.com/owner/repo/pull/71\n- Failed checks:\n- **pytest**: `failure`" in created[0][2]
     assert created[0][3] == ["ready", "prio:high"]
@@ -401,4 +424,55 @@ def test_sync_result_complete_without_pr_closes_issue(monkeypatch):
         }
     ]
     assert gh_calls == [["issue", "close", "64", "-R", "kai-linux/agent-os"]]
+    assert project_status_calls == ["opt-done"]
+
+
+def test_sync_result_partial_skips_terminal_issue_and_reconciles_done(monkeypatch):
+    monkeypatch.setattr("orchestrator.github_sync.load_config", lambda: _cfg())
+    comments = []
+    monkeypatch.setattr("orchestrator.github_sync.add_issue_comment", lambda repo, issue, body: comments.append(body))
+    create_calls = []
+    monkeypatch.setattr("orchestrator.github_sync._create_issue", lambda *args, **kwargs: create_calls.append(args))
+    label_calls = []
+    monkeypatch.setattr(
+        "orchestrator.github_sync.edit_issue_labels",
+        lambda repo, issue, add=None, remove=None: label_calls.append({"issue": issue, "add": add, "remove": remove}),
+    )
+    monkeypatch.setattr(
+        "orchestrator.github_sync.query_project",
+        lambda project_number, owner: {
+            "project_id": "proj",
+            "status_field_id": "field",
+            "status_options": {"Done": "opt-done"},
+            "items": [{"url": "https://github.com/kai-linux/agent-os/issues/64", "item_id": "item-64"}],
+        },
+    )
+    project_status_calls = []
+    monkeypatch.setattr(
+        "orchestrator.github_sync.set_item_status",
+        lambda project_id, item_id, field_id, option_id: project_status_calls.append(option_id),
+    )
+    monkeypatch.setattr(
+        "orchestrator.github_sync.gh_json",
+        lambda cmd: {
+            "number": 64,
+            "state": "CLOSED",
+            "url": "https://github.com/kai-linux/agent-os/issues/64",
+            "labels": [{"name": "blocked"}, {"name": "done"}],
+            "body": "## Context\n- PR: https://github.com/kai-linux/agent-os/pull/98\n",
+        } if cmd == ["issue", "view", "64", "-R", "kai-linux/agent-os", "--json", "number,state,body,labels,url"] else {},
+    )
+
+    sync = github_sync.sync_result(_meta(), {"status": "partial", "summary": "still pending", "next_step": "retry"}, None)
+
+    assert sync == {"followup_issue_url": None, "skipped_terminal_issue": True}
+    assert create_calls == []
+    assert comments == []
+    assert label_calls == [
+        {
+            "issue": 64,
+            "add": ["done"],
+            "remove": ["blocked", "ready", "in-progress", "agent-dispatched"],
+        }
+    ]
     assert project_status_calls == ["opt-done"]
