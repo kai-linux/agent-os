@@ -10,6 +10,12 @@ You give it a backlog. It ships product.
 
 ---
 
+## Goal
+
+Make Agent OS the most credible autonomous software organization for technical founders and solo builders: a system that can reliably turn backlog input into useful shipped work, improve itself from operational evidence, and earn trust through visible results. Prioritize work that increases adoption, reliability, evidence quality, and operator confidence over work that only creates attention.
+
+---
+
 ## The Team
 
 Every startup needs roles. Agent OS fills them all:
