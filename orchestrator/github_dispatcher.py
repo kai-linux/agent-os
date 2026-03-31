@@ -72,6 +72,11 @@ def parse_issue_body(body: str) -> dict:
     for name, content in SECTION_RE.findall(body or ""):
         sections[name.strip().lower()] = content.strip()
 
+    context = sections.get("context", "").strip()
+    preserved_ci_context = sections.get("preserved ci context", "").strip()
+    if preserved_ci_context:
+        context = "\n".join(part for part in [context, preserved_ci_context] if part).strip()
+
     return {
         "goal": sections.get("goal", "").strip(),
         "success_criteria": sections.get("success criteria", "").strip(),
@@ -79,7 +84,7 @@ def parse_issue_body(body: str) -> dict:
         "agent_preference": sections.get("agent preference", "").strip().lower() or "auto",
         "outcome_checks": parse_outcome_check_ids(sections.get("outcome checks", "")),
         "constraints": sections.get("constraints", "").strip(),
-        "context": sections.get("context", "").strip(),
+        "context": context,
         "base_branch": sections.get("base branch", "").strip(),
         "branch": sections.get("branch", "").strip(),
     }

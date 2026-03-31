@@ -219,6 +219,88 @@ Measure adoption
     assert parsed["outcome_checks"] == ["activation_rate", "signup_completion"]
 
 
+def test_parse_issue_body_merges_preserved_ci_context():
+    body = """
+## Goal
+Repair CI
+
+## Context
+Original issue: #73
+
+## Preserved CI Context
+- PR: https://github.com/owner/repo/pull/71
+- Failed checks:
+- **pytest**: `failure`
+"""
+
+    parsed = gd.parse_issue_body(body)
+
+    assert "Original issue: #73" in parsed["context"]
+    assert "- PR: https://github.com/owner/repo/pull/71" in parsed["context"]
+    assert "- Failed checks:" in parsed["context"]
+    assert "- **pytest**: `failure`" in parsed["context"]
+
+
+def test_build_mailbox_task_preserves_failed_ci_check_context_from_followup_issue(monkeypatch):
+    cfg = {
+        "default_agent": "auto",
+        "default_task_type": "implementation",
+        "default_base_branch": "main",
+        "default_allow_push": True,
+        "default_max_attempts": 4,
+        "max_runtime_minutes": 40,
+        "formatter_model": None,
+    }
+    repo_cfg = {"local_repo": "/tmp/repo", "github_repo": "owner/repo"}
+    issue = {
+        "number": 88,
+        "title": "Follow up partial debug for task-123",
+        "url": "https://github.com/owner/repo/issues/88",
+        "labels": [],
+        "body": """
+## Goal
+Investigate the remaining CI failure.
+
+## Task Type
+debugging
+
+## Branch
+agent/task-71
+
+## Context
+Original issue: #73
+
+## Preserved CI Context
+- PR: https://github.com/owner/repo/pull/71
+- Failed checks:
+- **pytest**: `failure`
+""",
+    }
+
+    monkeypatch.setattr(
+        gd,
+        "format_task",
+        lambda title, body, model=None: {
+            "goal": "Investigate the remaining CI failure.",
+            "success_criteria": "- Make CI green",
+            "task_type": "debugging",
+            "agent_preference": "auto",
+            "outcome_checks": [],
+            "constraints": "- Prefer minimal diffs",
+            "context": "- Investigate the failing workflow rerun.",
+            "base_branch": "",
+            "branch": "agent/task-71",
+        },
+    )
+
+    _task_id, mailbox = gd.build_mailbox_task(cfg, "proj", repo_cfg, issue)
+
+    assert "- Investigate the failing workflow rerun." in mailbox
+    assert "- PR: https://github.com/owner/repo/pull/71" in mailbox
+    assert "- Failed checks:" in mailbox
+    assert "- **pytest**: `failure`" in mailbox
+
+
 def test_build_mailbox_task_preserves_failed_ci_check_context_when_formatter_summarizes(monkeypatch):
     cfg = {
         "default_agent": "auto",
