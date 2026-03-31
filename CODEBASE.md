@@ -16,6 +16,16 @@
 
 ## Recent Changes
 
+### 2026-03-31 — [task-20260331-105617-integrate-production-feedback-metrics-into-task-sc] (#95 kai-linux/agent-os)
+Integrated fresh PRODUCTION_FEEDBACK.md signals into strategic planner backlog ranking and post-plan prioritization so recent failures, blocker patterns, and recovery signals can reorder candidates, raise priority, and be cited directly in plan rationale.
+
+**Files:** `- orchestrator/strategic_planner.py`, `- tests/test_strategic_planner.py`, `- .agent_result.md`
+
+**Decisions:**
+  - - Reused the existing PRODUCTION_FEEDBACK.md artifact format and parsed only its stable headings/bullets instead of redesigning the artifact
+  - - Kept the integration bounded to lightweight keyword scoring and one-step priority promotion so production evidence influences planning without replacing the planner model
+
+
 ### 2026-03-31 — [task-20260331-105417-prevent-invalid-agent-assignments-in-task-dispatch] (#94 kai-linux/agent-os)
 Dispatcher-side agent validation now rejects invalid agent preferences and blocks issues when no configured agent is currently available, preventing mailbox tasks from being created with impossible assignments like `agent=none`.
 
