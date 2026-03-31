@@ -25,15 +25,36 @@ That means sprint selection should favor work that increases:
 
 
 
+
 <!-- auto-focus-areas -->
-- Harden execution reliability by reducing CI, publish, and control-plane failure modes before tasks run or close
-- Improve activation and product credibility through clearer strategy, stronger docs, and public proof of shipped autonomous work
-- Close the loop on blocked and partial work with structured recovery, reruns, quarantines, and bounded follow-ups
-- Strengthen evidence-driven planning through automated research, production-feedback, objective scoring, and sprint-derived strategy artifacts
-- Improve observability and auditability with prompt snapshots, outcome attribution, blocker codes, and failure artifact capture
-- Advance agent autonomy through better task decomposition, dependency handling, adaptive routing, and multi-repo planning
+- Closed-loop task recovery and execution automation
+- Outcome measurement and evidence-driven planning
+- Task dispatch reliability and execution control
+- Control-plane observability and debugging infrastructure
+- Planning automation and artifact synthesis
 
 ## Sprint History
+
+### Sprint 2026-03-31
+
+**Retrospective:**
+Outcome evidence:
+- #55 / PR #75 / No measurable external metric: inconclusive — Merged work had no configured outcome check, so it is explicitly tracked as inconclusive instead of being treated as impact-free or automatically successful.
+- #50 / PR #81 / No measurable external metric: inconclusive — Merged work had no configured outcome check, so it is explicitly tracked as inconclusive instead of being treated as impact-free or automatically successful.
+- #63 / PR #82 / No measurable external metric: inconclusive — Merged work had no configured outcome check, so it is explicitly tracked as inconclusive instead of being treated as impact-free or automatically successful.
+- #76 / PR #83 / No measurable external metric: inconclusive — Merged work had no configured outcome check, so it is explicitly tracked as inconclusive instead of being treated as impact-free or automatically successful.
+- #78 / PR #84 / No measurable external metric: inconclusive — Merged work had no configured outcome check, so it is explicitly tracked as inconclusive instead of being treated as impact-free or automatically successful.
+- #45 / PR #80 / No measurable external metric: inconclusive — Merged work had no configured outcome check, so it is explicitly tracked as inconclusive instead of being treated as impact-free or automatically successful.
+- #85 / PR #89 / No measurable external metric: inconclusive — Merged work had no configured outcome check, so it is explicitly tracked as inconclusive instead of being treated as impact-free or automatically successful.
+- #47 / PR #90 / No measurable external metric: inconclusive — Merged work had no configured outcome check, so it is explicitly tracked as inconclusive instead of being treated as impact-free or automatically successful.
+
+**Plan:**
+- [prio:high] Prevent invalid agent assignments in task dispatcher: Task metrics show repeated blocked tasks with agent=none — this is the single highest-leverage reliability fix because it removes a systemic failure mode at the dispatch layer, which the planning principles rank above all local feature work.
+- [prio:high] Fix deepseek auth failures in agent-os: Deepseek auth failures caused three task failures on 03-20 and reduced effective agent pool capacity — fixing this removes a repeated execution blocker and restores fallback chain reliability.
+- [prio:high] Integrate production feedback metrics into task scoring: All 8 recent outcome attributions are inconclusive and production feedback infrastructure exists but is not consumed — this is the clearest path from Level 3 toward Level 4 closed-loop optimization.
+- [prio:normal] Escalate blocked tasks with no assigned agent within 1 cycle: Compounds with #94 to close the blocked-task recovery loop — even after preventing new agent=none assignments, existing and future blocked tasks need a timely escalation path to avoid silent stalls.
+- [prio:normal] Add a Goal section to README.md: The strategy prioritizes activation and credibility for trusted adoption — a clear Goal section is a quick, high-visibility improvement that compounds across every future visitor and every agent that reads README.md for context.
+
 
 ### Sprint 2026-03-20
 
