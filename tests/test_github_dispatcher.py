@@ -90,6 +90,102 @@ def test_requeue_unblocked_items_sets_status_ready(monkeypatch):
     assert calls == [("project-1", "item-1", "status-field", "ready-option")]
 
 
+def test_escalate_unassigned_blocked_tasks_marks_first_cycle(tmp_path):
+    blocked = tmp_path / "blocked"
+    escalated = tmp_path / "escalated"
+    blocked.mkdir()
+    escalated.mkdir()
+
+    task_path = blocked / "task-current.md"
+    task_path.write_text("""---
+task_id: task-current
+repo: /tmp/repo
+agent: none
+task_type: implementation
+branch: agent/task-current
+---
+
+# Goal
+
+Fix the task.
+""", encoding="utf-8")
+
+    changed = gd._escalate_unassigned_blocked_tasks({"BLOCKED": blocked, "ESCALATED": escalated})
+
+    assert changed is True
+    updated = task_path.read_text(encoding="utf-8")
+    assert "agent: none" in updated
+    assert f"{gd.UNASSIGNED_BLOCKED_SEEN_AT}:" in updated
+    assert list(escalated.iterdir()) == []
+
+
+def test_escalate_unassigned_blocked_tasks_moves_to_escalated_on_next_cycle(tmp_path):
+    blocked = tmp_path / "blocked"
+    escalated = tmp_path / "escalated"
+    blocked.mkdir()
+    escalated.mkdir()
+
+    task_path = blocked / "task-current.md"
+    task_path.write_text("""---
+task_id: task-current
+parent_task_id: task-root
+repo: /tmp/repo
+agent: none
+task_type: implementation
+branch: agent/task-current
+unassigned_blocked_seen_at: 2026-03-31T10:55:20
+---
+
+# Goal
+
+Fix the task.
+""", encoding="utf-8")
+
+    changed = gd._escalate_unassigned_blocked_tasks({"BLOCKED": blocked, "ESCALATED": escalated})
+
+    assert changed is True
+    moved_task = escalated / "task-current.md"
+    note_path = escalated / "task-root-escalation.md"
+    assert moved_task.exists()
+    assert note_path.exists()
+    assert not task_path.exists()
+    moved_text = moved_task.read_text(encoding="utf-8")
+    assert "escalation_note: task-root-escalation.md" in moved_text
+    assert "escalated_at:" in moved_text
+    note_text = note_path.read_text(encoding="utf-8")
+    assert "## Parent Task ID" in note_text
+    assert "task-root" in note_text
+    assert "Blocked task has no assigned agent after one scheduler cycle." in note_text
+    assert "agent=none" in note_text
+
+
+def test_escalate_unassigned_blocked_tasks_skips_assigned_tasks(tmp_path):
+    blocked = tmp_path / "blocked"
+    escalated = tmp_path / "escalated"
+    blocked.mkdir()
+    escalated.mkdir()
+
+    task_path = blocked / "task-current.md"
+    original = """---
+task_id: task-current
+repo: /tmp/repo
+agent: codex
+unassigned_blocked_seen_at: 2026-03-31T10:55:20
+---
+
+# Goal
+
+Fix the task.
+"""
+    task_path.write_text(original, encoding="utf-8")
+
+    changed = gd._escalate_unassigned_blocked_tasks({"BLOCKED": blocked, "ESCALATED": escalated})
+
+    assert changed is False
+    assert task_path.read_text(encoding="utf-8") == original
+    assert list(escalated.iterdir()) == []
+
+
 def test_parse_issue_body_extracts_branch_fields():
     body = """
 ## Goal
