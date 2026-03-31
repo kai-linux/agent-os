@@ -16,6 +16,16 @@
 
 ## Recent Changes
 
+### 2026-03-31 — [task-20260331-105417-prevent-invalid-agent-assignments-in-task-dispatch] (#94 kai-linux/agent-os)
+Dispatcher-side agent validation now rejects invalid agent preferences and blocks issues when no configured agent is currently available, preventing mailbox tasks from being created with impossible assignments like `agent=none`.
+
+**Files:** `- orchestrator/github_dispatcher.py`, `- tests/test_github_dispatcher.py`, `- .agent_result.md`
+
+**Decisions:**
+  - - Reused the queue's existing agent availability checks via a lazy wrapper instead of introducing a second availability source.
+  - - Kept the failure handling in the dispatcher's existing skip/block path so unavailable-agent tasks become explicit blocked issues rather than silent drops or inbox artifacts.
+
+
 ### 2026-03-31 — [task-20260331-105322-add-a-goal-section-to-readme-md] (#48 kai-linux/agent-os)
 Added a concise Goal section near the top of README.md so planners and workers can prioritize work against the core product objective without changing the rest of the document structure.
 
