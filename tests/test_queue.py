@@ -19,7 +19,6 @@ from orchestrator.queue import (
     get_agent_chain,
     handle_telegram_callback,
     maybe_requeue_prompt_inspection_recovery,
-    maybe_emit_self_improvement_events,
     parse_agent_result,
     parse_bullets,
     rescue_git_progress,
@@ -829,48 +828,6 @@ def test_rescue_git_progress_withholds_push_when_validation_fails(tmp_path, monk
     assert "not pushed" in rescued["summary"]
     assert run_tests_calls
     assert commit_calls == []
-
-
-def test_maybe_emit_self_improvement_events_records_blocker_for_weekly_synthesis(tmp_path, monkeypatch):
-    cfg = {
-        "root_dir": str(tmp_path),
-        "github_projects": {"agent-os": {"ready_value": "Ready"}},
-    }
-    meta = {
-        "repo": "/tmp/agent-os",
-        "github_repo": "kai-linux/agent-os",
-        "github_project_key": "agent-os",
-    }
-    result = {"status": "blocked", "blocker_code": "environment_failure"}
-    metrics_dir = tmp_path / "runtime" / "metrics"
-    metrics_dir.mkdir(parents=True)
-    (metrics_dir / "agent_stats.jsonl").write_text("{}", encoding="utf-8")
-
-    urls = maybe_emit_self_improvement_events(cfg, meta, result, "codex", tmp_path / "q.log", tmp_path / "s.log")
-
-    assert urls == []
-    assert "Recorded blocker evidence for weekly synthesis" in (tmp_path / "q.log").read_text(encoding="utf-8")
-
-
-def test_maybe_emit_self_improvement_events_records_agent_evidence_without_issue_creation(tmp_path):
-    cfg = {
-        "root_dir": str(tmp_path),
-        "github_projects": {"agent-os": {"ready_value": "Ready"}},
-    }
-    meta = {
-        "repo": "/tmp/agent-os",
-        "github_repo": "kai-linux/agent-os",
-        "github_project_key": "agent-os",
-    }
-    result = {"status": "complete", "blocker_code": "none"}
-    metrics_dir = tmp_path / "runtime" / "metrics"
-    metrics_dir.mkdir(parents=True)
-    (metrics_dir / "agent_stats.jsonl").write_text("{}", encoding="utf-8")
-
-    urls = maybe_emit_self_improvement_events(cfg, meta, result, "codex", tmp_path / "q.log", tmp_path / "s.log")
-
-    assert urls == []
-    assert "Recorded runtime evidence for weekly synthesis: agent=codex" in (tmp_path / "q.log").read_text(encoding="utf-8")
 
 
 def test_handle_telegram_callback_requeue(monkeypatch):

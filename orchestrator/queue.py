@@ -792,33 +792,6 @@ def ensure_issue_project_status(cfg: dict, project_key: str, issue_url: str, sta
     raise RuntimeError(f"Issue not found on project board: {issue_url}")
 
 
-def maybe_emit_self_improvement_events(
-    cfg: dict,
-    meta: dict,
-    final_result: dict,
-    final_agent: str | None,
-    logfile: Path | None,
-    queue_summary_log: Path | None,
-) -> list[str]:
-    metrics_file = Path(cfg.get("root_dir", ".")).expanduser() / "runtime" / "metrics" / "agent_stats.jsonl"
-    status = str(final_result.get("status", "")).strip().lower()
-    blocker_code = str(final_result.get("blocker_code", "")).strip().lower()
-    if not metrics_file.exists():
-        return []
-    if status in {"partial", "blocked"} and blocker_code and blocker_code != "none":
-        log(
-            f"Recorded blocker evidence for weekly synthesis: blocker_code={blocker_code}",
-            logfile,
-            queue_summary_log=queue_summary_log,
-        )
-    elif final_agent:
-        log(
-            f"Recorded runtime evidence for weekly synthesis: agent={final_agent}",
-            logfile,
-            queue_summary_log=queue_summary_log,
-        )
-    return []
-
 
 def _is_dispatcher_only_task(cfg: dict, meta: dict) -> bool:
     github_repo = str(meta.get("github_repo", "")).strip()
@@ -1935,7 +1908,6 @@ def record_metrics(
         raise
 
     log(f"Metrics recorded for {record['task_id']}: status={record['status']}, agent={record['agent']}", logfile, queue_summary_log=queue_summary_log)
-    maybe_emit_self_improvement_events(cfg, meta, final_result, final_agent, logfile, queue_summary_log)
 
 
 def synthesize_exhausted_result(model_attempts: list[str]) -> dict:
