@@ -101,6 +101,31 @@ SIGNALS_MAX_SOURCE_CHARS = FEEDBACK_MAX_SOURCE_CHARS
 SIGNALS_CONTEXT_MAX_CHARS = FEEDBACK_CONTEXT_MAX_CHARS
 OUTCOME_CONTEXT_MAX_CHARS = 4000
 OUTCOME_MAX_CHECKS = 12
+PRODUCTION_PRIORITY_KEYWORDS = {
+    "recent_failures": [
+        "bug", "failure", "reliability", "debug", "fix", "ci", "test",
+        "queue", "dispatcher", "blocked", "blocker",
+    ],
+    "blocked_patterns": [
+        "blocked", "blocker", "unblock", "dispatch", "routing", "queue",
+        "retry", "recovery",
+    ],
+    "recovery_signals": [
+        "retry", "recovery", "rerun", "outcome", "metric", "metrics",
+        "measurement", "evidence", "attribution", "observability", "planning",
+    ],
+}
+BLOCKER_CODE_KEYWORDS = {
+    "missing_credentials": ["credential", "credentials", "secret", "token", "auth", "permission"],
+    "environment_failure": ["environment", "tooling", "sandbox", "install", "runtime", "workflow", "ci"],
+    "dependency_blocked": ["dependency", "dependencies", "blocked", "blocker", "unblock", "sequencing"],
+    "invalid_result_contract": ["result", "contract", "schema", "parser", "validation"],
+    "push_not_ready": ["push", "publish", "remote", "branch", "git"],
+    "runner_failure": ["runner", "execution", "runtime"],
+    "test_failure": ["test", "pytest", "ci", "workflow"],
+}
+PRIORITY_RANK = {"prio:high": 2, "prio:normal": 1, "prio:low": 0}
+PRIORITY_BY_RANK = {value: key for key, value in PRIORITY_RANK.items()}
 
 
 def _format_cadence(days: float) -> str:
@@ -353,7 +378,12 @@ def _format_backlog_for_prompt(issues: list[dict]) -> str:
         labels = ", ".join(l.get("name", "") for l in i.get("labels", []))
         lbl = f" [{labels}]" if labels else ""
         body_preview = (i.get("body") or "")[:200].replace("\n", " ")
-        lines.append(f"- #{i['number']}: {i['title']}{lbl}\n  {body_preview}")
+        score = int(i.get("_production_feedback_score", 0) or 0)
+        reasons = [str(reason).strip() for reason in i.get("_production_feedback_reasons", []) if str(reason).strip()]
+        production_note = ""
+        if score > 0 and reasons:
+            production_note = f"\n  Production ranking signals: score={score}; " + "; ".join(reasons[:3])
+        lines.append(f"- #{i['number']}: {i['title']}{lbl}\n  {body_preview}{production_note}")
     return "\n".join(lines)
 
 
@@ -1382,6 +1412,193 @@ def _production_feedback_context(cfg: dict, github_slug: str, repo_path: Path) -
     _write_production_feedback_artifact(repo_path, artifact_path, sections, refresh_hours, feedback_cfg)
     content = artifact_path.read_text(encoding="utf-8", errors="replace").strip()
     return content[:FEEDBACK_CONTEXT_MAX_CHARS] if content else "(empty production feedback artifact)"
+
+
+def _parse_feedback_observed_at_text(raw: str | None) -> datetime | None:
+    value = str(raw or "").strip()
+    if not value or value == "unspecified":
+        return None
+    if value.endswith(" UTC"):
+        value = value[:-4].replace(" ", "T") + "+00:00"
+    return _parse_signal_timestamp(value)
+
+
+def _parse_production_feedback_sections(content: str) -> tuple[float | None, list[dict]]:
+    stale_after_match = re.search(r"^- Default stale after: ([0-9.]+)h$", content, re.MULTILINE)
+    stale_after_hours = float(stale_after_match.group(1)) if stale_after_match else None
+    sections: list[dict] = []
+    blocks = re.split(r"(?m)^## ", content)
+    for block in blocks[1:]:
+        block = "## " + block
+        lines = block.splitlines()
+        if not lines:
+            continue
+        name = lines[0][3:].strip()
+        planning_use_match = re.search(r"^- Planning Use: (.+)$", block, re.MULTILINE)
+        observed_at_match = re.search(r"^- Observed At: (.+)$", block, re.MULTILINE)
+        key_evidence_match = re.search(r"(?ms)^### Key Evidence\s*\n\n(.*?)(?:\n### |\Z)", block)
+        planning_implications_match = re.search(r"(?ms)^### Planning Implications\s*\n\n(.*?)(?:\n### |\Z)", block)
+        sections.append({
+            "name": name,
+            "planning_use": (planning_use_match.group(1).strip().lower() if planning_use_match else ""),
+            "observed_at": _parse_feedback_observed_at_text(observed_at_match.group(1) if observed_at_match else None),
+            "key_evidence": [
+                line[2:].strip()
+                for line in (key_evidence_match.group(1).splitlines() if key_evidence_match else [])
+                if line.startswith("- ")
+            ],
+            "planning_implications": [
+                line[2:].strip()
+                for line in (planning_implications_match.group(1).splitlines() if planning_implications_match else [])
+                if line.startswith("- ")
+            ],
+        })
+    return stale_after_hours, sections
+
+
+def _evidence_count_map(lines: list[str]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for line in lines:
+        match = re.match(r"(.+?):\s*(\d+)$", line)
+        if not match:
+            continue
+        counts[match.group(1).strip().lower()] = int(match.group(2))
+    return counts
+
+
+def _production_priority_signals(content: str) -> list[dict]:
+    stale_after_hours, sections = _parse_production_feedback_sections(content)
+    now = datetime.now(tz=timezone.utc)
+    signals: list[dict] = []
+    for section in sections:
+        if section["planning_use"] != "included":
+            continue
+        observed_at = section["observed_at"]
+        if observed_at is None:
+            continue
+        if stale_after_hours is not None:
+            age_hours = max(0.0, (now - observed_at).total_seconds() / 3600.0)
+            if age_hours > stale_after_hours:
+                continue
+        counts = _evidence_count_map(section["key_evidence"])
+        if section["name"] == "Recent Failures":
+            blocked = counts.get("blocked outcomes", 0)
+            partial = counts.get("partial outcomes", 0)
+            total = blocked + partial
+            if total <= 0:
+                continue
+            signals.append({
+                "name": "Recent Failures",
+                "metric": total,
+                "detail": f"blocked={blocked}, partial={partial}",
+                "keywords": list(PRODUCTION_PRIORITY_KEYWORDS["recent_failures"]),
+                "weight": min(5, 2 + total),
+            })
+        elif section["name"] == "Blocked-Task Patterns":
+            repeated = [(name, count) for name, count in counts.items() if name != "no blocker-code repetitions were observed in the current sprint window."]
+            if not repeated:
+                continue
+            repeated.sort(key=lambda item: (-item[1], item[0]))
+            blocker_code, blocker_count = repeated[0]
+            signals.append({
+                "name": "Blocked-Task Patterns",
+                "metric": blocker_count,
+                "detail": f"{blocker_code}={blocker_count}",
+                "keywords": list(PRODUCTION_PRIORITY_KEYWORDS["blocked_patterns"]) + BLOCKER_CODE_KEYWORDS.get(blocker_code, []),
+                "weight": min(5, 2 + blocker_count),
+            })
+        elif section["name"] == "Repeat-Recovery Signals":
+            recovery_total = sum(counts.values())
+            if recovery_total <= 0:
+                continue
+            signals.append({
+                "name": "Repeat-Recovery Signals",
+                "metric": recovery_total,
+                "detail": ", ".join(f"{name}={count}" for name, count in sorted(counts.items()))[:120],
+                "keywords": list(PRODUCTION_PRIORITY_KEYWORDS["recovery_signals"]),
+                "weight": min(5, 2 + recovery_total),
+            })
+    return signals
+
+
+def _score_issue_from_production_feedback(issue: dict, signals: list[dict]) -> tuple[int, list[str]]:
+    text_parts = [
+        str(issue.get("title") or ""),
+        str(issue.get("body") or ""),
+        " ".join(str(label.get("name") or "") for label in issue.get("labels", [])),
+    ]
+    haystack = " ".join(text_parts).lower()
+    score = 0
+    reasons: list[str] = []
+    for signal in signals:
+        hits = [keyword for keyword in signal["keywords"] if keyword in haystack]
+        if not hits:
+            continue
+        score += signal["weight"] + min(2, max(0, len(hits) - 1))
+        reasons.append(f"{signal['name']} ({signal['detail']})")
+    return score, reasons
+
+
+def _prioritize_backlog_with_production_feedback(
+    backlog: list[dict],
+    production_feedback_context: str,
+) -> list[dict]:
+    signals = _production_priority_signals(production_feedback_context)
+    if not backlog or not signals:
+        return backlog
+    enriched = []
+    for issue in backlog:
+        score, reasons = _score_issue_from_production_feedback(issue, signals)
+        updated = dict(issue)
+        updated["_production_feedback_score"] = score
+        updated["_production_feedback_reasons"] = reasons
+        enriched.append(updated)
+    enriched.sort(
+        key=lambda issue: (
+            -int(issue.get("_production_feedback_score", 0)),
+            issue.get("createdAt", ""),
+        )
+    )
+    return enriched
+
+
+def _adjust_priority_from_production_feedback(priority: str, score: int) -> str:
+    normalized = str(priority or "prio:normal").strip().lower()
+    if normalized not in PRIORITY_RANK:
+        normalized = "prio:normal"
+    if score < 5:
+        return normalized
+    return PRIORITY_BY_RANK[min(PRIORITY_RANK[normalized] + 1, PRIORITY_RANK["prio:high"])]
+
+
+def _apply_production_feedback_to_plan(plan: list[dict], backlog: list[dict]) -> list[dict]:
+    if not plan:
+        return plan
+    backlog_by_number = {
+        int(issue["number"]): issue
+        for issue in backlog
+        if str(issue.get("number", "")).isdigit()
+    }
+    enriched: list[tuple[int, int, dict]] = []
+    for index, task in enumerate(plan):
+        issue_number = task.get("issue_number")
+        issue = backlog_by_number.get(int(issue_number)) if str(issue_number).isdigit() else None
+        score = int(issue.get("_production_feedback_score", 0)) if issue else 0
+        reasons = list(issue.get("_production_feedback_reasons", [])) if issue else []
+        updated = dict(task)
+        if reasons:
+            rationale = str(updated.get("rationale", "")).strip()
+            signal_note = "; ".join(reasons[:3])
+            if signal_note not in rationale:
+                updated["rationale"] = (
+                    f"{rationale} Production signals: {signal_note}."
+                    if rationale else f"Production signals: {signal_note}."
+                )
+            updated["priority"] = _adjust_priority_from_production_feedback(updated.get("priority", "prio:normal"), score)
+        updated["_production_feedback_score"] = score
+        enriched.append((score, index, updated))
+    enriched.sort(key=lambda item: (-item[0], item[1]))
+    return [task for _, _, task in enriched]
 
 
 def _planning_signals_context(cfg: dict, github_slug: str, repo_path: Path) -> str:
@@ -2560,6 +2777,7 @@ def plan_repo(
 
     # 12. Backlog issues (candidates for promotion — trusted authors only)
     backlog = _backlog_issues(github_slug, cfg)
+    backlog = _prioritize_backlog_with_production_feedback(backlog, production_feedback_context)
     backlog_text = _format_backlog_for_prompt(backlog)
     print(f"  Backlog candidates: {len(backlog)}")
 
@@ -2603,6 +2821,7 @@ def plan_repo(
         print(f"  Failed to parse plan: {e}\n  Raw: {raw[:300]}")
         return None, "", None
 
+    plan = _apply_production_feedback_to_plan(plan, backlog)
     print(f"  Generated {len(plan)} tasks")
     if not plan and empty_reason:
         print(f"  Planner rationale for empty plan: {empty_reason}")

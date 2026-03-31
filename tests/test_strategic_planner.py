@@ -40,7 +40,9 @@ from orchestrator.strategic_planner import (
     _order_repos_by_dependencies,
     _planning_research_context,
     _production_feedback_context,
+    _production_priority_signals,
     _planning_signals_context,
+    _prioritize_backlog_with_production_feedback,
     _repo_outcome_config,
     _repo_production_feedback_config,
     _recent_outcome_summary,
@@ -49,6 +51,7 @@ from orchestrator.strategic_planner import (
     _repo_planner_config,
     _repo_research_config,
     _resolve_repos,
+    _apply_production_feedback_to_plan,
     _set_issues_ready,
     _open_issues_summary,
     _planner_allow_early_refresh,
@@ -693,6 +696,215 @@ def test_production_feedback_context_writes_no_signals_artifact_when_substrate_e
     assert "No recent failures were recorded" in context
     assert "No repeated blocked-task pattern was detected" in context
     assert "No repeat-recovery signals were recorded" in context
+
+
+def test_production_priority_signals_extract_three_fresh_metrics():
+    now = datetime.now(tz=timezone.utc).replace(microsecond=0)
+    context = textwrap.dedent(f"""\
+        # Production Feedback
+
+        - Generated: {now.strftime("%Y-%m-%d %H:%M UTC")}
+        - Refresh after: 24h
+        - Default stale after: 72h
+
+        ## Recent Failures
+
+        - Observed At: {now.strftime("%Y-%m-%d %H:%M UTC")}
+        - Planning Use: included
+
+        ### Key Evidence
+
+        - Blocked outcomes: 3
+        - Partial outcomes: 1
+
+        ### Planning Implications
+
+        - Prefer reliability work.
+
+        ## Blocked-Task Patterns
+
+        - Observed At: {now.strftime("%Y-%m-%d %H:%M UTC")}
+        - Planning Use: included
+
+        ### Key Evidence
+
+        - missing_credentials: 2
+
+        ### Planning Implications
+
+        - Remove recurring blockers.
+
+        ## Repeat-Recovery Signals
+
+        - Observed At: {now.strftime("%Y-%m-%d %H:%M UTC")}
+        - Planning Use: included
+
+        ### Key Evidence
+
+        - completed after retry: 2
+        - inconclusive: 1
+
+        ### Planning Implications
+
+        - Tighten measurement loops.
+    """)
+
+    signals = _production_priority_signals(context)
+
+    assert [signal["name"] for signal in signals] == [
+        "Recent Failures",
+        "Blocked-Task Patterns",
+        "Repeat-Recovery Signals",
+    ]
+    assert signals[0]["detail"] == "blocked=3, partial=1"
+    assert signals[1]["detail"] == "missing_credentials=2"
+    assert "completed after retry=2" in signals[2]["detail"]
+
+
+def test_production_priority_signals_ignore_stale_sections():
+    stale = datetime.now(tz=timezone.utc) - timedelta(days=10)
+    context = textwrap.dedent(f"""\
+        # Production Feedback
+
+        - Generated: {stale.strftime("%Y-%m-%d %H:%M UTC")}
+        - Refresh after: 24h
+        - Default stale after: 24h
+
+        ## Recent Failures
+
+        - Observed At: {stale.strftime("%Y-%m-%d %H:%M UTC")}
+        - Planning Use: included
+
+        ### Key Evidence
+
+        - Blocked outcomes: 5
+
+        ### Planning Implications
+
+        - Prefer reliability work.
+    """)
+
+    assert _production_priority_signals(context) == []
+
+
+def test_prioritize_backlog_with_production_feedback_reorders_matching_issues():
+    now = datetime.now(tz=timezone.utc).replace(microsecond=0)
+    context = textwrap.dedent(f"""\
+        # Production Feedback
+
+        - Generated: {now.strftime("%Y-%m-%d %H:%M UTC")}
+        - Refresh after: 24h
+        - Default stale after: 72h
+
+        ## Recent Failures
+
+        - Observed At: {now.strftime("%Y-%m-%d %H:%M UTC")}
+        - Planning Use: included
+
+        ### Key Evidence
+
+        - Blocked outcomes: 2
+        - Partial outcomes: 1
+
+        ### Planning Implications
+
+        - Prefer reliability work.
+
+        ## Blocked-Task Patterns
+
+        - Observed At: {now.strftime("%Y-%m-%d %H:%M UTC")}
+        - Planning Use: included
+
+        ### Key Evidence
+
+        - environment_failure: 2
+
+        ### Planning Implications
+
+        - Remove environment blockers.
+
+        ## Repeat-Recovery Signals
+
+        - Observed At: {now.strftime("%Y-%m-%d %H:%M UTC")}
+        - Planning Use: included
+
+        ### Key Evidence
+
+        - completed after retry: 2
+
+        ### Planning Implications
+
+        - Tighten retry loops.
+    """)
+    backlog = [
+        {
+            "number": 11,
+            "title": "Polish landing page copy",
+            "body": "Improve docs and marketing tone.",
+            "labels": [{"name": "enhancement"}],
+            "createdAt": "2026-03-30T09:00:00Z",
+        },
+        {
+            "number": 12,
+            "title": "Fix CI environment failure recovery",
+            "body": "Improve retry handling for blocked workflows and runtime failures.",
+            "labels": [{"name": "bug"}],
+            "createdAt": "2026-03-30T10:00:00Z",
+        },
+    ]
+
+    ranked = _prioritize_backlog_with_production_feedback(backlog, context)
+
+    assert [issue["number"] for issue in ranked] == [12, 11]
+    assert ranked[0]["_production_feedback_score"] > ranked[1].get("_production_feedback_score", 0)
+    assert "Recent Failures (blocked=2, partial=1)" in ranked[0]["_production_feedback_reasons"]
+
+
+def test_apply_production_feedback_to_plan_reorders_and_annotations():
+    backlog = [
+        {
+            "number": 21,
+            "title": "Polish landing page copy",
+            "body": "Improve docs and marketing tone.",
+            "labels": [{"name": "enhancement"}],
+            "_production_feedback_score": 0,
+            "_production_feedback_reasons": [],
+        },
+        {
+            "number": 22,
+            "title": "Add outcome metrics for retry recovery",
+            "body": "Track recovery and outcome attribution after retries.",
+            "labels": [{"name": "tech-debt"}],
+            "_production_feedback_score": 6,
+            "_production_feedback_reasons": [
+                "Repeat-Recovery Signals (completed after retry=2, inconclusive=1)"
+            ],
+        },
+    ]
+    plan = [
+        {
+            "action": "promote",
+            "issue_number": 21,
+            "title": "Polish landing page copy",
+            "task_type": "docs",
+            "priority": "prio:high",
+            "rationale": "Improves public clarity.",
+        },
+        {
+            "action": "promote",
+            "issue_number": 22,
+            "title": "Add outcome metrics for retry recovery",
+            "task_type": "implementation",
+            "priority": "prio:normal",
+            "rationale": "Improves observability.",
+        },
+    ]
+
+    updated = _apply_production_feedback_to_plan(plan, backlog)
+
+    assert [task["issue_number"] for task in updated] == [22, 21]
+    assert updated[0]["priority"] == "prio:high"
+    assert "Production signals: Repeat-Recovery Signals" in updated[0]["rationale"]
 
 
 def test_build_plan_prompt_includes_production_feedback():
