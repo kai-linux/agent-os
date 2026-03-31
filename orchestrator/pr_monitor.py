@@ -216,12 +216,24 @@ def _create_prs_for_orphan_branches(repos: set[str]):
 
         print(f"{repo}: checking {len(orphans)} agent branch(es) without open PRs")
         for branch in orphans:
-            if not _branch_has_commits_ahead_of_main(repo, branch):
-                continue
-            # Extract task_id slug from branch name (agent/<task_id>)
             task_id = branch[len("agent/"):]
+            if not _branch_has_commits_ahead_of_main(repo, branch):
+                # Branch is fully merged into main — delete it
+                try:
+                    gh(["api", f"repos/{repo}/git/refs/heads/{branch}",
+                        "-X", "DELETE"], check=False)
+                    print(f"  Deleted stale merged branch {branch}")
+                except Exception:
+                    pass
+                continue
             if _find_merged_pr_for_task(repo, task_id):
-                print(f"  Skipping orphan branch {branch}: merged PR already exists for task {task_id}")
+                # Has commits ahead but a PR was already merged — also delete
+                try:
+                    gh(["api", f"repos/{repo}/git/refs/heads/{branch}",
+                        "-X", "DELETE"], check=False)
+                    print(f"  Deleted branch {branch}: merged PR already exists for task {task_id}")
+                except Exception:
+                    pass
                 continue
             title = f"Agent: {task_id}"
             body = f"Automated changes from agent branch `{branch}`."

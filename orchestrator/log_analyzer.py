@@ -20,6 +20,7 @@ from orchestrator.agent_scorer import (
     findings_path as scorer_findings_path,
     load_recent_metrics,
 )
+from orchestrator.gh_project import gh as _gh, query_project, set_item_status
 from orchestrator.paths import load_config, runtime_paths
 from orchestrator.repo_modes import is_dispatcher_only_repo
 
@@ -143,6 +144,37 @@ def _create_issue(repo: str, title: str, body: str, labels: list[str]) -> str:
     if result.returncode != 0:
         raise RuntimeError(f"gh issue create failed: {result.stderr.strip()}")
     return result.stdout.strip()
+
+
+def _add_issue_to_board(cfg: dict, repo: str, issue_url: str):
+    """Add a newly created issue to the project board at Backlog status."""
+    owner = cfg.get("github_owner", "")
+    if not owner:
+        return
+    for project_cfg in cfg.get("github_projects", {}).values():
+        if not isinstance(project_cfg, dict):
+            continue
+        if not any(rc.get("github_repo") == repo for rc in project_cfg.get("repos", [])):
+            continue
+        backlog_value = project_cfg.get("backlog_value", "Backlog")
+        try:
+            raw = _gh([
+                "project", "item-add", str(project_cfg["project_number"]),
+                "--owner", owner, "--url", issue_url, "--format", "json",
+            ], check=False)
+            if not raw:
+                return
+            item_data = json.loads(raw)
+            item_id = item_data.get("id")
+            if not item_id:
+                return
+            info = query_project(project_cfg["project_number"], owner)
+            option_id = info["status_options"].get(backlog_value)
+            if info["status_field_id"] and option_id:
+                set_item_status(info["project_id"], item_id, info["status_field_id"], option_id)
+        except Exception as e:
+            print(f"Warning: failed to add {issue_url} to project board: {e}")
+        return
 
 
 def _send_telegram(cfg: dict, text: str):
@@ -415,6 +447,7 @@ def run():
             url = _create_issue(repo, title, body, labels)
             print(f"Created: {url}")
             created_urls.append(url)
+            _add_issue_to_board(cfg, repo, url)
         except Exception as e:
             print(f"Failed to create issue {title!r}: {e}")
             skipped.append(title)

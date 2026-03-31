@@ -20,7 +20,7 @@ from difflib import SequenceMatcher
 from pathlib import Path
 
 from orchestrator.paths import load_config, runtime_paths
-from orchestrator.agent_scorer import load_recent_metrics
+from orchestrator.agent_scorer import load_recent_metrics, findings_path as scorer_findings_path
 from orchestrator.gh_project import ensure_labels, query_project, set_item_status, gh
 from orchestrator.repo_context import (
     read_production_feedback_artifact,
@@ -523,6 +523,9 @@ Each object must have:
 --- Planning research artifact (PLANNING_RESEARCH.md) ---
 {research_context}
 
+--- Agent performance degradation findings (from weekly scorer) ---
+{scorer_findings}
+
 --- Recent task completions (last 30 days) ---
 {completions}
 
@@ -779,6 +782,20 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
 
     completions_text = _recent_completions_summary(records)
 
+    # Load agent scorer findings for richer remediation signals
+    scorer_text = "(none)"
+    try:
+        artifact = scorer_findings_path(root)
+        if artifact.exists():
+            payload = json.loads(artifact.read_text(encoding="utf-8"))
+            findings = payload.get("findings", [])
+            scorer_text = "\n".join(
+                f"- {f.get('title_hint', '?')} (agent={f.get('agent', '?')}, cause={f.get('degradation_cause', '?')}, rate={f.get('metrics', {}).get('rate', '?')})"
+                for f in findings[:10]
+            ) or "(none)"
+    except Exception:
+        pass
+
     open_text = "\n".join(
         f"- #{i.get('number')}: {i.get('title')}" for i in open_issues[:30]
     ) or "(none)"
@@ -797,6 +814,7 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
         planning_principles=planning_principles,
         production_feedback=production_feedback,
         research_context=research_context,
+        scorer_findings=scorer_text,
         completions=completions_text,
         open_issues=open_text,
     )

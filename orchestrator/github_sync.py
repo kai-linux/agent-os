@@ -25,12 +25,14 @@ _CI_CONTEXT_LINE_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"^\s*-\s+\*\*.+?\*\*:\s*`.+?`\s*(?:- .+)?$", re.IGNORECASE),
 )
 _FOLLOWUP_TITLE_PREFIX = "Follow up partial debug for root issue #"
+MAX_DEBUG_FOLLOWUP_DEPTH = 2
 _ROOT_ISSUE_RE = re.compile(r"^## Root Issue Number\s*\n(\d+)\s*$", re.MULTILINE)
 _ROOT_PR_RE = re.compile(r"^## Root PR Number\s*\n(\d+)\s*$", re.MULTILINE)
 _ROOT_BRANCH_RE = re.compile(r"^## Root Branch\s*\n(.+?)\s*$", re.MULTILINE)
 _BRANCH_RE = re.compile(r"^## Branch\s*\n(.+?)\s*$", re.MULTILINE)
 _ORIGINAL_ISSUE_RE = re.compile(r"Original issue:\s+#(\d+)", re.IGNORECASE)
 _PR_URL_RE = re.compile(r"/pull/(\d+)")
+_FOLLOWUP_DEPTH_RE = re.compile(r"^## Follow-up Depth\s*\n(\d+)\s*$", re.MULTILINE)
 
 
 def _find_repo_project(cfg: dict, repo: str) -> tuple[dict, dict] | tuple[None, None]:
@@ -228,6 +230,14 @@ def _maybe_create_partial_debug_followup(meta: dict, result: dict, cfg: dict) ->
 
     issue_snapshot = _get_issue_snapshot(str(repo), int(issue_number))
     issue_body = str(issue_snapshot.get("body", "") or "")
+
+    # Check follow-up depth to prevent infinite recursion
+    depth_match = _FOLLOWUP_DEPTH_RE.search(issue_body)
+    current_depth = int(depth_match.group(1)) if depth_match else 0
+    if current_depth >= MAX_DEBUG_FOLLOWUP_DEPTH:
+        print(f"Follow-up depth {current_depth} >= {MAX_DEBUG_FOLLOWUP_DEPTH}, skipping further follow-ups for #{issue_number}")
+        return None
+
     branch = meta.get("branch", "")
     base_branch = meta.get("base_branch", "main")
     root_issue_number = _extract_root_issue_number(int(issue_number), issue_body)
@@ -289,6 +299,8 @@ debugging
 {root_pr_number}
 """
     body += f"""
+## Follow-up Depth
+{current_depth + 1}
 
 ## Context
 Original issue: #{issue_number}
