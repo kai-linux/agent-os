@@ -21,6 +21,7 @@ from orchestrator.agent_scorer import (
     load_recent_metrics,
 )
 from orchestrator.gh_project import gh as _gh, query_project, set_item_status
+from orchestrator.outcome_attribution import get_repo_outcome_check_ids, format_outcome_checks_section
 from orchestrator.paths import load_config, runtime_paths
 from orchestrator.repo_modes import is_dispatcher_only_repo
 
@@ -443,6 +444,7 @@ def run():
             continue
 
         body = build_issue_body(issue, evidence_lookup)
+        body += format_outcome_checks_section(get_repo_outcome_check_ids(cfg, repo))
         try:
             url = _create_issue(repo, title, body, labels)
             print(f"Created: {url}")

@@ -14,7 +14,12 @@ from orchestrator.gh_project import (
     gh,
     gh_json,
 )
-from orchestrator.outcome_attribution import append_outcome_record, extract_pr_number
+from orchestrator.outcome_attribution import (
+    append_outcome_record,
+    extract_pr_number,
+    get_repo_outcome_check_ids,
+    format_outcome_checks_section,
+)
 from orchestrator.privacy import redact_text
 from orchestrator.repo_modes import is_dispatcher_only_repo
 
@@ -331,6 +336,7 @@ Original issue: #{issue_number}
 ### Avoid Repeating
 {bullets["attempted_approaches"]}
 """
+    body += format_outcome_checks_section(get_repo_outcome_check_ids(cfg, repo))
     labels = ["ready"]
     priority = str(meta.get("priority", "")).strip().lower()
     if priority.startswith("prio:"):

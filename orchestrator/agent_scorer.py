@@ -412,6 +412,164 @@ def write_findings(path: Path, findings: list[dict]):
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def _compute_merge_cycle_hours(records: list[dict]) -> dict:
+    """Compute mean/median hours from task start to completion for complete tasks."""
+    durations = [
+        rec["duration_seconds"] / 3600
+        for rec in records
+        if rec.get("status") == "complete" and rec.get("duration_seconds")
+    ]
+    if not durations:
+        return {"mean": None, "median": None, "count": 0}
+    durations.sort()
+    mid = len(durations) // 2
+    median = durations[mid] if len(durations) % 2 else (durations[mid - 1] + durations[mid]) / 2
+    return {"mean": sum(durations) / len(durations), "median": median, "count": len(durations)}
+
+
+def _compute_escalation_rate(records: list[dict]) -> dict:
+    """Fraction of tasks that exhausted all agents (status=blocked with no follow-up)."""
+    total = len(records)
+    if not total:
+        return {"rate": 0.0, "escalated": 0, "total": 0}
+    escalated = sum(1 for r in records if r.get("status") == "blocked")
+    return {"rate": escalated / total, "escalated": escalated, "total": total}
+
+
+def write_metrics_report(root: Path, metrics_file: Path):
+    """Write a rolling 2-week metrics report for outcome check consumption."""
+    now = datetime.now(tz=timezone.utc)
+    current_week = load_recent_metrics(metrics_file, window_days=7)
+    prior_week_all = load_recent_metrics(metrics_file, window_days=14)
+    # Subtract current week from 14-day window to get prior week
+    cutoff_7d = now - timedelta(days=7)
+    prior_week = [
+        r for r in prior_week_all
+        if _parse_ts(r) and _parse_ts(r) < cutoff_7d
+    ]
+
+    cur_rates = compute_success_rates(current_week)
+    prev_rates = compute_success_rates(prior_week)
+    cur_cycle = _compute_merge_cycle_hours(current_week)
+    prev_cycle = _compute_merge_cycle_hours(prior_week)
+    cur_esc = _compute_escalation_rate(current_week)
+    prev_esc = _compute_escalation_rate(prior_week)
+
+    def _rate_line(agent: str, stats: dict) -> str:
+        pct = round(stats["rate"] * 100)
+        return f"- {agent}: {pct}% ({stats['successes']}/{stats['total']})"
+
+    def _overall(rates: dict) -> dict:
+        total = sum(s["total"] for s in rates.values())
+        successes = sum(s["successes"] for s in rates.values())
+        return {"total": total, "successes": successes, "rate": successes / total if total else 0.0}
+
+    cur_overall = _overall(cur_rates)
+    prev_overall = _overall(prev_rates)
+
+    lines = [
+        f"# Agent-OS Metrics Report",
+        f"Generated: {now.isoformat()}",
+        "",
+        f"## Agent Success Rate (current week, last 7 days)",
+        f"Overall: {round(cur_overall['rate'] * 100)}% ({cur_overall['successes']}/{cur_overall['total']} tasks complete)",
+    ]
+    for agent in sorted(cur_rates):
+        lines.append(_rate_line(agent, cur_rates[agent]))
+    lines += [
+        "",
+        f"## Agent Success Rate (prior week, days 8-14)",
+        f"Overall: {round(prev_overall['rate'] * 100)}% ({prev_overall['successes']}/{prev_overall['total']} tasks complete)",
+    ]
+    for agent in sorted(prev_rates):
+        lines.append(_rate_line(agent, prev_rates[agent]))
+    lines += [
+        "",
+        f"## Task Completion Time",
+        f"Current week: mean {cur_cycle['mean']:.1f}h, median {cur_cycle['median']:.1f}h ({cur_cycle['count']} tasks)" if cur_cycle["mean"] else "Current week: no data",
+        f"Prior week: mean {prev_cycle['mean']:.1f}h, median {prev_cycle['median']:.1f}h ({prev_cycle['count']} tasks)" if prev_cycle["mean"] else "Prior week: no data",
+        "",
+        f"## Escalation Rate (tasks blocked after exhausting all agents)",
+        f"Current week: {round(cur_esc['rate'] * 100)}% ({cur_esc['escalated']}/{cur_esc['total']})",
+        f"Prior week: {round(prev_esc['rate'] * 100)}% ({prev_esc['escalated']}/{prev_esc['total']})",
+        "",
+        f"## Degradation Threshold",
+        f"Agents below {round(DEGRADED_THRESHOLD * 100)}% success rate are flagged for remediation.",
+        "",
+    ]
+
+    report_path = root / "runtime" / "analysis" / "metrics_report.md"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text("\n".join(lines), encoding="utf-8")
+    print(f"Wrote metrics report to {report_path}")
+    return report_path
+
+
+def write_production_feedback(root: Path, metrics_file: Path):
+    """Write PRODUCTION_FEEDBACK.md in repo root for groomer/planner consumption."""
+    now = datetime.now(tz=timezone.utc)
+    records = load_recent_metrics(metrics_file, window_days=14)
+    if not records:
+        return
+
+    rates = compute_success_rates(records)
+    cycle = _compute_merge_cycle_hours(records)
+    esc = _compute_escalation_rate(records)
+    overall_total = sum(s["total"] for s in rates.values())
+    overall_successes = sum(s["successes"] for s in rates.values())
+    overall_rate = overall_successes / overall_total if overall_total else 0.0
+
+    # Count tasks by type
+    type_counts: dict[str, int] = defaultdict(int)
+    for r in records:
+        type_counts[r.get("task_type", "unknown")] += 1
+
+    # Top blocker codes
+    blocker_counts: dict[str, int] = defaultdict(int)
+    for r in records:
+        bc = r.get("blocker_code", "")
+        if bc and bc != "none":
+            blocker_counts[bc] += 1
+
+    lines = [
+        f"# Production Feedback",
+        f"Auto-generated: {now.isoformat()}",
+        f"Window: last 14 days | Source: agent_stats.jsonl",
+        "",
+        "## Key Metrics",
+        f"- Overall success rate: {round(overall_rate * 100)}% ({overall_successes}/{overall_total})",
+        f"- Escalation rate: {round(esc['rate'] * 100)}% ({esc['escalated']}/{esc['total']})",
+        f"- Mean completion time: {cycle['mean']:.1f}h" if cycle["mean"] else "- Mean completion time: no data",
+        "",
+        "## Per-Agent Performance",
+    ]
+    for agent in sorted(rates):
+        s = rates[agent]
+        lines.append(f"- {agent}: {round(s['rate'] * 100)}% ({s['successes']}/{s['total']})")
+    lines += ["", "## Task Type Distribution"]
+    for tt in sorted(type_counts, key=lambda k: -type_counts[k]):
+        lines.append(f"- {tt}: {type_counts[tt]}")
+    if blocker_counts:
+        lines += ["", "## Top Blocker Codes"]
+        for bc in sorted(blocker_counts, key=lambda k: -blocker_counts[k])[:5]:
+            lines.append(f"- {bc}: {blocker_counts[bc]}")
+    lines.append("")
+
+    feedback_path = root / "PRODUCTION_FEEDBACK.md"
+    feedback_path.write_text("\n".join(lines), encoding="utf-8")
+    print(f"Wrote production feedback to {feedback_path}")
+
+
+def _parse_ts(rec: dict) -> datetime | None:
+    try:
+        ts = datetime.fromisoformat(rec.get("timestamp", ""))
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        return ts
+    except (ValueError, TypeError):
+        return None
+
+
 def run():
     cfg = load_config()
     root = Path(cfg.get("root_dir", ".")).expanduser()
@@ -441,6 +599,11 @@ def run():
     findings.extend(build_business_objective_findings(cfg))
     artifact = findings_path(root)
     write_findings(artifact, findings)
+
+    # Write metrics report for outcome check consumption
+    write_metrics_report(root, metrics_file)
+    # Write production feedback for groomer/planner consumption
+    write_production_feedback(root, metrics_file)
 
     if not findings:
         print(f"All agents above threshold. Wrote empty findings artifact to {artifact}.")
