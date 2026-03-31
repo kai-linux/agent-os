@@ -16,6 +16,16 @@
 
 ## Recent Changes
 
+### 2026-03-31 — [task-20260331-113316-follow-up-partial-debug-for-task-20260331-112615-f] (#106 kai-linux/agent-os)
+Validated that the existing follow-up remediation flow on this branch preserves the prior failing CI job name in GitHub debugging follow-up context and that queue-side CI verification still requires that preserved job name for rerun validation.
+
+**Files:** `- .agent_result.md`
+
+**Decisions:**
+  - - Kept the diff limited to the required result artifact because the relevant code fix was already present on the assigned branch.
+  - - Used focused regression tests instead of re-running full CI reproduction or the full test suite, since prior work had already covered those broader checks.
+
+
 ### 2026-03-31 — [task-20260331-105520-escalate-blocked-tasks-with-no-assigned-agent-with] (#57 kai-linux/agent-os)
 Added a dispatcher-cycle safeguard that marks blocked mailbox tasks with `agent=none` on first sight and escalates them on the next cycle with a structured escalation note carrying the task id and blocker context.
 
