@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 from orchestrator.paths import load_config
 from orchestrator.gh_project import (
@@ -16,6 +17,13 @@ from orchestrator.gh_project import (
 from orchestrator.outcome_attribution import append_outcome_record, extract_pr_number
 from orchestrator.privacy import redact_text
 from orchestrator.repo_modes import is_dispatcher_only_repo
+
+
+_CI_CONTEXT_LINE_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"^\s*-\s+PR:\s+.+$", re.IGNORECASE),
+    re.compile(r"^\s*-\s+Failed checks:\s*$", re.IGNORECASE),
+    re.compile(r"^\s*-\s+\*\*.+?\*\*:\s*`.+?`\s*(?:- .+)?$", re.IGNORECASE),
+)
 
 
 def _find_repo_project(cfg: dict, repo: str) -> tuple[dict, dict] | tuple[None, None]:
@@ -84,6 +92,23 @@ def _find_open_partial_followup(repo: str, task_id: str, title: str) -> dict | N
     return None
 
 
+def _extract_preserved_ci_context(body: str) -> str:
+    lines = [
+        line.rstrip()
+        for line in str(body or "").splitlines()
+        if any(pattern.match(line) for pattern in _CI_CONTEXT_LINE_PATTERNS)
+    ]
+    return "\n".join(lines).strip()
+
+
+def _get_issue_body(repo: str, issue_number: int) -> str:
+    try:
+        payload = gh_json(["issue", "view", str(issue_number), "-R", repo, "--json", "body"]) or {}
+    except Exception:
+        return ""
+    return str(payload.get("body", "") or "")
+
+
 def _maybe_create_partial_debug_followup(meta: dict, result: dict, cfg: dict) -> str | None:
     if result.get("status") != "partial":
         return None
@@ -108,6 +133,12 @@ def _maybe_create_partial_debug_followup(meta: dict, result: dict, cfg: dict) ->
     blocker_code = str(result.get("blocker_code", "")).strip() or "none"
     branch = meta.get("branch", "")
     base_branch = meta.get("base_branch", "main")
+    preserved_ci_context = _extract_preserved_ci_context(_get_issue_body(str(repo), int(issue_number)))
+    preserved_ci_block = (
+        f"\n## Preserved CI Context\n{preserved_ci_context}\n"
+        if preserved_ci_context
+        else ""
+    )
     bullets = {
         "done": "\n".join(result.get("done", ["- None"])),
         "blockers": "\n".join(result.get("blockers", ["- None"])),
@@ -134,6 +165,7 @@ debugging
 
 ## Context
 Original issue: #{issue_number}
+{preserved_ci_block}
 
 ## Original Task ID
 {task_id}

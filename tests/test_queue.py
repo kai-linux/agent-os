@@ -107,6 +107,23 @@ def test_get_agent_chain_unknown_type_falls_back_to_default():
     assert "codex" in chain
 
 
+def test_get_agent_chain_rejects_invalid_requested_agent():
+    from unittest.mock import patch
+    with patch("orchestrator.queue.agent_available", return_value=(True, None)):
+        chain = get_agent_chain({"agent": "bogus-agent", "task_type": "implementation"}, _cfg())
+    assert chain == []
+
+
+def test_get_agent_chain_skips_invalid_fallback_entries():
+    cfg = _cfg({"implementation": ["bogus-agent", "codex", "auto", "claude"]})
+
+    from unittest.mock import patch
+
+    with patch("orchestrator.queue.agent_available", return_value=(True, None)):
+        chain = get_agent_chain({"task_type": "implementation"}, cfg)
+    assert chain == ["codex", "claude"]
+
+
 def test_get_agent_chain_skips_unavailable_deepseek(monkeypatch):
     cfg = _cfg({"debugging": ["claude", "deepseek", "codex"]})
 
