@@ -125,13 +125,19 @@ def test_cleanup_merged_pr_issues_marks_original_and_remediation_done(monkeypatc
 
     monkeypatch.setattr(pm, "_extract_issue_number", lambda body: 24)
     monkeypatch.setattr(pm, "_find_open_issue_by_title", lambda repo, title: {"number": 35, "title": title})
+    descendant_calls = []
     monkeypatch.setattr(
         pm,
         "_mark_issue_done",
         lambda cfg, repo, issue_number, close_issue, comment=None: done_calls.append((repo, issue_number, close_issue, comment)),
     )
+    monkeypatch.setattr(
+        pm,
+        "_cleanup_descendant_followup_issues",
+        lambda cfg, repo, remediation_issue_number, pr_number, branch: descendant_calls.append((repo, remediation_issue_number, pr_number, branch)),
+    )
 
-    pm._cleanup_merged_pr_issues({}, "owner/repo", {"number": 34, "body": "Fixes #24"})
+    pm._cleanup_merged_pr_issues({}, "owner/repo", {"number": 34, "body": "Fixes #24", "headRefName": "agent/task-24"})
 
     assert done_calls[0][1] == 24
     assert done_calls[0][2] is True
@@ -139,6 +145,7 @@ def test_cleanup_merged_pr_issues_marks_original_and_remediation_done(monkeypatc
     assert done_calls[1][1] == 35
     assert done_calls[1][2] is True
     assert "Resolved automatically after PR #34 merged" in done_calls[1][3]
+    assert descendant_calls == [("owner/repo", 35, 34, "agent/task-24")]
 
 
 def test_cleanup_stale_ci_remediation_issues_for_merged_pr(monkeypatch):
@@ -229,6 +236,83 @@ def test_reconcile_open_pr_state_reopens_closed_remediation_and_clears_attempts(
     assert ready_calls and ready_calls[0][1] == 73
     assert "PR #71 is still failing CI" in ready_calls[0][3]
     assert state == {}
+
+
+def test_cleanup_descendant_followup_issues_closes_matching_branch_chain(monkeypatch):
+    issues = [
+        {
+            "number": 102,
+            "title": "Follow up partial debug for root issue #99",
+            "body": "## Root Issue Number\n99\n\n## Root PR Number\n98\n\n## Root Branch\nagent/task-99\n",
+        },
+        {
+            "number": 103,
+            "title": "Follow up partial debug for root issue #50",
+            "body": "## Root Issue Number\n50\n\n## RootBranch\nagent/other\n",
+        },
+        {
+            "number": 104,
+            "title": "Follow up partial debug for root issue #77",
+            "body": "## Branch\nagent/task-99\n",
+        },
+    ]
+    monkeypatch.setattr(pm, "_list_followup_debug_issues", lambda repo, state="open": issues)
+    done_calls = []
+    monkeypatch.setattr(
+        pm,
+        "_mark_issue_done",
+        lambda cfg, repo, issue_number, close_issue, comment=None: done_calls.append((issue_number, close_issue, comment)),
+    )
+
+    closed = pm._cleanup_descendant_followup_issues({}, "owner/repo", remediation_issue_number=99, pr_number=98, branch="agent/task-99")
+
+    assert closed == 2
+    assert done_calls[0][0] == 102
+    assert done_calls[1][0] == 104
+    assert all(call[1] is True for call in done_calls)
+
+
+def test_close_stale_redundant_agent_prs_closes_second_pr_after_merge(monkeypatch):
+    monkeypatch.setattr(
+        pm,
+        "_list_agent_prs",
+        lambda repo: [
+            {"number": 107, "title": "Agent: task-123", "headRefName": "agent/task-123"},
+            {"number": 108, "title": "Agent: task-999", "headRefName": "agent/task-999"},
+        ],
+    )
+    monkeypatch.setattr(
+        pm,
+        "_find_merged_pr_for_task",
+        lambda repo, task_id: {"number": 98} if task_id == "task-123" else None,
+    )
+    gh_calls = []
+    monkeypatch.setattr(pm, "gh", lambda args, check=False: gh_calls.append(args) or "")
+
+    closed = pm._close_stale_redundant_agent_prs("owner/repo")
+
+    assert closed == 1
+    assert gh_calls == [[
+        "pr", "close", "107", "-R", "owner/repo",
+        "--comment", "Closed automatically as stale automation drift; PR #98 already merged for task `task-123`.",
+    ]]
+
+
+def test_reconcile_issue_board_state_normalizes_closed_blocked_issue(monkeypatch):
+    done_calls = []
+    monkeypatch.setattr(
+        pm,
+        "_mark_issue_done",
+        lambda cfg, repo, issue_number, close_issue, comment=None: done_calls.append((issue_number, close_issue, comment)),
+    )
+
+    pm._reconcile_issue_board_state(
+        {},
+        "owner/repo",
+        {"number": 99, "state": "CLOSED", "labels": [{"name": "blocked"}, {"name": "done"}]},
+    )
+
+    assert done_calls == [(99, False, None)]
 
 
 # ---------------------------------------------------------------------------
