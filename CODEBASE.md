@@ -16,6 +16,16 @@
 
 ## Recent Changes
 
+### 2026-03-31 — [task-20260331-105322-add-a-goal-section-to-readme-md] (#48 kai-linux/agent-os)
+Added a concise Goal section near the top of README.md so planners and workers can prioritize work against the core product objective without changing the rest of the document structure.
+
+**Files:** `- README.md`, `- .agent_result.md`
+
+**Decisions:**
+  - - Placed the Goal section directly after the opening product description so it is visible before implementation details
+  - - Reused the repository's existing strategic language around credibility, trusted adoption, reliability, and evidence-driven improvement
+
+
 ### 2026-03-20 — [task-20260320-161412-backfill-the-current-sprint-production-feedback-ar] (#86 kai-linux/agent-os)
 deepseek failed before producing a valid result file. Runner exited with code 1 while executing `/home/kai/agent-os/bin/agent_runner.sh deepseek /srv/worktrees/agent-os/task-20260320-161412-backfill-the-current-sprint-production-feedback-ar /home/kai/agent-os/runtime/tmp/task-20260320-161412-backfill-the-current-sprint-production-feedback-ar.txt`. Classified as: authentication failure. Orchestrator rescued and pushed the worktree changes.
 
