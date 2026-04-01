@@ -16,6 +16,16 @@
 
 ## Recent Changes
 
+### 2026-04-01 — [task-20260401-120519-cluster-ci-failures-by-error-signature-to-deduplic] (#115 kai-linux/agent-os)
+Added conservative CI failure signature extraction and used it to cluster duplicate ready debug issues behind one primary task while keeping dependent issues for audit, then auto-resolved those dependents when the parent fix completed.
+
+**Files:** `- orchestrator/ci_failure_signatures.py`, `- orchestrator/github_dispatcher.py`, `- orchestrator/github_sync.py`, `- tests/test_github_dispatcher.py`, `- tests/test_github_sync.py`, `- .agent_result.md`
+
+**Decisions:**
+  - - Kept signature matching conservative by requiring at least two anchors from error type, code location, and stack frame before clustering.
+  - - Reused existing dependency handling by attaching duplicate issues to a primary via `Depends on #N` plus an explicit duplicate-parent marker instead of adding a new queue state.
+
+
 ### 2026-04-01 — [task-20260401-120417-implement-automatic-escalation-for-over-retried-bl] (#113 kai-linux/agent-os)
 Added dispatcher-side automatic escalation for repeatedly blocked unowned tasks, including deduped GitHub comments, Telegram retry/close/skip decision cards, and structured escalation context built from task lineage and attempt logs.
 
