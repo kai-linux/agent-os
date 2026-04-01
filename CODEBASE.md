@@ -16,6 +16,16 @@
 
 ## Recent Changes
 
+### 2026-04-01 — [task-20260401-120417-implement-automatic-escalation-for-over-retried-bl] (#113 kai-linux/agent-os)
+Added dispatcher-side automatic escalation for repeatedly blocked unowned tasks, including deduped GitHub comments, Telegram retry/close/skip decision cards, and structured escalation context built from task lineage and attempt logs.
+
+**Files:** `- orchestrator/github_dispatcher.py`, `- orchestrator/queue.py`, `- tests/test_github_dispatcher.py`, `- tests/test_queue.py`, `- .agent_result.md`
+
+**Decisions:**
+  - - Kept the new escalation in the dispatcher so blocked tasks can be surfaced for human review without changing queue routing or mailbox task state.
+  - - Reused the existing Telegram action store and dispatcher retry-decision note flow instead of introducing a second human-decision persistence path.
+
+
 ### 2026-04-01 — [task-20260401-120316-add-agent-health-checks-to-task-dispatch-routing] (#112 kai-linux/agent-os)
 Added a cached 24-hour agent health gate to dispatch routing so agents at or below an 80% recent success rate are skipped during fallback evaluation, and dispatch now blocks with an explicit human-review escalation when no healthy candidate remains.
 
