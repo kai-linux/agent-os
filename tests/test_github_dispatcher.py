@@ -114,7 +114,7 @@ branch: agent/task-current
 Fix the task.
 """, encoding="utf-8")
 
-    changed = gd._escalate_unassigned_blocked_tasks({"BLOCKED": blocked, "ESCALATED": escalated})
+    changed = gd._escalate_unassigned_blocked_tasks({}, {"BLOCKED": blocked, "ESCALATED": escalated, "DONE": tmp_path / "done"})
 
     assert changed is True
     updated = task_path.read_text(encoding="utf-8")
@@ -145,7 +145,7 @@ unassigned_blocked_seen_at: 2026-03-31T10:55:20
 Fix the task.
 """, encoding="utf-8")
 
-    changed = gd._escalate_unassigned_blocked_tasks({"BLOCKED": blocked, "ESCALATED": escalated})
+    changed = gd._escalate_unassigned_blocked_tasks({}, {"BLOCKED": blocked, "ESCALATED": escalated, "DONE": tmp_path / "done"})
 
     assert changed is True
     moved_task = escalated / "task-current.md"
@@ -183,7 +183,7 @@ Fix the task.
 """
     task_path.write_text(original, encoding="utf-8")
 
-    changed = gd._escalate_unassigned_blocked_tasks({"BLOCKED": blocked, "ESCALATED": escalated})
+    changed = gd._escalate_unassigned_blocked_tasks({}, {"BLOCKED": blocked, "ESCALATED": escalated, "DONE": tmp_path / "done"})
 
     assert changed is False
     assert task_path.read_text(encoding="utf-8") == original
