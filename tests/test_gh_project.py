@@ -8,7 +8,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from orchestrator import gh_project
 from orchestrator import pr_monitor as pm
-from orchestrator.pr_monitor import _checks_all_passed, _checks_any_failed, _extract_issue_number
+from orchestrator.pr_monitor import (
+    _checks_all_passed,
+    _checks_any_failed,
+    _extract_issue_number,
+    _get_conflicted_files,
+    _try_union_resolve,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -414,3 +420,106 @@ def test_get_issue_can_fetch_comments_explicitly(monkeypatch):
         "issue", "view", "42", "-R", "kai-linux/agent-os",
         "--json", "number,title,body,labels,url,updatedAt,comments",
     ]]
+
+
+# ---------------------------------------------------------------------------
+# _get_conflicted_files
+# ---------------------------------------------------------------------------
+
+
+def test_get_conflicted_files(tmp_path, monkeypatch):
+    """Returns conflicted file list, excluding CODEBASE.md and .agent_result.md."""
+    import subprocess as _sp
+    orig_run = _sp.run
+
+    def mock_run(cmd, **kw):
+        if "diff" in cmd and "--diff-filter=U" in cmd:
+            r = Mock()
+            r.returncode = 0
+            r.stdout = "CODEBASE.md\nfoo.py\n.agent_result.md\nbar.py\n"
+            return r
+        return orig_run(cmd, **kw)
+
+    monkeypatch.setattr(_sp, "run", mock_run)
+    result = _get_conflicted_files(tmp_path)
+    assert result == ["foo.py", "bar.py"]
+
+
+def test_get_conflicted_files_none(tmp_path, monkeypatch):
+    """Returns empty list when no conflicts."""
+    import subprocess as _sp
+
+    def mock_run(cmd, **kw):
+        r = Mock()
+        r.returncode = 0
+        r.stdout = ""
+        return r
+
+    monkeypatch.setattr(_sp, "run", mock_run)
+    assert _get_conflicted_files(tmp_path) == []
+
+
+# ---------------------------------------------------------------------------
+# _try_union_resolve
+# ---------------------------------------------------------------------------
+
+
+def test_try_union_resolve_strips_markers(tmp_path, monkeypatch):
+    """Union resolve keeps both sides and strips conflict markers."""
+    import subprocess as _sp
+    git_add_calls = []
+    orig_run = _sp.run
+
+    def mock_run(cmd, **kw):
+        if "add" in cmd:
+            git_add_calls.append(cmd)
+            r = Mock()
+            r.returncode = 0
+            return r
+        return orig_run(cmd, **kw)
+
+    monkeypatch.setattr(_sp, "run", mock_run)
+
+    conflicted = tmp_path / "foo.py"
+    conflicted.write_text(
+        "import os\n"
+        "<<<<<<< HEAD\n"
+        "def hello():\n"
+        "    pass\n"
+        "=======\n"
+        "def world():\n"
+        "    pass\n"
+        ">>>>>>> feature\n"
+        "# end\n"
+    )
+
+    result = _try_union_resolve(tmp_path, ["foo.py"])
+    assert result is True
+
+    resolved = conflicted.read_text()
+    assert "<<<<<<" not in resolved
+    assert "=======" not in resolved
+    assert ">>>>>>>" not in resolved
+    assert "def hello():" in resolved
+    assert "def world():" in resolved
+    assert "# end" in resolved
+
+
+def test_try_union_resolve_missing_file(tmp_path, monkeypatch):
+    """Returns False when a conflicted file doesn't exist."""
+    result = _try_union_resolve(tmp_path, ["nonexistent.py"])
+    assert result is False
+
+
+def test_try_union_resolve_no_markers(tmp_path, monkeypatch):
+    """Files without markers are skipped (considered already resolved)."""
+    import subprocess as _sp
+    monkeypatch.setattr(_sp, "run", lambda cmd, **kw: Mock(returncode=0))
+
+    clean = tmp_path / "clean.py"
+    clean.write_text("def foo():\n    pass\n")
+
+    result = _try_union_resolve(tmp_path, ["clean.py"])
+    assert result is True
+    # Content unchanged
+    assert clean.read_text() == "def foo():\n    pass\n"
