@@ -23,6 +23,7 @@ from orchestrator.codebase_memory import read_codebase_context, update_codebase_
 from orchestrator.gh_project import add_issue_comment, gh, gh_json, query_project, set_item_status
 from orchestrator.repo_context import build_execution_context
 from orchestrator.repo_modes import is_dispatcher_only_repo
+from orchestrator.agent_scorer import filter_healthy_agents
 
 
 TELEGRAM_ACTION_TTL_HOURS = 48
@@ -1605,7 +1606,9 @@ def get_agent_chain(meta: dict, cfg: dict) -> list[str]:
         available, _reason = agent_available(agent)
         if available:
             filtered.append(agent)
-    return filtered
+    metrics_file = Path(cfg.get("root_dir", ".")).expanduser() / "runtime" / "metrics" / "agent_stats.jsonl"
+    healthy, _skipped = filter_healthy_agents(filtered, metrics_file)
+    return healthy
 
 
 def get_next_agent(meta: dict, cfg: dict, model_attempts: list[str]) -> str | None:

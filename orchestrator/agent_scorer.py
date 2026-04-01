@@ -19,6 +19,8 @@ from orchestrator.repo_modes import is_dispatcher_only_repo
 
 DEGRADED_THRESHOLD = 0.60
 WINDOW_DAYS = 7
+HEALTH_CHECK_WINDOW_DAYS = 1
+HEALTHY_SUCCESS_RATE_THRESHOLD = 0.80
 MIN_TASKS_FOR_DEGRADED_FINDING = 4
 MIN_PEER_TASKS_FOR_MODEL_SELECTION = 3
 FINDINGS_FILENAME = "agent_scorer_findings.json"
@@ -31,6 +33,7 @@ BLOCKER_CAUSE_MAP = {
     "test_failure": "environment",
 }
 BUSINESS_SCORE_THRESHOLD = -0.15
+_RECENT_RATE_CACHE: dict[tuple[str, int, float], dict[str, dict]] = {}
 
 
 def load_recent_metrics(metrics_file: Path, window_days: int = WINDOW_DAYS) -> list[dict]:
@@ -71,6 +74,43 @@ def compute_success_rates(records: list[dict]) -> dict[str, dict]:
         agent: {**v, "rate": v["successes"] / v["total"] if v["total"] else 0.0}
         for agent, v in counts.items()
     }
+
+
+def recent_success_rates(metrics_file: Path, window_days: float = HEALTH_CHECK_WINDOW_DAYS) -> dict[str, dict]:
+    """Return cached recent success rates keyed by agent."""
+    try:
+        mtime_ns = metrics_file.stat().st_mtime_ns
+    except FileNotFoundError:
+        mtime_ns = -1
+    cache_key = (str(metrics_file), mtime_ns, window_days)
+    cached = _RECENT_RATE_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    rates = compute_success_rates(load_recent_metrics(metrics_file, window_days=window_days))
+    _RECENT_RATE_CACHE.clear()
+    _RECENT_RATE_CACHE[cache_key] = rates
+    return rates
+
+
+def filter_healthy_agents(
+    agents: list[str],
+    metrics_file: Path,
+    *,
+    threshold: float = HEALTHY_SUCCESS_RATE_THRESHOLD,
+    window_days: float = HEALTH_CHECK_WINDOW_DAYS,
+) -> tuple[list[str], dict[str, dict]]:
+    """Return healthy agents and skipped-agent stats for the recent metrics window."""
+    rates = recent_success_rates(metrics_file, window_days=window_days)
+    healthy: list[str] = []
+    skipped: dict[str, dict] = {}
+    for agent in agents:
+        stats = rates.get(agent)
+        if stats and stats.get("total", 0) > 0 and stats.get("rate", 0.0) <= threshold:
+            skipped[agent] = stats
+            continue
+        healthy.append(agent)
+    return healthy, skipped
 
 
 def degraded_agents(rates: dict[str, dict], threshold: float = DEGRADED_THRESHOLD) -> list[tuple[str, float, int]]:
