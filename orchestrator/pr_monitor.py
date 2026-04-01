@@ -197,6 +197,25 @@ def _branch_has_commits_ahead_of_main(repo: str, branch: str, base: str = "main"
         return False
 
 
+def _find_issue_for_task(repo: str, task_id: str) -> int | None:
+    """Search for an open or recently closed issue that was dispatched for this task."""
+    if not task_id:
+        return None
+    try:
+        issues = gh_json([
+            "issue", "list", "-R", repo, "--state", "all",
+            "--search", task_id, "--json", "number,body",
+            "--limit", "10",
+        ]) or []
+    except Exception:
+        return None
+    for issue in issues:
+        body = issue.get("body", "")
+        if task_id in body or f"agent/{task_id}" in body:
+            return int(issue["number"])
+    return None
+
+
 def _find_merged_pr_for_task(repo: str, task_id: str) -> dict | None:
     if not task_id:
         return None
@@ -254,7 +273,12 @@ def _create_prs_for_orphan_branches(repos: set[str]):
                     pass
                 continue
             title = f"Agent: {task_id}"
-            body = f"Automated changes from agent branch `{branch}`."
+            # Try to find the linked issue number for proper cleanup on merge
+            issue_number = _find_issue_for_task(repo, task_id)
+            if issue_number:
+                body = f"Automated changes for issue #{issue_number}"
+            else:
+                body = f"Automated changes from agent branch `{branch}`."
             pr_url = create_pr_for_branch(repo, branch, title, body)
             if pr_url:
                 print(f"  Opened PR for orphan branch {branch}: {pr_url}")
