@@ -443,8 +443,13 @@ def run():
             skipped.append(title)
             continue
 
+        if "bot-generated" not in labels:
+            labels.append("bot-generated")
+
         body = build_issue_body(issue, evidence_lookup)
-        body += format_outcome_checks_section(get_repo_outcome_check_ids(cfg, repo))
+        body += format_outcome_checks_section(
+            get_repo_outcome_check_ids(cfg, repo, issue_labels=labels)
+        )
         try:
             url = _create_issue(repo, title, body, labels)
             print(f"Created: {url}")

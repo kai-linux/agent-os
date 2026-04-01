@@ -31,8 +31,17 @@ def parse_outcome_check_ids(section_text: str) -> list[str]:
     return ids
 
 
-def get_repo_outcome_check_ids(cfg: dict, github_slug: str) -> list[str]:
-    """Return outcome check IDs configured for a repo (global + repo override)."""
+def get_repo_outcome_check_ids(
+    cfg: dict,
+    github_slug: str,
+    issue_labels: list[str] | None = None,
+) -> list[str]:
+    """Return outcome check IDs configured for a repo (global + repo override).
+
+    When *issue_labels* is provided, only checks whose ``labels`` field
+    overlaps with the issue labels (or checks with no ``labels`` restriction)
+    are returned.  This enables per-issue-type outcome measurement.
+    """
     outcome_cfg = dict(cfg.get("outcome_attribution") or {})
     for project_cfg in cfg.get("github_projects", {}).values():
         if not isinstance(project_cfg, dict):
@@ -50,7 +59,21 @@ def get_repo_outcome_check_ids(cfg: dict, github_slug: str) -> list[str]:
             continue
         break
     checks = outcome_cfg.get("checks") or []
-    return [str(c.get("id", "")).strip() for c in checks if isinstance(c, dict) and str(c.get("id", "")).strip()]
+    normalized_labels = {l.strip().lower() for l in (issue_labels or []) if l.strip()} if issue_labels else None
+    ids: list[str] = []
+    for c in checks:
+        if not isinstance(c, dict):
+            continue
+        check_id = str(c.get("id", "")).strip()
+        if not check_id:
+            continue
+        check_labels = c.get("labels")
+        if check_labels and normalized_labels is not None:
+            check_label_set = {str(l).strip().lower() for l in check_labels if str(l).strip()}
+            if not check_label_set & normalized_labels:
+                continue
+        ids.append(check_id)
+    return ids
 
 
 def format_outcome_checks_section(check_ids: list[str]) -> str:
