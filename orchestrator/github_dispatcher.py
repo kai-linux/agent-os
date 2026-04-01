@@ -10,6 +10,7 @@ from pathlib import Path
 
 import yaml
 
+from orchestrator.ci_failure_signatures import extract_ci_failure_signature, extract_signature_from_body
 from orchestrator.paths import load_config, runtime_paths
 from orchestrator.gh_project import (
     get_ready_items,
@@ -59,6 +60,7 @@ CI_CONTEXT_LINE_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"^\s*-\s+\*\*.+?\*\*:\s*`.+?`\s*(?:- .+)?$", re.IGNORECASE),
 )
 BLOCKED_ESCALATION_COMMENT_MARKER = "<!-- agent-os-blocked-task-escalation -->"
+_DUPLICATE_PARENT_RE = re.compile(r"^## Duplicate CI Signature Parent\s*\n#?(\d+)\s*$", re.MULTILINE)
 
 
 def slugify(text: str) -> str:
@@ -123,6 +125,93 @@ def parse_issue_dependencies(body: str) -> list[int]:
         if number not in deps:
             deps.append(number)
     return deps
+
+
+def _extract_duplicate_parent_issue(body: str) -> int | None:
+    match = _DUPLICATE_PARENT_RE.search(body or "")
+    if not match:
+        return None
+    return int(match.group(1))
+
+
+def _issue_debug_signature(issue: dict) -> str | None:
+    body = issue.get("body", "") or ""
+    parsed = parse_issue_body(body)
+    if parsed.get("task_type") != "debugging":
+        return None
+    return extract_ci_failure_signature(issue.get("title", "") or "", body)
+
+
+def _attach_duplicate_signature_dependency(
+    repo_full: str,
+    dependent_issue: dict,
+    primary_issue: dict,
+    info: dict | None,
+    project_cfg: dict,
+    signature: str,
+):
+    dependent_number = int(dependent_issue["number"])
+    primary_number = int(primary_issue["number"])
+    body = dependent_issue.get("body", "") or ""
+    dependencies = parse_issue_dependencies(body)
+    if dependencies:
+        return
+
+    signature_section = ""
+    if not extract_signature_from_body(body):
+        signature_section = f"\n## CI Failure Signature\n{signature}\n"
+    suffix = (
+        f"\n\nDepends on #{primary_number}\n"
+        f"{signature_section}\n"
+        f"## Duplicate CI Signature Parent\n#{primary_number}\n"
+    )
+    gh([
+        "api",
+        f"repos/{repo_full}/issues/{dependent_number}",
+        "-X", "PATCH",
+        "-f", f"body={body.rstrip()}{suffix}",
+    ], check=False)
+
+    edit_issue_labels(
+        repo_full,
+        dependent_number,
+        add=["blocked"],
+        remove=["ready", "in-progress", "agent-dispatched"],
+    )
+    add_issue_comment(
+        repo_full,
+        dependent_number,
+        (
+            f"Blocked automatically behind #{primary_number} because it matches the same CI failure signature.\n\n"
+            f"`{signature}`"
+        ),
+    )
+    if info is not None and dependent_issue.get("item_id"):
+        _set_project_status(info, dependent_issue["item_id"], project_cfg.get("blocked_value", "Blocked"))
+
+
+def _cluster_duplicate_debug_issues(
+    cfg: dict,
+    repo_full: str,
+    primary_issue: dict,
+    info: dict | None,
+    project_cfg: dict,
+    ready_items: list[dict],
+):
+    signature = _issue_debug_signature(primary_issue)
+    if not signature:
+        return
+
+    for candidate in ready_items:
+        if candidate.get("repo") != repo_full or candidate.get("number") == primary_issue.get("number"):
+            continue
+        if parse_issue_dependencies(candidate.get("body", "") or ""):
+            continue
+        if _extract_duplicate_parent_issue(candidate.get("body", "") or ""):
+            continue
+        if _issue_debug_signature(candidate) != signature:
+            continue
+        _attach_duplicate_signature_dependency(repo_full, candidate, primary_issue, info, project_cfg, signature)
 
 
 def _repo_agent_fallbacks(cfg: dict, project_key: str) -> dict:
@@ -1448,6 +1537,8 @@ def _dispatch_item(cfg, paths, owner, repo_to_project, info, ready_items, issue_
                 )
                 continue
 
+        _cluster_duplicate_debug_issues(cfg, repo_full, item, info, pcfg, ready_items)
+
         # --- Task decomposition: split epics into sub-issues ---
         decomp = _try_decompose(cfg, repo_full, item, info, pcfg)
         if decomp is not None:
@@ -1656,6 +1747,7 @@ def dispatch_one():
                                 f"{PUSH_NOT_READY_CODE}: {reason_codes}"
                             )
                             continue
+                    _cluster_duplicate_debug_issues(cfg, repo_full, issue_with_label_set, None, project_cfg, issues)
                     try:
                         task_id, task_md = build_mailbox_task(cfg, project_key, repo_cfg, issue)
                     except ValueError as exc:
