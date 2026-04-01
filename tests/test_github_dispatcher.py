@@ -1,6 +1,8 @@
 """Unit tests for dependency handling in orchestrator/github_dispatcher.py"""
 import json
+import os
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -184,6 +186,275 @@ Fix the task.
     assert changed is False
     assert task_path.read_text(encoding="utf-8") == original
     assert list(escalated.iterdir()) == []
+
+
+def test_escalate_over_retried_blocked_task_posts_comment_and_telegram(tmp_path, monkeypatch):
+    blocked = tmp_path / "blocked"
+    escalated = tmp_path / "escalated"
+    logs = tmp_path / "logs"
+    actions = tmp_path / "telegram_actions"
+    inbox = tmp_path / "inbox"
+    processing = tmp_path / "processing"
+    done = tmp_path / "done"
+    failed = tmp_path / "failed"
+    for path in (blocked, escalated, logs, actions, inbox, processing, done, failed):
+        path.mkdir()
+
+    task_path = blocked / "task-20260401-120602-debug-pr98.md"
+    task_path.write_text("""---
+task_id: task-20260401-120602-debug-pr98
+parent_task_id: task-pr98-root
+repo: /tmp/repo
+github_project_key: proj
+github_repo: owner/repo
+github_issue_number: 98
+github_issue_url: https://github.com/owner/repo/issues/98
+branch: agent/task-20260401-120602-debug-pr98
+attempt: 3
+---
+
+# Goal
+
+Repair PR #98.
+""", encoding="utf-8")
+    (logs / "task-20260401-120602-debug-pr98.log").write_text("""Worker status from codex: blocked
+Worker result file:
+STATUS: blocked
+
+BLOCKER_CODE:
+test_failure
+
+SUMMARY:
+CI rerun is still red for PR #98.
+
+DONE:
+- Investigated the failing branch.
+
+BLOCKERS:
+- The `pytest` job still fails on rerun.
+
+NEXT_STEP:
+Retry after reviewing the rerun logs.
+""", encoding="utf-8")
+    older = blocked / "task-20260401-120502-debug-pr98.md"
+    older.write_text("""---
+task_id: task-20260401-120502-debug-pr98
+parent_task_id: task-pr98-root
+repo: /tmp/repo
+attempt: 2
+---
+
+# Goal
+
+Previous retry.
+""", encoding="utf-8")
+    (logs / "task-20260401-120502-debug-pr98.log").write_text("""Worker status from claude: blocked
+Worker result file:
+STATUS: blocked
+
+BLOCKER_CODE:
+missing_context
+
+SUMMARY:
+The failing CI job name was not preserved.
+
+DONE:
+- Reviewed the CI metadata.
+
+BLOCKERS:
+- The failing CI job name was not preserved.
+
+NEXT_STEP:
+Recover the failing job context.
+""", encoding="utf-8")
+
+    comments = []
+    saved_actions = []
+    sent = []
+    monkeypatch.setattr(gd, "add_issue_comment", lambda repo, number, body: comments.append((repo, number, body)))
+    monkeypatch.setattr(gd, "save_telegram_action", lambda actions_dir, action: saved_actions.append(dict(action)))
+    monkeypatch.setattr(gd, "send_telegram", lambda cfg, text, reply_markup=None: sent.append((text, reply_markup)) or 77)
+
+    changed = gd._escalate_over_retried_blocked_tasks(
+        {"telegram_chat_id": "123", "blocked_escalation_attempt_threshold": 3, "blocked_escalation_age_hours": 24},
+        {
+            "INBOX": inbox,
+            "PROCESSING": processing,
+            "DONE": done,
+            "FAILED": failed,
+            "BLOCKED": blocked,
+            "ESCALATED": escalated,
+            "LOGS": logs,
+            "TELEGRAM_ACTIONS": actions,
+        },
+    )
+
+    assert changed is True
+    note_path = escalated / "task-pr98-root-escalation.md"
+    assert note_path.exists()
+    note_text = note_path.read_text(encoding="utf-8")
+    assert "Blocked task reached retry attempt 3" in note_text
+    assert "test_failure" in note_text
+    assert "missing_context" in note_text
+    assert "task `task-20260401-120602-debug-pr98`" in note_text
+    assert comments == [("owner/repo", 98, comments[0][2])]
+    assert "## Blocked task escalation" in comments[0][2]
+    assert "`test_failure`" in comments[0][2]
+    assert "Attempt 3 | task `task-20260401-120602-debug-pr98`" in comments[0][2]
+    assert len(saved_actions) == 2
+    assert saved_actions[-1]["message_id"] == 77
+    assert sent and sent[0][1]["inline_keyboard"][0][0]["text"] == "Retry"
+
+
+def test_escalate_over_retried_blocked_task_uses_age_threshold_and_dedupes(tmp_path, monkeypatch):
+    blocked = tmp_path / "blocked"
+    escalated = tmp_path / "escalated"
+    logs = tmp_path / "logs"
+    actions = tmp_path / "telegram_actions"
+    inbox = tmp_path / "inbox"
+    processing = tmp_path / "processing"
+    done = tmp_path / "done"
+    failed = tmp_path / "failed"
+    for path in (blocked, escalated, logs, actions, inbox, processing, done, failed):
+        path.mkdir()
+
+    task_path = blocked / "task-20260401-120807-debug-pr98.md"
+    task_path.write_text("""---
+task_id: task-20260401-120807-debug-pr98
+parent_task_id: task-20260401-120807-debug-pr98
+repo: /tmp/repo
+github_project_key: proj
+github_repo: owner/repo
+github_issue_number: 98
+github_issue_url: https://github.com/owner/repo/issues/98
+branch: agent/task-20260401-120807-debug-pr98
+attempt: 1
+---
+
+# Goal
+
+Repair PR #98.
+""", encoding="utf-8")
+    stale = datetime.now().timestamp() - timedelta(hours=49).total_seconds()
+    os.utime(task_path, (stale, stale))
+    (logs / "task-20260401-120807-debug-pr98.log").write_text("""Worker status from codex: blocked
+Worker result file:
+STATUS: blocked
+
+BLOCKER_CODE:
+test_failure
+
+SUMMARY:
+PR #98 remains blocked.
+
+DONE:
+- Reproduced the failure.
+
+BLOCKERS:
+- PR #98 remains blocked.
+
+NEXT_STEP:
+Escalate to human review.
+""", encoding="utf-8")
+
+    comments = []
+    monkeypatch.setattr(gd, "add_issue_comment", lambda repo, number, body: comments.append((repo, number, body)))
+    monkeypatch.setattr(gd, "save_telegram_action", lambda *args, **kwargs: None)
+    monkeypatch.setattr(gd, "send_telegram", lambda *args, **kwargs: 88)
+
+    paths = {
+        "INBOX": inbox,
+        "PROCESSING": processing,
+        "DONE": done,
+        "FAILED": failed,
+        "BLOCKED": blocked,
+        "ESCALATED": escalated,
+        "LOGS": logs,
+        "TELEGRAM_ACTIONS": actions,
+    }
+    cfg = {"telegram_chat_id": "123", "blocked_escalation_attempt_threshold": 3, "blocked_escalation_age_hours": 24}
+
+    assert gd._escalate_over_retried_blocked_tasks(cfg, paths) is True
+    assert "remained unowned" in comments[0][2]
+    assert gd._escalate_over_retried_blocked_tasks(cfg, paths) is False
+
+
+def test_escalate_over_retried_blocked_task_handles_pr98_examples(tmp_path, monkeypatch):
+    blocked = tmp_path / "blocked"
+    escalated = tmp_path / "escalated"
+    logs = tmp_path / "logs"
+    actions = tmp_path / "telegram_actions"
+    inbox = tmp_path / "inbox"
+    processing = tmp_path / "processing"
+    done = tmp_path / "done"
+    failed = tmp_path / "failed"
+    for path in (blocked, escalated, logs, actions, inbox, processing, done, failed):
+        path.mkdir()
+
+    for task_id in (
+        "task-20260401-120602-debug-pr98",
+        "task-20260401-120802-debug-pr98",
+        "task-20260401-120807-debug-pr98",
+    ):
+        (blocked / f"{task_id}.md").write_text(f"""---
+task_id: {task_id}
+parent_task_id: {task_id}
+repo: /tmp/repo
+github_project_key: proj
+github_repo: owner/repo
+github_issue_number: 98
+github_issue_url: https://github.com/owner/repo/issues/98
+attempt: 3
+---
+
+# Goal
+
+Repair PR #98.
+""", encoding="utf-8")
+        (logs / f"{task_id}.log").write_text("""Worker status from codex: blocked
+Worker result file:
+STATUS: blocked
+
+BLOCKER_CODE:
+test_failure
+
+SUMMARY:
+Repeated CI failure.
+
+DONE:
+- Reproduced the failing PR job.
+
+BLOCKERS:
+- Repeated CI failure.
+
+NEXT_STEP:
+Escalate.
+""", encoding="utf-8")
+
+    monkeypatch.setattr(gd, "add_issue_comment", lambda *args, **kwargs: None)
+    monkeypatch.setattr(gd, "save_telegram_action", lambda *args, **kwargs: None)
+    monkeypatch.setattr(gd, "send_telegram", lambda *args, **kwargs: 55)
+
+    paths = {
+        "INBOX": inbox,
+        "PROCESSING": processing,
+        "DONE": done,
+        "FAILED": failed,
+        "BLOCKED": blocked,
+        "ESCALATED": escalated,
+        "LOGS": logs,
+        "TELEGRAM_ACTIONS": actions,
+    }
+    cfg = {"telegram_chat_id": "123", "blocked_escalation_attempt_threshold": 3}
+
+    assert gd._escalate_over_retried_blocked_tasks(cfg, paths) is True
+    assert gd._escalate_over_retried_blocked_tasks(cfg, paths) is True
+    assert gd._escalate_over_retried_blocked_tasks(cfg, paths) is True
+    assert sorted(path.name for path in escalated.glob("*-escalation.md")) == [
+        "task-20260401-120602-debug-pr98-escalation.md",
+        "task-20260401-120802-debug-pr98-escalation.md",
+        "task-20260401-120807-debug-pr98-escalation.md",
+    ]
 
 
 def test_parse_issue_body_extracts_branch_fields():
