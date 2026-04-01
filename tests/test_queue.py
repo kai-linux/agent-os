@@ -134,6 +134,22 @@ def test_get_agent_chain_skips_unavailable_deepseek(monkeypatch):
     assert chain == ["claude", "codex"]
 
 
+def test_get_agent_chain_skips_deepseek_when_openrouter_credential_missing(monkeypatch, tmp_path):
+    cfg = _cfg({"implementation": ["deepseek", "codex", "claude"]})
+    openrouter_dir = tmp_path / "openrouter"
+    openrouter_dir.mkdir()
+    (openrouter_dir / "secrets.json").write_text("{}", encoding="utf-8")
+
+    monkeypatch.setenv("CLINE_BIN", "cline")
+    monkeypatch.setenv("DEEPSEEK_OPENROUTER_CONFIG", str(openrouter_dir))
+    monkeypatch.delenv("DEEPSEEK_NANOGPT_CONFIG", raising=False)
+    monkeypatch.delenv("DEEPSEEK_CHUTES_CONFIG", raising=False)
+    monkeypatch.setattr("orchestrator.queue._command_available", lambda cmd: True)
+
+    chain = get_agent_chain({"task_type": "implementation"}, cfg)
+    assert chain == ["codex", "claude"]
+
+
 def test_get_agent_chain_prefers_repo_specific_fallbacks():
     cfg = {
         **_cfg(
@@ -765,7 +781,42 @@ def test_agent_available_deepseek_requires_provider_config(monkeypatch):
 
     available, reason = agent_available("deepseek")
     assert available is False
-    assert "no DeepSeek provider config dir is set" in reason
+    assert "OpenRouter config dir missing" in reason
+
+
+def test_agent_available_deepseek_requires_openrouter_api_key(monkeypatch, tmp_path):
+    openrouter_dir = tmp_path / "openrouter"
+    openrouter_dir.mkdir()
+    (openrouter_dir / "secrets.json").write_text("{}", encoding="utf-8")
+
+    monkeypatch.setenv("CLINE_BIN", "cline")
+    monkeypatch.setenv("DEEPSEEK_OPENROUTER_CONFIG", str(openrouter_dir))
+    monkeypatch.delenv("DEEPSEEK_NANOGPT_CONFIG", raising=False)
+    monkeypatch.delenv("DEEPSEEK_CHUTES_CONFIG", raising=False)
+    monkeypatch.setattr("orchestrator.queue._command_available", lambda cmd: True)
+
+    available, reason = agent_available("deepseek")
+    assert available is False
+    assert "has no openRouterApiKey" in reason
+
+
+def test_agent_available_deepseek_rejects_placeholder_openrouter_api_key(monkeypatch, tmp_path):
+    openrouter_dir = tmp_path / "openrouter"
+    openrouter_dir.mkdir()
+    (openrouter_dir / "secrets.json").write_text(
+        '{"openRouterApiKey": "YOUR_OPENROUTER_API_KEY"}',
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("CLINE_BIN", "cline")
+    monkeypatch.setenv("DEEPSEEK_OPENROUTER_CONFIG", str(openrouter_dir))
+    monkeypatch.delenv("DEEPSEEK_NANOGPT_CONFIG", raising=False)
+    monkeypatch.delenv("DEEPSEEK_CHUTES_CONFIG", raising=False)
+    monkeypatch.setattr("orchestrator.queue._command_available", lambda cmd: True)
+
+    available, reason = agent_available("deepseek")
+    assert available is False
+    assert "placeholder text" in reason
 
 
 def test_rescue_git_progress_marks_result_complete(tmp_path, monkeypatch):

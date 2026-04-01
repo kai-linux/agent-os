@@ -535,6 +535,8 @@ Let scorer use *_post_merge.yaml
 
 DeepSeek has its own provider fallback: `openrouter → nanogpt → chutes`. It is kept last in the chain by default because it depends on extra provider configuration and should not consume retries when those providers are unavailable.
 
+Before the queue dispatches DeepSeek, it now preflights the configured providers. For OpenRouter, the queue requires a readable `secrets.json` with a non-placeholder `openRouterApiKey`; if that credential is missing or invalid, DeepSeek is skipped in the agent chain and the task routes to the next configured fallback agent instead of spending an execution attempt on an authentication failure.
+
 Strategic planning uses its own narrow fallback chain (`planner_agents`) so the control plane does not stall on a single Claude quota event and does not spray planning work across every model.
 
 Repos can opt into bounded pre-planning research with `planning_research`. Before sprint selection, the planner refreshes `PLANNING_RESEARCH.md` only when it is older than `max_age_hours`; otherwise it reuses the existing artifact. Research is intentionally constrained to explicitly configured `https` URLs on allowed domains plus relative repo or repo-adjacent files. There is no search step and no open-ended browsing path.
