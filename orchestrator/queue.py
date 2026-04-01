@@ -492,6 +492,30 @@ def _command_available(cmd: str) -> bool:
     return shutil.which(first) is not None
 
 
+def _load_json_file(path: Path) -> dict | None:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _openrouter_api_key_status(config_dir: Path) -> tuple[bool, str | None]:
+    secrets_path = config_dir / "secrets.json"
+    if not secrets_path.is_file():
+        return False, f"OpenRouter secrets file missing: {secrets_path}"
+    data = _load_json_file(secrets_path)
+    if data is None:
+        return False, f"OpenRouter secrets file is unreadable or invalid JSON: {secrets_path}"
+    api_key = str(data.get("openRouterApiKey", "")).strip()
+    if not api_key:
+        return False, f"OpenRouter credential missing: {secrets_path} has no openRouterApiKey"
+    lowered = api_key.lower()
+    if lowered in {"your_openrouter_api_key", "your-api-key", "changeme"} or "your_openrouter_api_key" in lowered:
+        return False, f"OpenRouter credential is placeholder text in {secrets_path}"
+    return True, None
+
+
 def agent_available(agent: str) -> tuple[bool, str | None]:
     agent = str(agent).strip().lower()
     if agent == "codex":
@@ -507,13 +531,34 @@ def agent_available(agent: str) -> tuple[bool, str | None]:
         cline_cmd = os.environ.get("CLINE_BIN", "cline")
         if not _command_available(cline_cmd):
             return False, f"{cline_cmd} not found on PATH"
-        provider_configs = [
-            os.environ.get("DEEPSEEK_OPENROUTER_CONFIG", str(Path.home() / ".config" / "openrouter")),
-            os.environ.get("DEEPSEEK_NANOGPT_CONFIG", ""),
-            os.environ.get("DEEPSEEK_CHUTES_CONFIG", ""),
-        ]
-        if not any(cfg and Path(cfg).is_dir() for cfg in provider_configs):
-            return False, "no DeepSeek provider config dir is set"
+        provider_reasons: list[str] = []
+
+        openrouter_cfg = Path(
+            os.environ.get("DEEPSEEK_OPENROUTER_CONFIG", str(Path.home() / ".config" / "openrouter"))
+        )
+        if openrouter_cfg.is_dir():
+            available, reason = _openrouter_api_key_status(openrouter_cfg)
+            if available:
+                return True, None
+            if reason:
+                provider_reasons.append(reason)
+        else:
+            provider_reasons.append(f"OpenRouter config dir missing: {openrouter_cfg}")
+
+        for provider_name, env_key in (
+            ("NanoGPT", "DEEPSEEK_NANOGPT_CONFIG"),
+            ("Chutes", "DEEPSEEK_CHUTES_CONFIG"),
+        ):
+            raw_cfg = os.environ.get(env_key, "").strip()
+            if not raw_cfg:
+                provider_reasons.append(f"{provider_name} config dir not set")
+                continue
+            if Path(raw_cfg).is_dir():
+                return True, None
+            provider_reasons.append(f"{provider_name} config dir missing: {raw_cfg}")
+
+        if provider_reasons:
+            return False, "; ".join(provider_reasons)
         return True, None
     return True, None
 
