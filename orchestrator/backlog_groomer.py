@@ -855,12 +855,16 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
     # 8. Dedup and create issues
     created_urls: list[str] = []
     skipped: list[str] = []
-    outcome_section = format_outcome_checks_section(get_repo_outcome_check_ids(cfg, github_slug))
 
     for issue in proposed[:MAX_ISSUES_PER_REPO]:
         title = (issue.get("title") or "").strip()
-        body = (issue.get("body") or "").strip() + outcome_section
         labels = [str(l) for l in issue.get("labels", []) if l]
+        if "bot-generated" not in labels:
+            labels.append("bot-generated")
+        outcome_section = format_outcome_checks_section(
+            get_repo_outcome_check_ids(cfg, github_slug, issue_labels=labels)
+        )
+        body = (issue.get("body") or "").strip() + outcome_section
         priority = issue.get("priority", "prio:normal")
 
         # Add priority label

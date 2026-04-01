@@ -75,7 +75,9 @@ SIGNALS_ARTIFACT_DEFAULT = "PLANNING_SIGNALS.md"
 RESEARCH_ALLOWED_KINDS = {
     "official_docs",
     "competitor",
+    "competitive_intel",
     "product_surface",
+    "production_evidence",
     "repo_reference",
 }
 FEEDBACK_SIGNAL_CLASSES = {
@@ -375,15 +377,18 @@ def _format_backlog_for_prompt(issues: list[dict]) -> str:
         return "(no backlog issues)"
     lines = []
     for i in issues:
-        labels = ", ".join(l.get("name", "") for l in i.get("labels", []))
+        label_names = [l.get("name", "") for l in i.get("labels", [])]
+        is_bot = "bot-generated" in label_names
+        labels = ", ".join(label_names)
         lbl = f" [{labels}]" if labels else ""
+        origin = " (bot-generated)" if is_bot else " (human-filed)"
         body_preview = (i.get("body") or "")[:200].replace("\n", " ")
         score = int(i.get("_production_feedback_score", 0) or 0)
         reasons = [str(reason).strip() for reason in i.get("_production_feedback_reasons", []) if str(reason).strip()]
         production_note = ""
         if score > 0 and reasons:
             production_note = f"\n  Production ranking signals: score={score}; " + "; ".join(reasons[:3])
-        lines.append(f"- #{i['number']}: {i['title']}{lbl}\n  {body_preview}{production_note}")
+        lines.append(f"- #{i['number']}: {i['title']}{lbl}{origin}\n  {body_preview}{production_note}")
     return "\n".join(lines)
 
 
@@ -831,6 +836,105 @@ def _write_research_artifact(repo_path: Path, artifact_path: Path, sections: lis
     )
 
 
+DYNAMIC_SEARCH_MAX_QUERIES = 3
+DYNAMIC_SEARCH_MAX_RESULTS_PER_QUERY = 3
+
+
+def _web_search(query: str, max_results: int = DYNAMIC_SEARCH_MAX_RESULTS_PER_QUERY) -> list[dict]:
+    """Run a DuckDuckGo text search and return results as dicts.
+
+    Returns a list of ``{"title": ..., "href": ..., "body": ...}`` dicts.
+    Gracefully returns an empty list on import or network failure so the
+    planning loop never crashes on a search error.
+    """
+    DDGS = None
+    try:
+        from ddgs import DDGS  # noqa: E402 — renamed package
+    except ImportError:
+        try:
+            from duckduckgo_search import DDGS  # noqa: E402 — legacy name
+        except ImportError:
+            print("  duckduckgo-search / ddgs not installed; skipping dynamic search")
+            return []
+    try:
+        with DDGS() as ddgs:
+            return [r for r in ddgs.text(query, max_results=max_results)]
+    except Exception as e:
+        print(f"  Web search failed for {query!r}: {e}")
+        return []
+
+
+def _dynamic_research_queries(github_slug: str, repo_path: Path) -> list[str]:
+    """Generate 2-3 bounded search queries about the competitive landscape."""
+    repo_name = github_slug.rsplit("/", 1)[-1]
+    readme_path = repo_path / "README.md"
+    readme_snippet = ""
+    if readme_path.exists():
+        readme_snippet = readme_path.read_text(encoding="utf-8", errors="replace")[:500]
+
+    # Extract the repo's purpose from the first meaningful line
+    purpose = ""
+    for line in readme_snippet.splitlines():
+        stripped = line.strip().lstrip("#").strip()
+        if stripped and len(stripped) > 20:
+            purpose = stripped[:120]
+            break
+
+    queries = [
+        "site:github.com autonomous AI coding agent orchestrator",
+        "AI software engineering agent framework comparison SWE-agent OpenHands Devon",
+    ]
+    if purpose and repo_name.lower() not in purpose.lower():
+        queries.append(f"site:github.com {purpose}")
+    else:
+        queries.append(f"site:github.com AI agent task dispatch self-healing")
+    return queries[:DYNAMIC_SEARCH_MAX_QUERIES]
+
+
+def _dynamic_research_sections(
+    github_slug: str,
+    repo_path: Path,
+    research_cfg: dict,
+) -> list[dict]:
+    """Run bounded web searches and return summarized research sections."""
+    search_cfg = research_cfg.get("dynamic_search") or {}
+    if not search_cfg.get("enabled", False):
+        return []
+
+    max_queries = min(
+        int(search_cfg.get("max_queries", DYNAMIC_SEARCH_MAX_QUERIES)),
+        DYNAMIC_SEARCH_MAX_QUERIES,
+    )
+    queries = _dynamic_research_queries(github_slug, repo_path)[:max_queries]
+    sections: list[dict] = []
+
+    for query in queries:
+        results = _web_search(query)
+        if not results:
+            continue
+        # Combine top results into a single source text for summarization
+        combined = "\n\n".join(
+            f"**{r.get('title', '')}** ({r.get('href', '')})\n{r.get('body', '')}"
+            for r in results
+        )[:RESEARCH_MAX_SOURCE_CHARS]
+
+        source = {
+            "name": f"Web search: {query}",
+            "kind": "competitor",
+            "url": f"search:{query}",
+        }
+        summary, implications = _summarize_research_source(source, combined)
+        sections.append({
+            "name": source["name"],
+            "kind": "competitor",
+            "location": f"DuckDuckGo search: {query!r}",
+            "summary": summary,
+            "planning_implications": implications or ["No direct sprint implication captured."],
+        })
+
+    return sections
+
+
 def _planning_research_context(cfg: dict, github_slug: str, repo_path: Path) -> str:
     """Return bounded research context, refreshing the artifact when stale."""
     research_cfg = _repo_research_config(cfg, github_slug)
@@ -872,6 +976,12 @@ def _planning_research_context(cfg: dict, github_slug: str, repo_path: Path) -> 
             "summary": summary,
             "planning_implications": implications or ["No direct sprint implication captured."],
         })
+
+    # Append dynamic web search results when enabled
+    dynamic_sections = _dynamic_research_sections(github_slug, repo_path, research_cfg)
+    if dynamic_sections:
+        print(f"  Dynamic web search contributed {len(dynamic_sections)} research section(s)")
+        sections.extend(dynamic_sections)
 
     _write_research_artifact(repo_path, artifact_path, sections, refresh_hours)
     content = artifact_path.read_text(encoding="utf-8", errors="replace").strip()
@@ -2291,6 +2401,7 @@ Rules:
 - Use recent outcome evidence to reinforce work that improved results, repair regressions, and close measurement gaps
 - When fresh research is present, use it to inform prioritization and rationale. Prefer work that is supported by repo-local strategy plus bounded external evidence.
 - Prefer unblockers, autonomy gains, planning-quality gains, and evidence-driven improvements over local churn
+- When the backlog contains both human-filed and bot-generated issues of similar impact, prefer human-filed issues — they represent stakeholder intent and should not be crowded out by automated self-improvement churn
 - Include a mix of: feature work that advances the product vision, bug fixes, self-improvement, and infrastructure
 - At least 1-2 tasks should push toward the long-term vision, not just maintain the status quo
 - If sibling repos are listed above, consider cross-repo dependencies: sequence work so prerequisite changes (e.g. API changes in repo A that repo B depends on) are completed first. If a task depends on work in another repo, note the dependency in the goal (e.g. "Depends on owner/repo-a completing X")

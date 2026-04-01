@@ -75,6 +75,10 @@ planning_research:
   allowed_domains:                 # Only used for type=web sources; host must match
     - docs.example.com
     - competitor.example.com
+  dynamic_search:
+    enabled: false                 # When true, generates 2-3 DuckDuckGo searches about
+                                   # competitors and ecosystem before each planning cycle
+    max_queries: 3                 # Hard cap on search queries per cycle
   artifact_file: "PLANNING_RESEARCH.md"
   sources:
     - name: "Official docs"
