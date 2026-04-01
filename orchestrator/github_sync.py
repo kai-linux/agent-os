@@ -3,6 +3,11 @@ from __future__ import annotations
 import json
 import re
 
+from orchestrator.ci_failure_signatures import (
+    extract_ci_failure_signature,
+    extract_signature_from_body,
+    format_signature_section,
+)
 from orchestrator.paths import load_config
 from orchestrator.gh_project import (
     add_issue_comment,
@@ -38,6 +43,7 @@ _BRANCH_RE = re.compile(r"^## Branch\s*\n(.+?)\s*$", re.MULTILINE)
 _ORIGINAL_ISSUE_RE = re.compile(r"Original issue:\s+#(\d+)", re.IGNORECASE)
 _PR_URL_RE = re.compile(r"/pull/(\d+)")
 _FOLLOWUP_DEPTH_RE = re.compile(r"^## Follow-up Depth\s*\n(\d+)\s*$", re.MULTILINE)
+_DUPLICATE_PARENT_RE = re.compile(r"^## Duplicate CI Signature Parent\s*\n#?(\d+)\s*$", re.MULTILINE)
 
 
 def _find_repo_project(cfg: dict, repo: str) -> tuple[dict, dict] | tuple[None, None]:
@@ -166,6 +172,38 @@ def _reconcile_terminal_issue_state(cfg: dict, project_cfg: dict, repo: str, iss
         print(f"Warning: failed to reconcile terminal issue #{issue_number}: {e}")
 
 
+def _mark_issue_done(cfg: dict, repo: str, issue_number: int, *, close_issue: bool, comment: str | None = None):
+    project_cfg, _repo_cfg = _find_repo_project(cfg, repo)
+    edit_issue_labels(
+        repo,
+        issue_number,
+        add=["done"],
+        remove=["blocked", "in-progress", "ready", "agent-dispatched"],
+    )
+    if comment:
+        try:
+            add_issue_comment(repo, issue_number, comment)
+        except Exception as e:
+            print(f"Warning: failed to comment on issue #{issue_number}: {e}")
+    if close_issue:
+        try:
+            gh(["issue", "close", str(issue_number), "-R", repo], check=False)
+        except Exception as e:
+            print(f"Warning: failed to close issue #{issue_number}: {e}")
+    if project_cfg:
+        try:
+            info = query_project(project_cfg["project_number"], cfg["github_owner"])
+            option_id = info["status_options"].get(project_cfg.get("done_value", "Done"))
+            if info["status_field_id"] and option_id:
+                issue_url = f"https://github.com/{repo}/issues/{issue_number}"
+                for item in info["items"]:
+                    if item["url"] == issue_url:
+                        set_item_status(info["project_id"], item["item_id"], info["status_field_id"], option_id)
+                        break
+        except Exception as e:
+            print(f"Warning: failed to set done status for #{issue_number}: {e}")
+
+
 def _find_open_partial_followup(
     repo: str,
     *,
@@ -218,6 +256,52 @@ def _get_issue_body(repo: str, issue_number: int) -> str:
     return str(payload.get("body", "") or "")
 
 
+def _extract_duplicate_parent_issue(body: str) -> int | None:
+    match = _DUPLICATE_PARENT_RE.search(body or "")
+    if not match:
+        return None
+    return int(match.group(1))
+
+
+def _list_open_followup_issues(repo: str) -> list[dict]:
+    try:
+        issues = gh_json([
+            "issue", "list", "-R", repo, "--state", "open",
+            "--search", '"Follow up partial debug"',
+            "--json", "number,title,body,url,state,labels",
+            "--limit", "100",
+        ]) or []
+    except Exception:
+        return []
+    return [issue for issue in issues if (issue.get("title") or "").startswith(_FOLLOWUP_TITLE_PREFIX)]
+
+
+def _resolve_dependent_signature_followups(cfg: dict, repo: str, issue_number: int, parent_signature: str | None) -> int:
+    resolved = 0
+    for issue in _list_open_followup_issues(repo):
+        dependent_number = int(issue.get("number", 0) or 0)
+        if not dependent_number or dependent_number == issue_number:
+            continue
+        body = issue.get("body") or ""
+        duplicate_parent = _extract_duplicate_parent_issue(body)
+        if duplicate_parent != issue_number:
+            continue
+        dependent_signature = extract_signature_from_body(body)
+        if parent_signature and dependent_signature and dependent_signature != parent_signature:
+            continue
+
+        _mark_issue_done(
+            cfg,
+            repo,
+            dependent_number,
+            close_issue=True,
+            comment=f"Resolved automatically by transitive fix in #{issue_number}.",
+        )
+        resolved += 1
+        resolved += _resolve_dependent_signature_followups(cfg, repo, dependent_number, dependent_signature or parent_signature)
+    return resolved
+
+
 def _maybe_create_partial_debug_followup(meta: dict, result: dict, cfg: dict) -> str | None:
     if result.get("status") != "partial":
         return None
@@ -262,6 +346,11 @@ def _maybe_create_partial_debug_followup(meta: dict, result: dict, cfg: dict) ->
 
     summary = redact_text(result.get("summary", "No summary provided."))
     blocker_code = str(result.get("blocker_code", "")).strip() or "none"
+    signature = extract_ci_failure_signature(
+        str(meta.get("github_issue_title", "")).strip(),
+        issue_body,
+        summary,
+    )
     preserved_ci_context = _extract_preserved_ci_context(issue_body)
     preserved_ci_block = (
         f"\n## Preserved CI Context\n{preserved_ci_context}\n"
@@ -319,6 +408,7 @@ Original issue: #{issue_number}
 
 ## Prior Blocker Code
 {blocker_code}
+{format_signature_section(signature)}
 
 ## Evidence
 ### Progress So Far
@@ -424,15 +514,15 @@ def sync_result(meta: dict, result: dict, commit_hash: str | None):
                 },
             )
 
-    if has_manual:
-        comment += f"\n### 🔧 Manual steps required\n```\n{public_manual_steps}\n```\n"
-
-    try:
-        add_issue_comment(repo, issue_number, comment)
-    except Exception as e:
-        print(f"Warning: failed to comment on issue #{issue_number}: {e}")
-
     if status == "complete":
+        resolved_dependents = _resolve_dependent_signature_followups(
+            cfg,
+            str(repo),
+            int(issue_number),
+            extract_signature_from_body(str(current_issue.get("body", "") or "")),
+        )
+        if resolved_dependents:
+            comment += f"\n### Resolved dependents\n{resolved_dependents} dependent debug issue(s) closed by transitive fix.\n"
         if pr_url:
             edit_issue_labels(
                 repo,
@@ -465,7 +555,17 @@ def sync_result(meta: dict, result: dict, commit_hash: str | None):
         )
         status_value = project_cfg["blocked_value"]
 
+    if has_manual:
+        comment += f"\n### 🔧 Manual steps required\n```\n{public_manual_steps}\n```\n"
+
+    try:
+        add_issue_comment(repo, issue_number, comment)
+    except Exception as e:
+        print(f"Warning: failed to comment on issue #{issue_number}: {e}")
     else:
+        pass
+
+    if status not in ("complete", "partial", "blocked"):
         edit_issue_labels(
             repo,
             issue_number,
