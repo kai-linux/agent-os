@@ -1017,6 +1017,77 @@ def test_dispatch_item_escalates_to_human_review_when_all_agents_unhealthy(tmp_p
     assert "No healthy agents available" in json.loads(payload)["detail"]
 
 
+def test_cluster_duplicate_debug_issues_blocks_matching_signature(monkeypatch):
+    info = {
+        "project_id": "project-1",
+        "status_field_id": "status-field",
+        "status_options": {"Blocked": "blocked-option"},
+    }
+    project_cfg = {"blocked_value": "Blocked"}
+    primary = {
+        "item_id": "item-1",
+        "number": 101,
+        "title": "Follow up partial debug for root issue #99",
+        "body": """
+## Task Type
+debugging
+
+## CI Failure Signature
+checks=pytest | error=ImportError | location=src/app.py:17 | frame=load_config
+""",
+        "repo": "owner/repo",
+    }
+    duplicate = {
+        "item_id": "item-2",
+        "number": 102,
+        "title": "Follow up partial debug for root issue #100",
+        "body": """
+## Task Type
+debugging
+
+## CI Failure Signature
+checks=pytest | error=ImportError | location=src/app.py:17 | frame=load_config
+""",
+        "repo": "owner/repo",
+    }
+    unrelated = {
+        "item_id": "item-3",
+        "number": 103,
+        "title": "Follow up partial debug for root issue #101",
+        "body": """
+## Task Type
+debugging
+
+## CI Failure Signature
+checks=pytest | error=ValueError | location=src/app.py:22 | frame=parse_payload
+""",
+        "repo": "owner/repo",
+    }
+    gh_calls = []
+    label_calls = []
+    comments = []
+    status_updates = []
+
+    monkeypatch.setattr(gd, "gh", lambda args, check=False: gh_calls.append(args) or "")
+    monkeypatch.setattr(gd, "edit_issue_labels", lambda repo, number, add=None, remove=None: label_calls.append((repo, number, add, remove)))
+    monkeypatch.setattr(gd, "add_issue_comment", lambda repo, number, body: comments.append((repo, number, body)))
+    monkeypatch.setattr(gd, "set_item_status", lambda project_id, item_id, field_id, option_id: status_updates.append((project_id, item_id, field_id, option_id)))
+
+    gd._cluster_duplicate_debug_issues({}, "owner/repo", primary, info, project_cfg, [primary, duplicate, unrelated])
+
+    assert gh_calls == [[
+        "api",
+        "repos/owner/repo/issues/102",
+        "-X", "PATCH",
+        "-f", "body=\n## Task Type\ndebugging\n\n## CI Failure Signature\nchecks=pytest | error=ImportError | location=src/app.py:17 | frame=load_config\n\nDepends on #101\n\n## Duplicate CI Signature Parent\n#101\n",
+    ]]
+    assert label_calls == [("owner/repo", 102, ["blocked"], ["ready", "in-progress", "agent-dispatched"])]
+    assert len(comments) == 1
+    assert "#101" in comments[0][2]
+    assert "ImportError" in comments[0][2]
+    assert status_updates == [("project-1", "item-2", "status-field", "blocked-option")]
+
+
 def test_parse_retry_decision_supports_yaml_section():
     note = """
 # Escalation Note

@@ -114,6 +114,85 @@ def test_sync_result_partial_debug_creates_single_deduped_followup(monkeypatch):
     assert any("Follow-up issue" in body for _, _, body in comments)
 
 
+def test_sync_result_partial_debug_followup_persists_ci_signature(monkeypatch):
+    created = []
+
+    monkeypatch.setattr(github_sync, "load_config", lambda: {
+        "github_owner": "owner",
+        "github_projects": {
+            "proj": {
+                "project_number": 1,
+                "ready_value": "Ready",
+                "blocked_value": "Blocked",
+                "done_value": "Done",
+                "repos": [{"github_repo": "owner/repo", "local_repo": "/tmp/repo"}],
+            }
+        },
+    })
+    monkeypatch.setattr(github_sync, "edit_issue_labels", lambda *args, **kwargs: None)
+    monkeypatch.setattr(github_sync, "create_pr_for_branch", lambda *args, **kwargs: None)
+    monkeypatch.setattr(github_sync, "query_project", lambda *args, **kwargs: {
+        "project_id": "proj-id",
+        "status_field_id": "status-field",
+        "status_options": {"Blocked": "blocked-option", "Ready": "ready-option"},
+        "items": [{"url": "https://github.com/owner/repo/issues/7", "item_id": "item-7"}],
+    })
+    monkeypatch.setattr(github_sync, "set_item_status", lambda *args, **kwargs: None)
+    monkeypatch.setattr(github_sync, "gh", lambda *args, **kwargs: '{"id":"item-99"}')
+    monkeypatch.setattr(github_sync, "add_issue_comment", lambda *args, **kwargs: None)
+    monkeypatch.setattr(github_sync, "gh_json", lambda cmd: {
+        "number": 7,
+        "state": "OPEN",
+        "url": "https://github.com/owner/repo/issues/7",
+        "labels": [{"name": "in-progress"}],
+        "body": """## Context
+- PR: https://github.com/owner/repo/pull/71
+- Failed checks:
+- **pytest**: `failure`
+
+## Remaining Failure
+Traceback (most recent call last):
+  File "src/app.py", line 17, in load_config
+ImportError: missing parser
+""",
+    } if cmd == ["issue", "view", "7", "-R", "owner/repo", "--json", "number,state,body,labels,url"] else {
+        "body": ""
+    } if cmd == ["issue", "view", "7", "-R", "owner/repo", "--json", "body"] else [])
+    monkeypatch.setattr(github_sync, "_find_open_partial_followup", lambda *args, **kwargs: None)
+    monkeypatch.setattr(github_sync, "_create_issue", lambda repo, title, body, labels: created.append(body) or "https://github.com/owner/repo/issues/88")
+
+    github_sync.sync_result(
+        {
+            "task_id": "task-123",
+            "task_type": "debugging",
+            "branch": "agent/task-123",
+            "base_branch": "main",
+            "priority": "prio:high",
+            "github_project_key": "proj",
+            "github_repo": "owner/repo",
+            "github_issue_title": "Fix CI failure on PR #71",
+            "github_issue_number": 7,
+            "github_issue_url": "https://github.com/owner/repo/issues/7",
+        },
+        {
+            "status": "partial",
+            "summary": 'Traceback (most recent call last):\n  File "src/app.py", line 17, in load_config\nImportError: missing parser',
+            "next_step": "Inspect the import path handling in load_config.",
+            "blocker_code": "test_failure",
+            "done": ["- Captured the failing stack trace."],
+            "blockers": ["- Import path still resolves incorrectly."],
+            "files_changed": ["- None"],
+            "tests_run": ["- pytest tests/test_queue.py -> failed"],
+            "attempted_approaches": ["- Reproduced with the current PR branch."],
+            "manual_steps": "- None",
+        },
+        None,
+    )
+
+    assert len(created) == 1
+    assert "## CI Failure Signature\nchecks=pytest | error=ImportError | location=src/app.py:17 | frame=load_config" in created[0]
+
+
 def test_sync_result_partial_pr_ci_recovery_keeps_branch_handoff_and_ready_followup(monkeypatch):
     created = []
     comments = []
@@ -476,3 +555,112 @@ def test_sync_result_partial_skips_terminal_issue_and_reconciles_done(monkeypatc
         }
     ]
     assert project_status_calls == ["opt-done"]
+
+
+def test_sync_result_complete_resolves_dependent_signature_followups(monkeypatch):
+    monkeypatch.setattr("orchestrator.github_sync.load_config", lambda: {
+        "github_owner": "kai-linux",
+        "github_projects": {
+            "agent-os": {
+                "project_number": 6,
+                "in_progress_value": "In Progress",
+                "blocked_value": "Blocked",
+                "done_value": "Done",
+                "repos": [{"github_repo": "kai-linux/agent-os", "local_repo": "/tmp/repo"}],
+            }
+        },
+    })
+    comments = []
+    monkeypatch.setattr("orchestrator.github_sync.add_issue_comment", lambda repo, issue, body: comments.append((issue, body)))
+    monkeypatch.setattr("orchestrator.github_sync.create_pr_for_branch", lambda repo, branch, title, body: None)
+    label_calls = []
+    monkeypatch.setattr(
+        "orchestrator.github_sync.edit_issue_labels",
+        lambda repo, issue, add=None, remove=None: label_calls.append({"issue": issue, "add": add, "remove": remove}),
+    )
+    gh_calls = []
+    monkeypatch.setattr("orchestrator.github_sync.gh", lambda args, check=True: gh_calls.append(args))
+    monkeypatch.setattr(
+        "orchestrator.github_sync.query_project",
+        lambda project_number, owner: {
+            "project_id": "proj",
+            "status_field_id": "field",
+            "status_options": {"Done": "opt-done", "Blocked": "opt-blocked"},
+            "items": [
+                {"url": "https://github.com/kai-linux/agent-os/issues/64", "item_id": "item-64"},
+                {"url": "https://github.com/kai-linux/agent-os/issues/88", "item_id": "item-88"},
+                {"url": "https://github.com/kai-linux/agent-os/issues/89", "item_id": "item-89"},
+            ],
+        },
+    )
+    project_status_calls = []
+    monkeypatch.setattr(
+        "orchestrator.github_sync.set_item_status",
+        lambda project_id, item_id, field_id, option_id: project_status_calls.append((item_id, option_id)),
+    )
+
+    open_followups = [
+        {
+            "number": 88,
+            "title": "Follow up partial debug for root issue #64",
+            "body": """## Task Type
+debugging
+
+## CI Failure Signature
+checks=pytest | error=ImportError | location=src/app.py:17 | frame=load_config
+
+Depends on #64
+
+## Duplicate CI Signature Parent
+#64
+""",
+        },
+        {
+            "number": 89,
+            "title": "Follow up partial debug for root issue #64",
+            "body": """## Task Type
+debugging
+
+## CI Failure Signature
+checks=pytest | error=ImportError | location=src/app.py:17 | frame=load_config
+
+Depends on #88
+
+## Duplicate CI Signature Parent
+#88
+""",
+        },
+    ]
+
+    def fake_gh_json(cmd):
+        if cmd == ["issue", "view", "64", "-R", "kai-linux/agent-os", "--json", "number,state,body,labels,url"]:
+            return {
+                "number": 64,
+                "state": "OPEN",
+                "url": "https://github.com/kai-linux/agent-os/issues/64",
+                "labels": [{"name": "in-progress"}],
+                "body": """## Task Type
+debugging
+
+## CI Failure Signature
+checks=pytest | error=ImportError | location=src/app.py:17 | frame=load_config
+""",
+            }
+        if cmd[:6] == ["issue", "list", "-R", "kai-linux/agent-os", "--state", "open"]:
+            return open_followups
+        return {}
+
+    monkeypatch.setattr("orchestrator.github_sync.gh_json", fake_gh_json)
+
+    github_sync.sync_result(_meta(), {"status": "complete", "summary": "ok", "next_step": "none"}, "abc123")
+
+    assert {"issue": 64, "add": ["done"], "remove": ["in-progress", "ready", "blocked", "agent-dispatched"]} in label_calls
+    assert {"issue": 88, "add": ["done"], "remove": ["blocked", "in-progress", "ready", "agent-dispatched"]} in label_calls
+    assert {"issue": 89, "add": ["done"], "remove": ["blocked", "in-progress", "ready", "agent-dispatched"]} in label_calls
+    assert ["issue", "close", "64", "-R", "kai-linux/agent-os"] in gh_calls
+    assert ["issue", "close", "88", "-R", "kai-linux/agent-os"] in gh_calls
+    assert ["issue", "close", "89", "-R", "kai-linux/agent-os"] in gh_calls
+    assert any("Resolved dependents" in body for issue, body in comments if issue == 64)
+    assert ("item-64", "opt-done") in project_status_calls
+    assert ("item-88", "opt-done") in project_status_calls
+    assert ("item-89", "opt-done") in project_status_calls
