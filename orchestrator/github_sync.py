@@ -399,7 +399,8 @@ def sync_result(meta: dict, result: dict, commit_hash: str | None):
         comment += f"\n### Follow-up issue\n{followup_issue_url}\n"
 
     pr_url = None
-    if status == "complete":
+    has_commits = bool(commit_hash)
+    if has_commits:
         pr_url = create_pr_for_branch(
             repo,
             branch,
