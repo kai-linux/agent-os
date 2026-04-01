@@ -23,7 +23,9 @@ from orchestrator.strategic_planner import (
     _approval_timeout_hours,
     _allowed_research_file,
     _build_plan_prompt,
+    _build_sprint_report,
     _clean_research_text,
+    _fallback_sprint_report,
     _has_active_sprint_work,
     _maybe_refresh_backlog_for_early_cycle,
     _create_plan_approval_action,
@@ -59,6 +61,8 @@ from orchestrator.strategic_planner import (
     _summarize_strategy,
     _update_focus_areas_section,
     _analyze_focus_areas,
+    _format_sprint_report_message,
+    _write_sprint_report_artifact,
 )
 
 
@@ -696,6 +700,102 @@ def test_production_feedback_context_writes_no_signals_artifact_when_substrate_e
     assert "No recent failures were recorded" in context
     assert "No repeated blocked-task pattern was detected" in context
     assert "No repeat-recovery signals were recorded" in context
+
+
+def test_fallback_sprint_report_extracts_counts_and_next_focus():
+    retrospective = textwrap.dedent("""\
+        Issues completed:
+        - #10: Stabilize queue — completed
+        - #11: Add reporting — completed
+
+        PRs merged:
+        - PR #12: Agent: improve queue recovery
+
+        Outcome evidence:
+        - #10 / PR #12 / reliability: improved — Retry loops recovered.
+        - #11 / PR #13 / visibility: inconclusive — No measurable external metric.
+    """)
+    sprint_summary = textwrap.dedent("""\
+        - [prio:high] Add sprint report artifact: Make sprint movement visible
+        - [prio:normal] Tighten outcome checks: Reduce inconclusive reporting
+    """)
+
+    report = _fallback_sprint_report(
+        retrospective,
+        sprint_summary,
+        readme_goal="Ship reliable autonomous work.",
+        north_star="Closed-loop improvement with visible trust signals.",
+    )
+
+    assert "2 issue(s)" in report["headline"]
+    assert "1 PR(s)" in report["headline"]
+    assert any("Shipped execution moved forward" in item for item in report["progress_points"])
+    assert any("inconclusive" in item.lower() for item in report["risks_and_gaps"])
+    assert report["next_sprint_focus"] == ["Add sprint report artifact", "Tighten outcome checks"]
+
+
+def test_build_sprint_report_uses_model_output(monkeypatch):
+    monkeypatch.setattr(
+        "orchestrator.strategic_planner._call_haiku",
+        lambda prompt: json.dumps(
+            {
+                "headline": "Reliability work shipped and planning got more visible.",
+                "movement_summary": "The sprint improved execution reliability and clarified strategic reporting.",
+                "progress_points": ["Closed high-priority reliability work."],
+                "risks_and_gaps": ["Outcome evidence is still sparse."],
+                "next_sprint_focus": ["Expand outcome coverage."],
+            }
+        ),
+    )
+
+    report = _build_sprint_report(
+        readme_goal="Ship reliable autonomous work.",
+        north_star="Closed-loop improvement with visible trust signals.",
+        strategy_context="Improve reliability and trust.",
+        retrospective="Issues completed:\n- #1: Fix queue",
+        sprint_summary="- [prio:high] Add report artifact: Improve visibility",
+    )
+
+    assert report["headline"] == "Reliability work shipped and planning got more visible."
+    assert report["progress_points"] == ["Closed high-priority reliability work."]
+
+
+def test_write_sprint_report_artifact_writes_markdown(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    committed = {}
+
+    def _capture_commit(repo_path, relative_path, target_content, commit_message, success_message):
+        committed["repo_path"] = repo_path
+        committed["relative_path"] = relative_path
+        committed["target_content"] = target_content
+        committed["commit_message"] = commit_message
+        committed["success_message"] = success_message
+
+    monkeypatch.setattr("orchestrator.strategic_planner._commit_repo_markdown_with_retry", _capture_commit)
+
+    _write_sprint_report_artifact(
+        repo,
+        readme_goal="Ship reliable autonomous work.",
+        north_star="Closed-loop improvement with visible trust signals.",
+        retrospective="Issues completed:\n- #1: Fix queue",
+        sprint_summary="- [prio:high] Add report artifact: Improve visibility",
+        report={
+            "headline": "Visibility improved.",
+            "movement_summary": "The sprint improved oversight of delivered work.",
+            "progress_points": ["A direct report artifact is now generated."],
+            "risks_and_gaps": ["Outcome measurement remains incomplete."],
+            "next_sprint_focus": ["Expand outcome-linked reporting."],
+        },
+    )
+
+    artifact = repo / "SPRINT_REPORT.md"
+    assert artifact.exists()
+    content = artifact.read_text(encoding="utf-8")
+    assert "# Sprint Report" in content
+    assert "## How This Sprint Moved The Repo Forward" in content
+    assert "Visibility improved." in content
+    assert committed["relative_path"] == Path("SPRINT_REPORT.md")
 
 
 def test_production_priority_signals_extract_three_fresh_metrics():
@@ -1587,3 +1687,34 @@ def test_gather_cross_repo_context_includes_dependency_relationships(tmp_path):
 
     assert "Prerequisites for this repo: owner/repo-a" in ctx
     assert "owner/repo-a (prerequisite for current repo)" in ctx
+
+
+# ---------------------------------------------------------------------------
+# _format_sprint_report_message
+# ---------------------------------------------------------------------------
+
+
+def test_format_sprint_report_message_basic():
+    report = {
+        "headline": "Shipped 5 issues and hardened CI recovery.",
+        "movement_summary": "The sprint advanced reliability from Level 2 toward Level 3.",
+        "progress_points": ["Fixed cascading CI failures", "Added health-gated dispatch"],
+        "risks_and_gaps": ["Outcome measurement still inconclusive"],
+        "next_sprint_focus": ["Configure external outcome checks", "Close feedback loop"],
+    }
+    msg = _format_sprint_report_message(report, "owner/repo")
+    assert "📊 Sprint Report — owner/repo" in msg
+    assert "Shipped 5 issues" in msg
+    assert "🧭 Vision Progress" in msg
+    assert "Level 2 toward Level 3" in msg
+    assert "• Fixed cascading CI failures" in msg
+    assert "• Outcome measurement still inconclusive" in msg
+    assert "• Configure external outcome checks" in msg
+
+
+def test_format_sprint_report_message_empty_fields():
+    report = {}
+    msg = _format_sprint_report_message(report, "owner/repo")
+    assert "📊 Sprint Report — owner/repo" in msg
+    assert "No headline." in msg
+    assert "No movement summary." in msg

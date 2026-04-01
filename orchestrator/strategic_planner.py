@@ -72,6 +72,7 @@ REJECTION_KEYWORDS = {"no", "reject", "skip", "cancel", "nope"}
 RESEARCH_ARTIFACT_DEFAULT = "PLANNING_RESEARCH.md"
 PRODUCTION_FEEDBACK_ARTIFACT_DEFAULT = "PRODUCTION_FEEDBACK.md"
 SIGNALS_ARTIFACT_DEFAULT = "PLANNING_SIGNALS.md"
+SPRINT_REPORT_ARTIFACT_DEFAULT = "SPRINT_REPORT.md"
 RESEARCH_ALLOWED_KINDS = {
     "official_docs",
     "competitor",
@@ -755,6 +756,38 @@ Return ONLY JSON with this schema:
 {{
   "summary": "2-4 sentence factual summary",
   "planning_implications": ["bullet", "bullet", "bullet"]
+}}
+"""
+
+
+_SPRINT_REPORT_PROMPT = """\
+You are preparing a sprint report for an autonomous software team.
+
+Use only the supplied repository context. Do not invent metrics, customer impact,
+or roadmap outcomes that are not present.
+
+Repository goal:
+{readme_goal}
+
+North star:
+{north_star}
+
+Current strategy:
+{strategy_context}
+
+Last sprint retrospective:
+{retrospective}
+
+Next sprint plan:
+{sprint_summary}
+
+Return ONLY JSON with this schema:
+{{
+  "headline": "one sentence summary of what changed",
+  "movement_summary": "2-4 sentence explanation of how the sprint moved the repo toward or away from the goal and north star",
+  "progress_points": ["bullet", "bullet", "bullet"],
+  "risks_and_gaps": ["bullet", "bullet"],
+  "next_sprint_focus": ["bullet", "bullet", "bullet"]
 }}
 """
 
@@ -2306,6 +2339,208 @@ def _build_retrospective(cfg: dict, repo: str, repo_path: Path, days: int = DEFA
     return "\n\n".join(parts)
 
 
+def _fallback_sprint_report(
+    retrospective: str,
+    sprint_summary: str,
+    *,
+    readme_goal: str,
+    north_star: str,
+) -> dict:
+    progress_points: list[str] = []
+    risks_and_gaps: list[str] = []
+    next_sprint_focus: list[str] = []
+
+    closed_issues = len(re.findall(r"^- #\d+:", retrospective, flags=re.MULTILINE))
+    merged_prs = len(re.findall(r"^- PR #\d+:", retrospective, flags=re.MULTILINE))
+    improved = len(re.findall(r": improved\b", retrospective, flags=re.IGNORECASE))
+    regressed = len(re.findall(r": regressed\b", retrospective, flags=re.IGNORECASE))
+    inconclusive = len(re.findall(r": inconclusive\b", retrospective, flags=re.IGNORECASE))
+
+    if closed_issues or merged_prs:
+        progress_points.append(
+            f"Shipped execution moved forward with {closed_issues} closed issue(s) and {merged_prs} merged PR(s) in the sprint window."
+        )
+    if improved:
+        progress_points.append(
+            f"Measured outcome evidence showed {improved} improved check(s), indicating some shipped work moved beyond internal throughput."
+        )
+    if "blocked" in retrospective.lower() or "partial" in retrospective.lower():
+        risks_and_gaps.append(
+            "Execution still shows blocked or partial work patterns, so reliability and recovery remain active constraints."
+        )
+    if regressed:
+        risks_and_gaps.append(
+            f"Outcome evidence included {regressed} regressed check(s), so not all shipped work moved the objective in the right direction."
+        )
+    if inconclusive:
+        risks_and_gaps.append(
+            f"{inconclusive} outcome check(s) were inconclusive, which means progress is still under-measured in important areas."
+        )
+
+    for raw_line in sprint_summary.splitlines():
+        line = raw_line.strip()
+        if not line.startswith("- ["):
+            continue
+        cleaned = re.sub(r"^- \[[^]]+\]\s*", "", line)
+        goal = cleaned.split(":", 1)[0].strip()
+        if goal:
+            next_sprint_focus.append(goal)
+        if len(next_sprint_focus) >= 3:
+            break
+
+    if not progress_points:
+        progress_points.append("The sprint produced little visible shipped progress in the current reporting window.")
+    if not risks_and_gaps:
+        risks_and_gaps.append("No major risk was explicitly extracted from the sprint evidence, but measurement coverage may still be thin.")
+    if not next_sprint_focus:
+        next_sprint_focus.append("No next sprint priorities were captured.")
+
+    goal_summary = readme_goal.strip().splitlines()[0] if readme_goal.strip() else "the repo goal"
+    north_star_summary = north_star.strip().splitlines()[0] if north_star.strip() else "the north star"
+    movement_summary = (
+        f"This sprint is best understood against the goal of {goal_summary}. "
+        f"It moved the repo primarily through shipped execution and operational learning, while the north-star target remains {north_star_summary}."
+    )
+    if improved and not regressed:
+        movement_summary += " The available evidence suggests positive movement, though measurement is still incomplete."
+    elif regressed:
+        movement_summary += " Some signals regressed, so the movement was mixed rather than clean forward progress."
+    elif inconclusive:
+        movement_summary += " Most of the movement is still inferred from shipped work rather than directly measured outcomes."
+
+    headline = (
+        f"Sprint shipped {closed_issues} issue(s) and {merged_prs} PR(s), with "
+        f"{improved} improved, {regressed} regressed, and {inconclusive} inconclusive outcome signal(s)."
+    )
+    return {
+        "headline": headline,
+        "movement_summary": movement_summary,
+        "progress_points": progress_points[:4],
+        "risks_and_gaps": risks_and_gaps[:4],
+        "next_sprint_focus": next_sprint_focus[:4],
+    }
+
+
+def _build_sprint_report(
+    *,
+    readme_goal: str,
+    north_star: str,
+    strategy_context: str,
+    retrospective: str,
+    sprint_summary: str,
+) -> dict:
+    prompt = _SPRINT_REPORT_PROMPT.format(
+        readme_goal=readme_goal,
+        north_star=north_star,
+        strategy_context=strategy_context[:4000],
+        retrospective=retrospective[:4000],
+        sprint_summary=sprint_summary[:3000],
+    )
+    try:
+        raw = _call_haiku(prompt)
+        text = raw.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        data = json.loads(text)
+        headline = str(data.get("headline", "")).strip()
+        movement_summary = str(data.get("movement_summary", "")).strip()
+        progress_points = [str(item).strip() for item in data.get("progress_points", []) if str(item).strip()]
+        risks_and_gaps = [str(item).strip() for item in data.get("risks_and_gaps", []) if str(item).strip()]
+        next_sprint_focus = [str(item).strip() for item in data.get("next_sprint_focus", []) if str(item).strip()]
+        if headline and movement_summary:
+            return {
+                "headline": headline[:240],
+                "movement_summary": movement_summary[:1200],
+                "progress_points": progress_points[:4],
+                "risks_and_gaps": risks_and_gaps[:4],
+                "next_sprint_focus": next_sprint_focus[:4],
+            }
+    except Exception as e:
+        print(f"  Sprint report summarization failed: {e}")
+
+    return _fallback_sprint_report(
+        retrospective,
+        sprint_summary,
+        readme_goal=readme_goal,
+        north_star=north_star,
+    )
+
+
+def _write_sprint_report_artifact(
+    repo_path: Path,
+    *,
+    readme_goal: str,
+    north_star: str,
+    retrospective: str,
+    sprint_summary: str,
+    report: dict,
+    artifact_name: str = SPRINT_REPORT_ARTIFACT_DEFAULT,
+):
+    now = datetime.now(tz=timezone.utc)
+    artifact_path = repo_path / artifact_name
+    lines = [
+        "# Sprint Report",
+        "",
+        f"- Generated: {now.strftime('%Y-%m-%d %H:%M UTC')}",
+        f"- Sprint Date: {now.strftime('%Y-%m-%d')}",
+        "",
+        "## Headline",
+        "",
+        str(report.get("headline") or "").strip() or "No headline generated.",
+        "",
+        "## Goal",
+        "",
+        readme_goal.strip() or "(no README goal found)",
+        "",
+        "## North Star",
+        "",
+        north_star.strip() or "(no north star found)",
+        "",
+        "## How This Sprint Moved The Repo Forward",
+        "",
+        str(report.get("movement_summary") or "").strip() or "No movement summary generated.",
+        "",
+        "## Progress This Sprint",
+        "",
+    ]
+    for item in report.get("progress_points", []) or ["No concrete progress points were extracted."]:
+        lines.append(f"- {item}")
+    lines.extend([
+        "",
+        "## Risks And Gaps",
+        "",
+    ])
+    for item in report.get("risks_and_gaps", []) or ["No explicit risks or gaps were extracted."]:
+        lines.append(f"- {item}")
+    lines.extend([
+        "",
+        "## Next Sprint Focus",
+        "",
+    ])
+    for item in report.get("next_sprint_focus", []) or ["No next sprint focus was extracted."]:
+        lines.append(f"- {item}")
+    lines.extend([
+        "",
+        "## Source Retrospective",
+        "",
+        retrospective.strip() or "(no retrospective)",
+        "",
+        "## Planned Next Sprint",
+        "",
+        sprint_summary.strip() or "(no sprint summary)",
+        "",
+    ])
+    updated = "\n".join(lines)
+    artifact_path.write_text(updated, encoding="utf-8")
+    _commit_repo_markdown_with_retry(
+        repo_path,
+        artifact_path.relative_to(repo_path),
+        updated,
+        f"chore: refresh {artifact_path.name}",
+        f"  {artifact_path.name} updated and pushed for {repo_path.name}",
+    )
+
+
 def _recent_metrics_summary(cfg: dict) -> str:
     """Compact summary of recent task completions."""
     root = Path(cfg.get("root_dir", ".")).expanduser()
@@ -2558,6 +2793,31 @@ def _send_telegram(cfg: dict, text: str, reply_markup: dict | None = None) -> in
     return None
 
 
+def _format_sprint_report_message(report: dict, repo: str) -> str:
+    """Format a sprint report dict as a Telegram message."""
+    lines = [
+        f"📊 Sprint Report — {repo}",
+        "",
+        str(report.get("headline") or "No headline."),
+        "",
+        "🧭 Vision Progress",
+        str(report.get("movement_summary") or "No movement summary."),
+        "",
+        "✅ Progress",
+    ]
+    for item in report.get("progress_points", []) or ["No progress points."]:
+        lines.append(f"• {item}")
+    lines.append("")
+    lines.append("⚠️ Risks & Gaps")
+    for item in report.get("risks_and_gaps", []) or ["No risks identified."]:
+        lines.append(f"• {item}")
+    lines.append("")
+    lines.append("🔜 Next Sprint Focus")
+    for item in report.get("next_sprint_focus", []) or ["No focus items."]:
+        lines.append(f"• {item}")
+    return "\n".join(lines)
+
+
 def _format_plan_message(plan: list[dict], repo: str, cadence_days: float) -> str:
     """Format the sprint plan for Telegram display."""
     approval_timeout_hours = _approval_timeout_hours(cadence_days)
@@ -2672,7 +2932,25 @@ def _complete_plan_action(
             f"- [{t.get('priority', '?')}] {t.get('title', '?')}: {t.get('rationale', '')}"
             for t in plan
         )
+        readme_goal = _read_readme_goal(repo_path)
+        north_star = read_north_star(repo_path)
+        strategy_context = _read_strategy(repo_path)
+        sprint_report = _build_sprint_report(
+            readme_goal=readme_goal,
+            north_star=north_star,
+            strategy_context=strategy_context,
+            retrospective=retrospective,
+            sprint_summary=sprint_summary,
+        )
         _update_strategy(repo_path, repo, sprint_summary, retrospective)
+        _write_sprint_report_artifact(
+            repo_path,
+            readme_goal=readme_goal,
+            north_star=north_star,
+            retrospective=retrospective,
+            sprint_summary=sprint_summary,
+            report=sprint_report,
+        )
         record_run(cfg, "strategic_planner", repo)
         summary = (
             f"✅ Approved sprint applied for {repo}\n"
@@ -2681,6 +2959,9 @@ def _complete_plan_action(
         )
         print(summary)
         _send_telegram(cfg, summary)
+        report_msg = _format_sprint_report_message(sprint_report, repo)
+        print(report_msg)
+        _send_telegram(cfg, report_msg)
         action["status"] = "completed"
         action["completed_at"] = now
         save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
