@@ -22,6 +22,7 @@ from orchestrator.gh_project import (
 from orchestrator.task_formatter import format_task
 from orchestrator.task_decomposer import decompose_issue, create_sub_issues
 from orchestrator.outcome_attribution import parse_outcome_check_ids
+from orchestrator.agent_scorer import filter_healthy_agents
 from orchestrator.trust import is_trusted
 from orchestrator.queue import (
     send_telegram,
@@ -174,6 +175,18 @@ def _validated_agent_assignment(cfg: dict, project_key: str, task_type: str, req
         raise ValueError(
             f"No agents configured for task_type={task_type!r} "
             f"(project_key={project_key!r}, requested_agent={requested_agent!r})."
+        )
+
+    metrics_file = Path(cfg.get("root_dir", ".")).expanduser() / "runtime" / "metrics" / "agent_stats.jsonl"
+    healthy_chain, skipped_agents = filter_healthy_agents(chain, metrics_file)
+    if not healthy_chain:
+        skipped_summary = ", ".join(
+            f"{agent} ({round(stats['rate'] * 100, 1)}% success over {stats['total']} task(s) in the last 24h)"
+            for agent, stats in skipped_agents.items()
+        ) or "none"
+        raise ValueError(
+            f"No healthy agents available for task_type={task_type!r}. "
+            f"All configured candidates are at or below the >80% success-rate gate: {skipped_summary}."
         )
 
     return requested_agent
@@ -1198,6 +1211,7 @@ def _skip_agent_unavailable(
         },
         sort_keys=True,
     )
+    human_review_required = "No healthy agents available" in str(error)
     add_issue_comment(
         repo_full,
         item["number"],
@@ -1205,7 +1219,12 @@ def _skip_agent_unavailable(
             "<!-- agent-os-dispatch-skip",
             payload,
             "-->",
-            "Blocked automatically: no available agent matched this task's requirements.",
+            (
+                "Blocked automatically: no healthy available agent matched this task's requirements. "
+                "Escalated for human review."
+                if human_review_required
+                else "Blocked automatically: no available agent matched this task's requirements."
+            ),
         ]),
     )
 

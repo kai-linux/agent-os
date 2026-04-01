@@ -5,6 +5,8 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from orchestrator import github_dispatcher as gd
@@ -709,6 +711,50 @@ none
         assert str(exc) == "Unsupported agent preference: none. Expected one of: auto, claude, codex, deepseek, gemini."
 
 
+def test_build_mailbox_task_rejects_when_no_healthy_agent_available(tmp_path, monkeypatch):
+    metrics_dir = tmp_path / "runtime" / "metrics"
+    metrics_dir.mkdir(parents=True)
+    now = gd.datetime.now().isoformat()
+    records = [
+        {"timestamp": now, "agent": "codex", "status": "complete"},
+        {"timestamp": now, "agent": "codex", "status": "blocked"},
+        {"timestamp": now, "agent": "claude", "status": "complete"},
+        {"timestamp": now, "agent": "claude", "status": "blocked"},
+    ]
+    (metrics_dir / "agent_stats.jsonl").write_text(
+        "".join(json.dumps(record) + "\n" for record in records),
+        encoding="utf-8",
+    )
+
+    cfg = {
+        "root_dir": str(tmp_path),
+        "default_agent": "auto",
+        "default_task_type": "implementation",
+        "default_base_branch": "main",
+        "default_allow_push": True,
+        "default_max_attempts": 4,
+        "max_runtime_minutes": 40,
+        "formatter_model": None,
+        "agent_fallbacks": {"implementation": ["codex", "claude"]},
+    }
+    repo_cfg = {"local_repo": "/tmp/repo", "github_repo": "owner/repo"}
+    issue = {
+        "number": 42,
+        "title": "Improve dispatch validation",
+        "url": "https://github.com/owner/repo/issues/42",
+        "labels": [{"name": "prio:high"}],
+        "body": """
+## Goal
+Improve dispatch validation.
+""",
+    }
+
+    monkeypatch.setattr(gd, "format_task", lambda title, body, model=None: None)
+
+    with pytest.raises(ValueError, match="No healthy agents available"):
+        gd.build_mailbox_task(cfg, "proj", repo_cfg, issue)
+
+
 def test_check_push_readiness_reports_missing_origin_remote(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -902,6 +948,73 @@ def test_dispatch_item_blocks_task_when_agent_fallbacks_are_invalid(tmp_path, mo
             "bogus-agent. Expected only: claude, codex, deepseek, gemini."
         ),
     }
+
+
+def test_dispatch_item_escalates_to_human_review_when_all_agents_unhealthy(tmp_path, monkeypatch):
+    metrics_dir = tmp_path / "runtime" / "metrics"
+    metrics_dir.mkdir(parents=True)
+    now = gd.datetime.now().isoformat()
+    records = [
+        {"timestamp": now, "agent": "codex", "status": "complete"},
+        {"timestamp": now, "agent": "codex", "status": "blocked"},
+        {"timestamp": now, "agent": "claude", "status": "complete"},
+        {"timestamp": now, "agent": "claude", "status": "blocked"},
+    ]
+    (metrics_dir / "agent_stats.jsonl").write_text(
+        "".join(json.dumps(record) + "\n" for record in records),
+        encoding="utf-8",
+    )
+
+    cfg = {
+        "root_dir": str(tmp_path),
+        "default_agent": "auto",
+        "default_task_type": "implementation",
+        "default_allow_push": True,
+        "github_owner": "owner",
+        "agent_fallbacks": {"implementation": ["codex", "claude"]},
+    }
+    paths = {"INBOX": tmp_path / "inbox"}
+    paths["INBOX"].mkdir()
+    info = {
+        "status_field_id": "status-field",
+        "status_options": {"Blocked": "blocked-option"},
+        "project_id": "project-1",
+    }
+    ready_items = [{
+        "item_id": "item-1",
+        "number": 42,
+        "title": "Dispatch task with unhealthy agents",
+        "body": "Keep the diff minimal.",
+        "url": "https://github.com/owner/repo/issues/42",
+        "labels": {"ready", "prio:high"},
+        "repo": "owner/repo",
+        "author": "trusted-user",
+        "state": "OPEN",
+    }]
+    repo_to_project = {
+        "owner/repo": (
+            "proj",
+            {"blocked_value": "Blocked"},
+            {"local_repo": "/tmp/repo", "github_repo": "owner/repo"},
+        ),
+    }
+    comments = []
+
+    monkeypatch.setattr(gd, "is_trusted", lambda author, _cfg: True)
+    monkeypatch.setattr(gd, "_resolve_issue_dependencies", lambda *args, **kwargs: {"status": "clear"})
+    monkeypatch.setattr(gd, "_try_decompose", lambda *args, **kwargs: None)
+    monkeypatch.setattr(gd, "format_task", lambda title, body, model=None: None)
+    monkeypatch.setattr(gd, "add_issue_comment", lambda repo, number, body: comments.append((repo, number, body)))
+    monkeypatch.setattr(gd, "edit_issue_labels", lambda *args, **kwargs: None)
+    monkeypatch.setattr(gd, "set_item_status", lambda *args, **kwargs: None)
+
+    dispatched = gd._dispatch_item(cfg, paths, "owner", repo_to_project, info, ready_items, {})
+
+    assert dispatched is False
+    assert len(comments) == 1
+    assert "Escalated for human review." in comments[0][2]
+    payload = comments[0][2].splitlines()[1]
+    assert "No healthy agents available" in json.loads(payload)["detail"]
 
 
 def test_parse_retry_decision_supports_yaml_section():
