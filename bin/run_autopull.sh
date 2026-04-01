@@ -7,4 +7,9 @@ set -euo pipefail
 log_cron_start "autopull"
 
 cd "$ROOT"
-git pull
+git pull --rebase --autostash || true
+
+# Push any local-only commits (e.g. CODEBASE.md updates from agents)
+if [ "$(git rev-list --count @{u}..HEAD 2>/dev/null)" -gt 0 ] 2>/dev/null; then
+  git push
+fi
