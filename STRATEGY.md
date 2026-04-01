@@ -26,14 +26,51 @@ That means sprint selection should favor work that increases:
 
 
 
+
 <!-- auto-focus-areas -->
-- Closed-loop task recovery and execution automation
-- Outcome measurement and evidence-driven planning
-- Task dispatch reliability and execution control
-- Control-plane observability and debugging infrastructure
-- Planning automation and artifact synthesis
+- Prevent CI failure cascades with debug recovery loops
+- Ensure reliable task dispatch with agent health gating
+- Automate detection and escalation of blocked tasks
+- Enable evidence-driven planning from production feedback
+- Build control plane observability through execution auditing
 
 ## Sprint History
+
+### Sprint 2026-04-01
+
+**Retrospective:**
+Issues completed:
+- #109: Follow up partial debug for task-20260331-112817-follow-up-partial-debug-for-task-20260331-111916-f [prio:high, done] — COMPLETED
+- #106: Follow up partial debug for task-20260331-112615-fix-ci-failure-on-pr-98 [prio:high, agent-dispatched, done] — COMPLETED
+- #105: Follow up partial debug for task-20260331-111518-follow-up-partial-debug-for-task-20260331-110613-f [prio:high, done] — COMPLETED
+- #104: Follow up partial debug for task-20260331-111916-follow-up-partial-debug-for-task-20260331-111114-f [prio:high, done] — COMPLETED
+- #103: Follow up partial debug for task-20260331-111114-fix-ci-failure-on-pr-98 [prio:high, done] — COMPLETED
+- #102: Follow up partial debug for task-20260331-110613-fix-ci-failure-on-pr-98 [prio:high, done] — COMPLETED
+- #99: Fix CI failure on PR #98 [bug, prio:high, done] — COMPLETED
+- #95: Integrate production feedback metrics into task scoring [enhancement, prio:high, prio:normal, done] — COMPLETED
+- #94: Prevent invalid agent assignments in task dispatcher [bug, prio:high, done] — COMPLETED
+- #93: Root-cause and resolve 4 stuck debugging tasks from March 19 [bug, prio:high, done] — COMPLETED
+- #57: Escalate blocked tasks with no assigned agent within 1 cycle [enhancement, prio:normal, done] — COMPLETED
+
+PRs merged:
+- PR #101: Agent: task-20260331-105520-escalate-blocked-tasks-with-no-assigned-agent-with (branch: agent/task-20260331-105520-escalate-blocked-tasks-with-no-assigned-agent-with)
+- PR #100: Agent: task-20260331-105617-integrate-production-feedback-metrics-into-task-sc (branch: agent/task-20260331-105617-integrate-production-feedback-metrics-into-task-sc)
+- PR #98: Agent: task-20260331-105417-prevent-invalid-agent-assignments-in-task-dispatch (branch: agent/task-20260331-105417-prevent-invalid-agent-assignments-in-task-dispatch)
+- PR #97: Agent: task-20260331-105322-add-a-goal-section-to-readme-md (branch: agent/task-20260331-105322-add-a-goal-section-to-readme-md)
+
+Outcome evidence:
+- #48 / PR #97 / No measurable external metric: inconclusive — Merged work had no configured outcome check, so it is explicitly tracked as inconclusive instead of being treated as impact-free or automatically successful.
+- #95 / PR #100 / No measurable external metric: inconclusive — Merged work had no configured outcome check, so it is explicitly tracked as inconclusive instead of being treated as impact-free or automatically successful.
+- #57 / PR #101 / No measurable external metric: inconclusive — Merged work had no configured outcome check, so it is explicitly tracked as inconclusive instead of being treated as impact-free or automatically successful.
+- #94 / PR #98 / No measurable external metric: inconclusive — Merged work had no configured outcome check, so it is explicitly tracked as inconclusive instead of being treated as impact-free or automatically successful.
+
+**Plan:**
+- [prio:high] Debug: Root cause analysis for PR #98 cascading CI failures: Task metrics show 7+ partial/blocked debug tasks from one CI failure — this is the most visible repeated operational failure mode and understanding it is prerequisite to preventing future cascades, which the planning principles rank highest.
+- [prio:high] Add agent health checks to task dispatch routing: Task metrics show 27 blocked tasks concentrated on deepseek and none agents — health-gated dispatch compounds last sprint's invalid-assignment fix (#94) and directly reduces wasted execution cycles.
+- [prio:high] Cluster CI failures by error signature to deduplicate debug work: The PR #98 cascade demonstrates the cost of dispatching duplicate debug work — clustering prevents the pattern from recurring and reduces partial-task churn, advancing control-plane reliability.
+- [prio:high] Fix deepseek auth failures in agent-os: Deepseek auth failures have persisted across two sprint cycles with multiple blocked tasks — fixing this restores fallback chain capacity and directly removes a repeated execution blocker.
+- [prio:high] Implement automatic escalation for over-retried blocked tasks: Last sprint added blocked-task escalation within 1 cycle (#57) but the system still lacks a ceiling on retries — this closes the recovery loop and advances toward Level 4 closed-loop optimization.
+
 
 ### Sprint 2026-03-31
 
