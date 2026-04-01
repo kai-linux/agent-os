@@ -16,6 +16,16 @@
 
 ## Recent Changes
 
+### 2026-04-01 — [task-20260401-120316-add-agent-health-checks-to-task-dispatch-routing] (#112 kai-linux/agent-os)
+Added a cached 24-hour agent health gate to dispatch routing so agents at or below an 80% recent success rate are skipped during fallback evaluation, and dispatch now blocks with an explicit human-review escalation when no healthy candidate remains.
+
+**Files:** `- orchestrator/agent_scorer.py`, `- orchestrator/queue.py`, `- orchestrator/github_dispatcher.py`, `- tests/test_queue.py`, `- tests/test_github_dispatcher.py`, `- .agent_result.md`
+
+**Decisions:**
+  - - Reused `runtime/metrics/agent_stats.jsonl` and the existing scorer parsing logic instead of adding a new health datastore.
+  - - Treated agents with no recent 24-hour metrics as eligible so the new gate removes degraded agents without breaking routing for agents that lack fresh history.
+
+
 ### 2026-04-01 — [task-20260401-120115-fix-deepseek-auth-failures-in-agent-os] (#91 kai-linux/agent-os)
 DeepSeek was being treated as dispatchable whenever an OpenRouter config directory existed, even if `secrets.json` was missing a usable `openRouterApiKey`. The queue now preflights that credential before dispatch, skips DeepSeek when auth is unavailable, and falls through to the next configured fallback agent instead of burning an execution attempt on a predictable authentication failure.
 
