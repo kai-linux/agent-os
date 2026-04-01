@@ -961,3 +961,74 @@ def test_handle_telegram_callback_plan_approve():
         assert "Approved sprint plan" in outcome["text"]
         stored = actions_dir.joinpath("abcdef123456.json").read_text(encoding="utf-8")
         assert '"approval": "approved"' in stored
+
+
+def test_handle_telegram_callback_blocked_task_retry(tmp_path, monkeypatch):
+    actions_dir = tmp_path / "telegram_actions"
+    actions_dir.mkdir()
+    escalated = tmp_path / "mailbox" / "escalated"
+    escalated.mkdir(parents=True)
+    note_path = escalated / "task-root-escalation.md"
+    note_path.write_text("# Escalation Note\n", encoding="utf-8")
+
+    action = {
+        "action_id": "abcdef123456",
+        "type": "blocked_task_escalation",
+        "status": "pending",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+        "chat_id": "1",
+        "message_id": 10,
+        "task_id": "task-123",
+        "github_project_key": "demo",
+        "github_repo": "acme/demo",
+        "github_issue_number": 7,
+        "github_issue_url": "https://github.com/acme/demo/issues/7",
+        "escalation_note": "task-root-escalation.md",
+    }
+    save_telegram_action(actions_dir, action)
+
+    monkeypatch.setattr("orchestrator.queue.runtime_paths", lambda cfg: {"ESCALATED": escalated})
+    comments = []
+    monkeypatch.setattr("orchestrator.queue.add_issue_comment", lambda repo, number, body: comments.append((repo, number, body)))
+
+    outcome = handle_telegram_callback({}, actions_dir, "esc:abcdef123456:retry")
+    assert "Recorded retry" in outcome["text"]
+    note_text = note_path.read_text(encoding="utf-8")
+    assert "## Retry Decision" in note_text
+    assert "action: retry" in note_text
+    assert comments and "`retry`" in comments[0][2]
+
+
+def test_handle_telegram_callback_blocked_task_skip(tmp_path, monkeypatch):
+    actions_dir = tmp_path / "telegram_actions"
+    actions_dir.mkdir()
+    escalated = tmp_path / "mailbox" / "escalated"
+    escalated.mkdir(parents=True)
+    note_path = escalated / "task-root-escalation.md"
+    note_path.write_text("# Escalation Note\n", encoding="utf-8")
+
+    action = {
+        "action_id": "abcdef123456",
+        "type": "blocked_task_escalation",
+        "status": "pending",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+        "chat_id": "1",
+        "message_id": 10,
+        "task_id": "task-123",
+        "github_project_key": "demo",
+        "github_repo": "acme/demo",
+        "github_issue_number": 7,
+        "github_issue_url": "https://github.com/acme/demo/issues/7",
+        "escalation_note": "task-root-escalation.md",
+    }
+    save_telegram_action(actions_dir, action)
+
+    monkeypatch.setattr("orchestrator.queue.runtime_paths", lambda cfg: {"ESCALATED": escalated})
+    monkeypatch.setattr("orchestrator.queue.add_issue_comment", lambda *args, **kwargs: None)
+
+    outcome = handle_telegram_callback({}, actions_dir, "esc:abcdef123456:skip")
+    assert "skipped" in outcome["text"].lower()
+    note_text = note_path.read_text(encoding="utf-8")
+    assert "action: skip" in note_text

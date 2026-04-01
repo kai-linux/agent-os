@@ -5,7 +5,7 @@ import os
 import re
 import shutil
 import subprocess
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import yaml
@@ -23,6 +23,10 @@ from orchestrator.task_formatter import format_task
 from orchestrator.task_decomposer import decompose_issue, create_sub_issues
 from orchestrator.outcome_attribution import parse_outcome_check_ids
 from orchestrator.trust import is_trusted
+from orchestrator.queue import (
+    send_telegram,
+    save_telegram_action,
+)
 
 
 SECTION_RE = re.compile(r"^##\s+(.+?)\n(.*?)(?=^##\s+|\Z)", re.MULTILINE | re.DOTALL)
@@ -51,6 +55,7 @@ CI_CONTEXT_LINE_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"^\s*-\s+Failed checks:\s*$", re.IGNORECASE),
     re.compile(r"^\s*-\s+\*\*.+?\*\*:\s*`.+?`\s*(?:- .+)?$", re.IGNORECASE),
 )
+BLOCKED_ESCALATION_COMMENT_MARKER = "<!-- agent-os-blocked-task-escalation -->"
 
 
 def slugify(text: str) -> str:
@@ -377,6 +382,331 @@ def _parse_mailbox_task(path: Path) -> tuple[dict, str]:
     if not match:
         raise ValueError(f"Invalid task format in {path}")
     return yaml.safe_load(match.group(1)) or {}, match.group(2).strip()
+
+
+def _parse_markdown_heading(text: str, heading: str, next_headings: list[str]) -> str:
+    if next_headings:
+        pattern = rf"(?ms)^# {re.escape(heading)}\s*\n(.*?)(?=^# (?:{'|'.join(map(re.escape, next_headings))})\s*$|\Z)"
+    else:
+        pattern = rf"(?ms)^# {re.escape(heading)}\s*\n(.*)$"
+    match = re.search(pattern, text or "")
+    return match.group(1).strip() if match else ""
+
+
+def _parse_log_result_section(text: str, label: str, next_labels: list[str]) -> str:
+    if next_labels:
+        pattern = rf"(?ms)^{re.escape(label)}:\s*(.*?)(?=^(?:{'|'.join(map(re.escape, next_labels))}):|\Z)"
+    else:
+        pattern = rf"(?ms)^{re.escape(label)}:\s*(.*)$"
+    match = re.search(pattern, text or "")
+    return match.group(1).strip() if match else ""
+
+
+def _extract_task_result_snapshot(paths: dict, task_id: str, body: str) -> dict:
+    log_path = paths["LOGS"] / f"{task_id}.log"
+    if log_path.exists():
+        text = log_path.read_text(encoding="utf-8")
+        status_match = re.findall(r"Worker status from .*?: (\w+)", text)
+        status = status_match[-1].strip().lower() if status_match else ""
+        summary = _parse_log_result_section(
+            text,
+            "SUMMARY",
+            ["DONE", "BLOCKERS", "NEXT_STEP", "FILES_CHANGED", "TESTS_RUN", "DECISIONS", "RISKS", "ATTEMPTED_APPROACHES", "MANUAL_STEPS"],
+        )
+        blocker_code = _parse_log_result_section(
+            text,
+            "BLOCKER_CODE",
+            ["SUMMARY", "DONE", "BLOCKERS", "NEXT_STEP", "FILES_CHANGED", "TESTS_RUN", "DECISIONS", "RISKS", "ATTEMPTED_APPROACHES", "MANUAL_STEPS"],
+        ).splitlines()[0].strip() if "BLOCKER_CODE:" in text else ""
+        blockers = _parse_log_result_section(
+            text,
+            "BLOCKERS",
+            ["NEXT_STEP", "FILES_CHANGED", "TESTS_RUN", "DECISIONS", "RISKS", "ATTEMPTED_APPROACHES", "MANUAL_STEPS"],
+        )
+        return {
+            "status": status or "blocked",
+            "summary": summary or "No summary captured.",
+            "blocker_code": blocker_code or "unknown",
+            "blockers": [line.strip() for line in blockers.splitlines() if line.strip()] or ["- None"],
+        }
+
+    prior_summary = _parse_markdown_heading(
+        body,
+        "Prior Summary",
+        ["Prior Blocker Code", "Prior Progress", "Known Blockers", "Files Changed So Far", "Tests Run So Far", "Prior Decisions", "Known Risks", "Avoid Repeating These Approaches", "Models Already Tried In This Task Lineage"],
+    )
+    prior_blocker = _parse_markdown_heading(
+        body,
+        "Prior Blocker Code",
+        ["Prior Progress", "Known Blockers", "Files Changed So Far", "Tests Run So Far", "Prior Decisions", "Known Risks", "Avoid Repeating These Approaches", "Models Already Tried In This Task Lineage"],
+    )
+    known_blockers = _parse_markdown_heading(
+        body,
+        "Known Blockers",
+        ["Files Changed So Far", "Tests Run So Far", "Prior Decisions", "Known Risks", "Avoid Repeating These Approaches", "Models Already Tried In This Task Lineage"],
+    )
+    return {
+        "status": "blocked",
+        "summary": prior_summary or "No summary captured.",
+        "blocker_code": prior_blocker or "unknown",
+        "blockers": [line.strip() for line in known_blockers.splitlines() if line.strip()] or ["- None"],
+    }
+
+
+def _collect_lineage_entries(paths: dict, parent_task_id: str) -> list[dict]:
+    candidates: list[dict] = []
+    for base_key in ("INBOX", "PROCESSING", "DONE", "FAILED", "BLOCKED", "ESCALATED"):
+        base = paths[base_key]
+        for task_path in sorted(base.glob("*.md")):
+            if task_path.name.endswith("-escalation.md"):
+                continue
+            try:
+                meta, body = _parse_mailbox_task(task_path)
+            except Exception:
+                continue
+            task_id = str(meta.get("task_id", "")).strip()
+            lineage_id = str(meta.get("parent_task_id") or task_id).strip()
+            if task_id != parent_task_id and lineage_id != parent_task_id:
+                continue
+            snapshot = _extract_task_result_snapshot(paths, task_id or task_path.stem, body)
+            candidates.append({
+                "path": task_path,
+                "meta": meta,
+                "body": body,
+                "task_id": task_id or task_path.stem,
+                "attempt": int(meta.get("attempt", 1) or 1),
+                "mtime": task_path.stat().st_mtime,
+                "state": base_key.lower(),
+                **snapshot,
+            })
+
+    candidates.sort(key=lambda item: (item["attempt"], item["mtime"], item["task_id"]))
+    deduped: list[dict] = []
+    seen_ids: set[str] = set()
+    for item in candidates:
+        if item["task_id"] in seen_ids:
+            continue
+        seen_ids.add(item["task_id"])
+        deduped.append(item)
+    return deduped
+
+
+def _blocked_task_error_patterns(entries: list[dict]) -> tuple[list[str], list[str]]:
+    blocker_codes: list[str] = []
+    blocker_counts: dict[str, int] = {}
+    bullet_counts: dict[str, int] = {}
+    for entry in entries:
+        code = str(entry.get("blocker_code", "")).strip() or "unknown"
+        blocker_counts[code] = blocker_counts.get(code, 0) + 1
+        if code not in blocker_codes:
+            blocker_codes.append(code)
+        for raw_bullet in entry.get("blockers", []):
+            bullet = raw_bullet[2:].strip() if raw_bullet.startswith("- ") else raw_bullet.strip()
+            if not bullet or bullet.lower() == "none":
+                continue
+            bullet_counts[bullet] = bullet_counts.get(bullet, 0) + 1
+
+    patterns: list[str] = []
+    for code, count in sorted(blocker_counts.items(), key=lambda item: (-item[1], item[0])):
+        patterns.append(f"`{code}` repeated {count} time(s)")
+    for bullet, count in sorted(bullet_counts.items(), key=lambda item: (-item[1], item[0]))[:3]:
+        if count > 1:
+            patterns.append(f"\"{bullet}\" repeated {count} time(s)")
+    return blocker_codes, patterns or ["No repeated error pattern extracted from blockers."]
+
+
+def _format_attempt_log(entries: list[dict]) -> list[str]:
+    lines: list[str] = []
+    for entry in entries:
+        summary = str(entry.get("summary", "No summary captured.")).strip().replace("\n", " ")
+        if len(summary) > 160:
+            summary = summary[:157] + "..."
+        lines.append(
+            f"- Attempt {entry['attempt']} | task `{entry['task_id']}` | state `{entry['state']}` | blocker `{entry.get('blocker_code', 'unknown')}` | {summary}"
+        )
+    return lines or ["- No prior attempt records found."]
+
+
+def _format_blocked_elapsed(task_path: Path) -> str:
+    age = datetime.now() - datetime.fromtimestamp(task_path.stat().st_mtime)
+    if age < timedelta(hours=1):
+        minutes = max(1, int(age.total_seconds() // 60))
+        return f"{minutes} minute(s)"
+    if age < timedelta(days=1):
+        return f"{int(age.total_seconds() // 3600)} hour(s)"
+    return f"{age.days} day(s)"
+
+
+def _build_blocked_task_escalation_note(meta: dict, body: str, entries: list[dict], task_path: Path, reason: str) -> str:
+    blocker_codes, error_patterns = _blocked_task_error_patterns(entries)
+    return f"""# Escalation Note
+
+## Parent Task ID
+{meta.get("parent_task_id", meta.get("task_id", "unknown"))}
+
+## Branch
+{meta.get("branch", "unknown")}
+
+## Repo
+{meta.get("repo", "unknown")}
+
+## Task Type
+{meta.get("task_type", "unknown")}
+
+## Escalation Trigger
+{reason}
+
+## Blocked Age
+{_format_blocked_elapsed(task_path)}
+
+## Previous Blocker Codes
+{", ".join(blocker_codes) if blocker_codes else "unknown"}
+
+## Error Patterns
+{chr(10).join(f"- {pattern}" for pattern in error_patterns)}
+
+## Attempt Log
+{chr(10).join(_format_attempt_log(entries))}
+
+## Original Task
+{body}
+"""
+
+
+def _build_blocked_task_comment(meta: dict, task_path: Path, entries: list[dict], reason: str) -> str:
+    blocker_codes, error_patterns = _blocked_task_error_patterns(entries)
+    attempt_log = _format_attempt_log(entries)
+    return f"""## Blocked task escalation
+{BLOCKED_ESCALATION_COMMENT_MARKER}
+
+**Task ID:** `{meta.get("task_id", task_path.stem)}`
+**Parent Task ID:** `{meta.get("parent_task_id", meta.get("task_id", task_path.stem))}`
+**Branch:** `{meta.get("branch", "unknown")}`
+**Trigger:** {reason}
+**Blocked age:** {_format_blocked_elapsed(task_path)}
+
+### Previous blocker codes
+{", ".join(f"`{code}`" for code in blocker_codes) if blocker_codes else "`unknown`"}
+
+### Error patterns
+{chr(10).join(f"- {pattern}" for pattern in error_patterns)}
+
+### Attempt log
+{chr(10).join(attempt_log)}
+"""
+
+
+def _blocked_escalation_reply_markup(action_id: str) -> dict:
+    return {
+        "inline_keyboard": [[
+            {"text": "Retry", "callback_data": f"esc:{action_id}:retry"},
+            {"text": "Close", "callback_data": f"esc:{action_id}:close"},
+            {"text": "Skip", "callback_data": f"esc:{action_id}:skip"},
+        ]]
+    }
+
+
+def _build_blocked_task_telegram_message(meta: dict, task_path: Path, entries: list[dict], reason: str, note_path: Path) -> str:
+    blocker_codes, error_patterns = _blocked_task_error_patterns(entries)
+    lines = [
+        "🛑 Blocked task escalation",
+        f"Issue: {meta.get('github_issue_url', 'n/a')}",
+        f"Task ID: {meta.get('task_id', task_path.stem)}",
+        f"Attempts: {max((entry['attempt'] for entry in entries), default=int(meta.get('attempt', 1) or 1))}",
+        f"Blocked age: {_format_blocked_elapsed(task_path)}",
+        f"Trigger: {reason}",
+        f"Blocker codes: {', '.join(blocker_codes) if blocker_codes else 'unknown'}",
+        "",
+        "Error patterns:",
+        *[f"- {pattern}" for pattern in error_patterns[:3]],
+        "",
+        "Attempt log:",
+        *_format_attempt_log(entries)[:4],
+        "",
+        f"Note: {note_path.name}",
+    ]
+    text = "\n".join(lines).strip()
+    return text if len(text) <= 4000 else text[:3997] + "..."
+
+
+def _create_blocked_task_action(meta: dict, note_path: Path, chat_id: str) -> dict:
+    now = datetime.now(timezone.utc)
+    action_id = os.urandom(6).hex()
+    return {
+        "action_id": action_id,
+        "type": "blocked_task_escalation",
+        "status": "pending",
+        "created_at": now.isoformat(),
+        "expires_at": (now + timedelta(hours=48)).isoformat(),
+        "chat_id": str(chat_id),
+        "message_id": None,
+        "task_id": meta.get("task_id"),
+        "github_project_key": meta.get("github_project_key"),
+        "github_repo": meta.get("github_repo"),
+        "github_issue_number": meta.get("github_issue_number"),
+        "github_issue_url": meta.get("github_issue_url"),
+        "escalation_note": note_path.name,
+    }
+
+
+def _blocked_task_escalation_reason(task_path: Path, meta: dict, attempt_threshold: int, age_hours: int) -> str | None:
+    attempt = int(meta.get("attempt", 1) or 1)
+    age = datetime.now() - datetime.fromtimestamp(task_path.stat().st_mtime)
+    if attempt >= attempt_threshold:
+        return f"Blocked task reached retry attempt {attempt} (threshold: {attempt_threshold})."
+    if age >= timedelta(hours=age_hours):
+        return f"Blocked task has remained unowned for {_format_blocked_elapsed(task_path)} (threshold: {age_hours} hour(s))."
+    return None
+
+
+def _escalate_over_retried_blocked_tasks(cfg: dict, paths: dict) -> bool:
+    attempt_threshold = int(cfg.get("blocked_escalation_attempt_threshold", 3) or 3)
+    age_hours = int(cfg.get("blocked_escalation_age_hours", 24) or 24)
+    chat_id = str(cfg.get("telegram_chat_id", "")).strip()
+
+    for task_path in sorted(paths["BLOCKED"].glob("*.md")):
+        try:
+            meta, body = _parse_mailbox_task(task_path)
+        except Exception:
+            continue
+
+        repo_full = str(meta.get("github_repo", "")).strip()
+        issue_number = meta.get("github_issue_number")
+        project_key = str(meta.get("github_project_key", "")).strip()
+        if not repo_full or not issue_number or not project_key:
+            continue
+
+        reason = _blocked_task_escalation_reason(task_path, meta, attempt_threshold, age_hours)
+        if not reason:
+            continue
+
+        parent_task_id = str(meta.get("parent_task_id") or meta.get("task_id") or task_path.stem).strip()
+        note_path = paths["ESCALATED"] / f"{parent_task_id}-escalation.md"
+        if note_path.exists():
+            continue
+
+        entries = _collect_lineage_entries(paths, parent_task_id)
+        note_path.write_text(
+            _build_blocked_task_escalation_note(meta, body, entries, task_path, reason),
+            encoding="utf-8",
+        )
+        add_issue_comment(repo_full, int(issue_number), _build_blocked_task_comment(meta, task_path, entries, reason))
+
+        if chat_id:
+            action = _create_blocked_task_action(meta, note_path, chat_id)
+            save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
+            message_id = send_telegram(
+                cfg,
+                _build_blocked_task_telegram_message(meta, task_path, entries, reason, note_path),
+                reply_markup=_blocked_escalation_reply_markup(action["action_id"]),
+            )
+            action["message_id"] = message_id
+            save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
+
+        print(f"Escalated blocked task for human review: {meta.get('task_id', task_path.stem)}")
+        return True
+
+    return False
 
 
 def _build_unassigned_blocked_escalation_note(meta: dict, body: str) -> str:
@@ -1223,6 +1553,8 @@ def dispatch_one():
     issue_lookup = _build_issue_lookup(queried)
     _requeue_unblocked_items(queried, repo_to_project, issue_lookup)
     if _escalate_unassigned_blocked_tasks(paths):
+        return
+    if _escalate_over_retried_blocked_tasks(cfg, paths):
         return
     if _consume_retry_decisions(cfg, paths, queried):
         return

@@ -769,6 +769,72 @@ def escalation_reply_markup(action_id: str) -> dict:
     }
 
 
+def _append_retry_decision_note(note_path: Path, operation: str) -> str:
+    note_text = note_path.read_text(encoding="utf-8") if note_path.exists() else ""
+    if "<!-- agent-os-blocked-task-decision -->" in note_text:
+        return "A decision was already recorded for this blocked-task escalation."
+
+    if operation == "retry":
+        decision_block = "action: retry\nreason: Human selected retry from Telegram blocked-task escalation."
+        human_text = "Recorded retry for dispatcher pickup."
+    elif operation == "close":
+        decision_block = "action: stop\nreason: Human selected close from Telegram blocked-task escalation."
+        human_text = "Recorded close for dispatcher pickup."
+    else:
+        decision_block = "action: skip\nreason: Human acknowledged the escalation and deferred action."
+        human_text = "Marked this blocked-task escalation as skipped."
+
+    suffix = (
+        "\n\n<!-- agent-os-blocked-task-decision -->\n"
+        "## Retry Decision\n"
+        f"{decision_block}\n"
+    )
+    note_path.write_text(note_text.rstrip() + suffix, encoding="utf-8")
+    return human_text
+
+
+def _handle_blocked_task_escalation_callback(
+    cfg: dict,
+    action: dict,
+    operation: str,
+    logfile: Path | None = None,
+    queue_summary_log: Path | None = None,
+) -> str:
+    if operation not in {"retry", "close", "skip"}:
+        raise RuntimeError(f"Unsupported blocked-task escalation operation: {operation}")
+
+    paths = runtime_paths(cfg)
+    note_name = str(action.get("escalation_note", "")).strip()
+    if not note_name:
+        raise RuntimeError("Blocked-task escalation action is missing an escalation note.")
+
+    note_path = paths["ESCALATED"] / note_name
+    if not note_path.exists():
+        raise RuntimeError(f"Escalation note not found: {note_path}")
+
+    result_text = _append_retry_decision_note(note_path, operation)
+    repo = str(action.get("github_repo", "")).strip()
+    issue_number = action.get("github_issue_number")
+    if repo and issue_number:
+        decision_name = {"retry": "retry", "close": "close", "skip": "skip"}[operation]
+        add_issue_comment(
+            repo,
+            int(issue_number),
+            (
+                "## Blocked task escalation decision\n"
+                f"**Task:** `{action.get('task_id', 'unknown')}`\n"
+                f"**Decision:** `{decision_name}`\n"
+                "Recorded from Telegram and preserved in the escalation note for dispatcher review."
+            ),
+        )
+    log(
+        f"Blocked-task escalation decision recorded: task={action.get('task_id')} operation={operation}",
+        logfile,
+        queue_summary_log=queue_summary_log,
+    )
+    return result_text
+
+
 def planner_reply_markup(action_id: str) -> dict:
     return {
         "inline_keyboard": [[
@@ -909,7 +975,7 @@ def handle_telegram_callback(
     logfile: Path | None = None,
     queue_summary_log: Path | None = None,
 ) -> dict:
-    m = re.fullmatch(r"(esc|plan):([a-f0-9]{12}):(requeue|close|approve|reject)", callback_data or "")
+    m = re.fullmatch(r"(esc|plan):([a-f0-9]{12}):(requeue|retry|close|skip|approve|reject)", callback_data or "")
     if not m:
         return {"text": "Unknown action.", "show_alert": True, "remove_keyboard": False}
 
@@ -942,7 +1008,9 @@ def handle_telegram_callback(
         save_telegram_action(actions_dir, action)
         return {"text": action["result_text"], "show_alert": False, "remove_keyboard": True}
 
-    if operation == "requeue":
+    if action.get("type") == "blocked_task_escalation":
+        result_text = _handle_blocked_task_escalation_callback(cfg, action, operation, logfile, queue_summary_log)
+    elif operation == "requeue":
         new_issue_url = requeue_escalation(cfg, action, logfile, queue_summary_log)
         result_text = f"Re-queued: {new_issue_url}"
     else:
