@@ -16,6 +16,16 @@
 
 ## Recent Changes
 
+### 2026-04-01 — [task-20260401-120115-fix-deepseek-auth-failures-in-agent-os] (#91 kai-linux/agent-os)
+DeepSeek was being treated as dispatchable whenever an OpenRouter config directory existed, even if `secrets.json` was missing a usable `openRouterApiKey`. The queue now preflights that credential before dispatch, skips DeepSeek when auth is unavailable, and falls through to the next configured fallback agent instead of burning an execution attempt on a predictable authentication failure.
+
+**Files:** `- .agent_result.md`, `- README.md`, `- orchestrator/queue.py`, `- tests/test_queue.py`
+
+**Decisions:**
+  - - Reused the existing `agent_available()` gate so the queue skips DeepSeek before execution rather than adding duplicate auth handling inside the runner and queue.
+  - - Scoped credential validation to the known failing OpenRouter path and preserved the existing DeepSeek provider fallback behavior for NanoGPT and Chutes.
+
+
 ### 2026-03-31 — [task-20260331-113316-follow-up-partial-debug-for-task-20260331-112615-f] (#106 kai-linux/agent-os)
 Validated that the existing follow-up remediation flow on this branch preserves the prior failing CI job name in GitHub debugging follow-up context and that queue-side CI verification still requires that preserved job name for rerun validation.
 
