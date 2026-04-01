@@ -123,30 +123,38 @@ def _rebase_pr_onto_main(repo: str, pr: dict) -> bool:
                 # Auto-resolve: drop .agent_result.md (deleted on main), keep union for CODEBASE.md
                 subprocess.run(["git", "-C", str(worktree_path), "rm", "-f", ".agent_result.md"], capture_output=True)
                 subprocess.run(["git", "-C", str(worktree_path), "checkout", "--theirs", "CODEBASE.md"], capture_output=True)
+
+                # For remaining conflicted files, try union merge (keep both sides)
+                conflict_files = _get_conflicted_files(worktree_path)
+                if conflict_files:
+                    resolved = _try_union_resolve(worktree_path, conflict_files)
+                    if not resolved:
+                        print(f"  Rebase has conflicts that could not be auto-resolved, aborting")
+                        subprocess.run(
+                            ["git", "-C", str(worktree_path), "rebase", "--abort"],
+                            capture_output=True,
+                        )
+                        return False
+
                 subprocess.run(["git", "-C", str(worktree_path), "add", "-A"], check=True, capture_output=True)
-
-                # Abort if any staged files still contain conflict markers
-                marker_check = subprocess.run(
-                    ["git", "-C", str(worktree_path), "diff", "--cached", "--diff-filter=U"],
-                    capture_output=True, text=True,
-                )
-                grep_check = subprocess.run(
-                    ["grep", "-rl", "^<<<<<<<", str(worktree_path)],
-                    capture_output=True, text=True,
-                )
-                if marker_check.stdout.strip() or grep_check.returncode == 0:
-                    print(f"  Rebase has unresolved conflicts beyond CODEBASE.md/.agent_result.md, aborting")
-                    subprocess.run(
-                        ["git", "-C", str(worktree_path), "rebase", "--abort"],
-                        capture_output=True,
-                    )
-                    return False
-
                 subprocess.run(
                     ["git", "-C", str(worktree_path), "rebase", "--continue"],
                     check=True, capture_output=True,
                     env={**subprocess.os.environ, "GIT_EDITOR": "true"},
                 )
+
+                # Validate with tests after conflict resolution
+                test_result = subprocess.run(
+                    ["python3", "-m", "pytest", "tests/", "-x", "-q", "--tb=no"],
+                    capture_output=True, text=True, cwd=str(worktree_path), timeout=120,
+                )
+                if test_result.returncode != 0:
+                    print(f"  Tests failed after auto-resolved rebase, aborting")
+                    subprocess.run(
+                        ["git", "-C", str(worktree_path), "rebase", "--abort"],
+                        capture_output=True,
+                    )
+                    return False
 
             # Force-push rebased branch
             subprocess.run(
