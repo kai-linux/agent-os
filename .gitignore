@@ -1,4 +1,6 @@
 config.*
+objectives/*.yaml
+!objectives/example.yaml
 .venv
 mailbox/*
 logs/*
