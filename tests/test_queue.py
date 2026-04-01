@@ -1,4 +1,5 @@
 """Unit tests for pure functions in orchestrator/queue.py"""
+import json
 import sys
 import textwrap
 import tempfile
@@ -148,6 +149,51 @@ def test_get_agent_chain_skips_deepseek_when_openrouter_credential_missing(monke
 
     chain = get_agent_chain({"task_type": "implementation"}, cfg)
     assert chain == ["codex", "claude"]
+
+
+def test_get_agent_chain_skips_agents_below_recent_health_threshold(tmp_path):
+    metrics_dir = tmp_path / "runtime" / "metrics"
+    metrics_dir.mkdir(parents=True)
+    now = datetime.now(timezone.utc).isoformat()
+    records = [
+        {"timestamp": now, "agent": "codex", "status": "complete"},
+        {"timestamp": now, "agent": "claude", "status": "complete"},
+        {"timestamp": now, "agent": "claude", "status": "blocked"},
+    ]
+    (metrics_dir / "agent_stats.jsonl").write_text(
+        "".join(json.dumps(record) + "\n" for record in records),
+        encoding="utf-8",
+    )
+
+    from unittest.mock import patch
+
+    with patch("orchestrator.queue.agent_available", return_value=(True, None)):
+        chain = get_agent_chain(
+            {"task_type": "implementation"},
+            {**_cfg({"implementation": ["claude", "codex"]}), "root_dir": str(tmp_path)},
+        )
+
+    assert chain == ["codex"]
+
+
+def test_get_agent_chain_allows_agents_without_recent_metrics(tmp_path):
+    metrics_dir = tmp_path / "runtime" / "metrics"
+    metrics_dir.mkdir(parents=True)
+    now = datetime.now(timezone.utc).isoformat()
+    (metrics_dir / "agent_stats.jsonl").write_text(
+        json.dumps({"timestamp": now, "agent": "claude", "status": "complete"}) + "\n",
+        encoding="utf-8",
+    )
+
+    from unittest.mock import patch
+
+    with patch("orchestrator.queue.agent_available", return_value=(True, None)):
+        chain = get_agent_chain(
+            {"task_type": "implementation"},
+            {**_cfg({"implementation": ["gemini", "claude"]}), "root_dir": str(tmp_path)},
+        )
+
+    assert chain == ["gemini", "claude"]
 
 
 def test_get_agent_chain_prefers_repo_specific_fallbacks():
