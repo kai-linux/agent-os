@@ -18,7 +18,9 @@ from orchestrator.gh_project import (
     add_issue_comment,
     list_ready_issues,
     gh,
+    gh_json,
 )
+from orchestrator.repo_modes import is_dispatcher_only_repo
 from orchestrator.task_formatter import format_task
 from orchestrator.task_decomposer import decompose_issue, create_sub_issues
 from orchestrator.outcome_attribution import parse_outcome_check_ids
@@ -689,6 +691,20 @@ def _escalate_over_retried_blocked_tasks(cfg: dict, paths: dict) -> bool:
         if not repo_full or not issue_number or not project_key:
             continue
 
+        # Skip escalation for dispatcher-only repos and closed issues
+        if is_dispatcher_only_repo(cfg, repo_full):
+            shutil.move(str(task_path), str(paths["DONE"] / task_path.name))
+            print(f"Skipped escalation for dispatcher-only repo {repo_full}: {task_path.stem}")
+            continue
+        try:
+            snapshot = gh_json(["issue", "view", str(issue_number), "-R", repo_full, "--json", "state"]) or {}
+            if str(snapshot.get("state", "")).upper() == "CLOSED":
+                shutil.move(str(task_path), str(paths["DONE"] / task_path.name))
+                print(f"Skipped escalation for closed issue #{issue_number}: {task_path.stem}")
+                continue
+        except Exception:
+            pass
+
         reason = _blocked_task_escalation_reason(task_path, meta, attempt_threshold, age_hours)
         if not reason:
             continue
@@ -780,7 +796,7 @@ Assign a valid agent or add an escalation retry decision so automation can resum
 """
 
 
-def _escalate_unassigned_blocked_tasks(paths: dict) -> bool:
+def _escalate_unassigned_blocked_tasks(cfg: dict, paths: dict) -> bool:
     for task_path in sorted(paths["BLOCKED"].glob("*.md")):
         try:
             meta, body = _parse_mailbox_task(task_path)
@@ -789,6 +805,23 @@ def _escalate_unassigned_blocked_tasks(paths: dict) -> bool:
 
         if str(meta.get("agent", "")).strip().lower() != "none":
             continue
+
+        # Skip for dispatcher-only repos and closed issues
+        repo_full = str(meta.get("github_repo", "")).strip()
+        issue_number = meta.get("github_issue_number")
+        if repo_full and is_dispatcher_only_repo(cfg, repo_full):
+            shutil.move(str(task_path), str(paths["DONE"] / task_path.name))
+            print(f"Skipped escalation for dispatcher-only repo {repo_full}: {task_path.stem}")
+            continue
+        if repo_full and issue_number:
+            try:
+                snapshot = gh_json(["issue", "view", str(issue_number), "-R", repo_full, "--json", "state"]) or {}
+                if str(snapshot.get("state", "")).upper() == "CLOSED":
+                    shutil.move(str(task_path), str(paths["DONE"] / task_path.name))
+                    print(f"Skipped escalation for closed issue #{issue_number}: {task_path.stem}")
+                    continue
+            except Exception:
+                pass
 
         if not meta.get(UNASSIGNED_BLOCKED_SEEN_AT):
             meta = dict(meta)
@@ -1571,7 +1604,7 @@ def dispatch_one():
 
     issue_lookup = _build_issue_lookup(queried)
     _requeue_unblocked_items(queried, repo_to_project, issue_lookup)
-    if _escalate_unassigned_blocked_tasks(paths):
+    if _escalate_unassigned_blocked_tasks(cfg, paths):
         return
     if _escalate_over_retried_blocked_tasks(cfg, paths):
         return
