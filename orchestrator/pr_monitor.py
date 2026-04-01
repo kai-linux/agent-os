@@ -124,6 +124,24 @@ def _rebase_pr_onto_main(repo: str, pr: dict) -> bool:
                 subprocess.run(["git", "-C", str(worktree_path), "rm", "-f", ".agent_result.md"], capture_output=True)
                 subprocess.run(["git", "-C", str(worktree_path), "checkout", "--theirs", "CODEBASE.md"], capture_output=True)
                 subprocess.run(["git", "-C", str(worktree_path), "add", "-A"], check=True, capture_output=True)
+
+                # Abort if any staged files still contain conflict markers
+                marker_check = subprocess.run(
+                    ["git", "-C", str(worktree_path), "diff", "--cached", "--diff-filter=U"],
+                    capture_output=True, text=True,
+                )
+                grep_check = subprocess.run(
+                    ["grep", "-rl", "^<<<<<<<", str(worktree_path)],
+                    capture_output=True, text=True,
+                )
+                if marker_check.stdout.strip() or grep_check.returncode == 0:
+                    print(f"  Rebase has unresolved conflicts beyond CODEBASE.md/.agent_result.md, aborting")
+                    subprocess.run(
+                        ["git", "-C", str(worktree_path), "rebase", "--abort"],
+                        capture_output=True,
+                    )
+                    return False
+
                 subprocess.run(
                     ["git", "-C", str(worktree_path), "rebase", "--continue"],
                     check=True, capture_output=True,
