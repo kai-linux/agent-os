@@ -135,7 +135,6 @@ def test_get_agent_chain_skips_unavailable_deepseek(monkeypatch):
     assert chain == ["claude", "codex"]
 
 
-<<<<<<< HEAD
 def test_get_agent_chain_skips_deepseek_when_openrouter_credential_missing(monkeypatch, tmp_path):
     cfg = _cfg({"implementation": ["deepseek", "codex", "claude"]})
     openrouter_dir = tmp_path / "openrouter"
@@ -150,7 +149,8 @@ def test_get_agent_chain_skips_deepseek_when_openrouter_credential_missing(monke
 
     chain = get_agent_chain({"task_type": "implementation"}, cfg)
     assert chain == ["codex", "claude"]
-=======
+
+
 def test_get_agent_chain_skips_agents_below_recent_health_threshold(tmp_path):
     metrics_dir = tmp_path / "runtime" / "metrics"
     metrics_dir.mkdir(parents=True)
@@ -194,7 +194,6 @@ def test_get_agent_chain_allows_agents_without_recent_metrics(tmp_path):
         )
 
     assert chain == ["gemini", "claude"]
->>>>>>> 1a4b76a (agent task-20260401-120316-add-agent-health-checks-to-task-dispatch-routing)
 
 
 def test_get_agent_chain_prefers_repo_specific_fallbacks():
