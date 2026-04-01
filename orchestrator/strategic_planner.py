@@ -46,7 +46,7 @@ from orchestrator.queue import (
     telegram_action_expired,
     process_telegram_callbacks,
 )
-from orchestrator.scheduler_state import is_due, record_run, job_lock
+from orchestrator.scheduler_state import is_due, record_run, job_lock, load_scheduler_state, save_scheduler_state
 from orchestrator.backlog_groomer import groom_repo, _repo_groomer_cadence_days
 from orchestrator.outcome_attribution import (
     OUTCOME_INTERPRETATIONS,
@@ -335,6 +335,93 @@ def _has_active_sprint_work(repo: str, cfg: dict) -> tuple[bool, str]:
     if _has_open_agent_pr(repo):
         return True, "open agent PR"
     return False, "no active sprint work"
+
+
+def _is_sprint_completion_notified(cfg: dict, github_slug: str) -> bool:
+    """Check if a sprint completion notification has already been sent for this repo."""
+    state = load_scheduler_state(cfg)
+    return bool(
+        ((state.get("sprint_completion") or {}).get(github_slug) or {}).get("notified")
+    )
+
+
+def _record_sprint_completion_notified(cfg: dict, github_slug: str) -> None:
+    """Mark that a sprint completion notification has been sent for this repo."""
+    state = load_scheduler_state(cfg)
+    state.setdefault("sprint_completion", {})
+    state["sprint_completion"][github_slug] = {
+        "notified": True,
+        "notified_at": datetime.now(timezone.utc).isoformat(),
+    }
+    save_scheduler_state(cfg, state)
+
+
+def _clear_sprint_completion_notified(cfg: dict, github_slug: str) -> None:
+    """Reset the sprint completion notification flag (e.g. when a new sprint starts)."""
+    state = load_scheduler_state(cfg)
+    sprint_state = state.get("sprint_completion", {})
+    if github_slug in sprint_state:
+        del sprint_state[github_slug]
+        save_scheduler_state(cfg, state)
+
+
+def _notify_sprint_completed(
+    cfg: dict,
+    github_slug: str,
+    repo_path: Path | None = None,
+    sprint_cadence_days: float = DEFAULT_SPRINT_CADENCE_DAYS,
+) -> None:
+    """Send a one-time Telegram notification when all sprint tasks are finished.
+
+    When repo_path is available, builds a full sprint report with vision
+    progress so the operator sees what was accomplished and how the work
+    relates to the North Star.
+    """
+    if _is_sprint_completion_notified(cfg, github_slug):
+        return
+
+    # Try to build a rich completion report
+    report_msg: str | None = None
+    if repo_path is not None:
+        try:
+            retrospective = _build_retrospective(
+                cfg, github_slug, repo_path, days=sprint_cadence_days,
+            )
+            readme_goal = _read_readme_goal(repo_path)
+            north_star = read_north_star(repo_path)
+            strategy_context = _read_strategy(repo_path)
+            # Use empty sprint summary since the next plan hasn't been generated yet
+            sprint_report = _build_sprint_report(
+                readme_goal=readme_goal,
+                north_star=north_star,
+                strategy_context=strategy_context,
+                retrospective=retrospective,
+                sprint_summary="(next sprint not yet planned)",
+            )
+            report_msg = _format_sprint_report_message(sprint_report, github_slug)
+            # Replace the header to indicate completion rather than a mid-cycle report
+            report_msg = report_msg.replace(
+                f"📊 Sprint Report — {github_slug}",
+                f"🏁 Sprint Completed — {github_slug}",
+                1,
+            )
+        except Exception as exc:
+            print(f"  Sprint completion report failed, sending basic notification: {exc}")
+
+    if report_msg:
+        print(report_msg)
+        _send_telegram(cfg, report_msg)
+    else:
+        msg = (
+            f"🏁 Sprint Completed — {github_slug}\n"
+            f"\n"
+            f"All sprint tasks have been finished.\n"
+            f"A new sprint plan will be generated on the next planning cycle."
+        )
+        print(msg)
+        _send_telegram(cfg, msg)
+
+    _record_sprint_completion_notified(cfg, github_slug)
 
 
 def _maybe_refresh_backlog_for_early_cycle(cfg: dict, github_slug: str, repo_path: Path) -> tuple[bool, str]:
@@ -2952,6 +3039,7 @@ def _complete_plan_action(
             report=sprint_report,
         )
         record_run(cfg, "strategic_planner", repo)
+        _clear_sprint_completion_notified(cfg, repo)
         summary = (
             f"✅ Approved sprint applied for {repo}\n"
             f"Issues moved to Ready: {len(ready_urls)} | Skipped: {len(skipped)}\n"
@@ -3398,11 +3486,14 @@ def run():
                 if active:
                     print(f"  Skipping {github_slug}: {reason} ({active_reason})")
                     continue
+                _notify_sprint_completed(cfg, github_slug, repo_path, sprint_cadence_days)
                 should_plan, override_reason = _maybe_refresh_backlog_for_early_cycle(cfg, github_slug, repo_path)
                 if not should_plan:
                     print(f"  Skipping {github_slug}: {reason} ({override_reason})")
                     continue
                 print(f"  Proceeding early for {github_slug}: {override_reason}")
+            else:
+                _notify_sprint_completed(cfg, github_slug, repo_path, sprint_cadence_days)
 
             # Build cross-repo context from sibling repos
             cross_repo_ctx = _gather_cross_repo_context(
