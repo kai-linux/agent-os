@@ -3067,7 +3067,8 @@ def _complete_plan_action(
         skip_msg = f"⏭️ Sprint plan for {repo} was not approved. Skipping this cycle."
         print(skip_msg)
         _send_telegram(cfg, skip_msg)
-        record_run(cfg, "strategic_planner", repo)
+        # Do NOT record_run here — a rejected plan should not reset the cadence
+        # timer. The planner should generate a new plan on the next cron tick.
         action["status"] = "rejected"
         action["completed_at"] = now
         save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
@@ -3077,7 +3078,8 @@ def _complete_plan_action(
         skip_msg = f"⏭️ Sprint plan for {repo} expired without approval. Skipping this cycle."
         print(skip_msg)
         _send_telegram(cfg, skip_msg)
-        record_run(cfg, "strategic_planner", repo)
+        # Do NOT record_run here — an expired plan should not reset the cadence
+        # timer. The planner should generate a new plan on the next cron tick.
         action["status"] = "expired"
         action["expired_at"] = now
         save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
