@@ -266,3 +266,43 @@ def score_objective_snapshots(objective: dict, snapshots: list[dict]) -> dict:
         "latest_observed_at": latest_text,
         "freshness": freshness,
     }
+
+
+def format_objective_for_prompt(objective: dict, max_chars: int = 2000) -> str:
+    """Format the repo objective as a readable prompt section.
+
+    Returns a human-readable summary of the primary outcome, metrics,
+    and their weights so LLM consumers (planner, groomer) understand
+    what the repo is optimizing for.
+    """
+    if not objective:
+        return "(no objective configured for this repo)"
+
+    lines: list[str] = []
+    primary = str(objective.get("primary_outcome") or "").strip()
+    if primary:
+        lines.append(f"Primary outcome: {primary}")
+
+    eval_window = objective.get("evaluation_window_days")
+    if eval_window:
+        lines.append(f"Evaluation window: {eval_window} days")
+
+    metrics = objective_metrics(objective)
+    if metrics:
+        lines.append("")
+        lines.append("Tracked metrics (what the system is measured on):")
+        weights = objective_metric_weights(objective)
+        for m in metrics:
+            mid = str(m.get("id", "")).strip()
+            name = str(m.get("name") or mid).strip()
+            direction = str(m.get("direction") or "increase").strip()
+            weight_pct = weights.get(mid, 0) * 100
+            lines.append(f"  - {name} (id={mid}, direction={direction}, weight={weight_pct:.0f}%)")
+
+    interp = objective.get("interpretation_scores")
+    if isinstance(interp, dict):
+        lines.append("")
+        lines.append("Scoring: " + ", ".join(f"{k}={v}" for k, v in interp.items()))
+
+    result = "\n".join(lines)
+    return result[:max_chars] if len(result) > max_chars else result

@@ -22,6 +22,7 @@ from pathlib import Path
 from orchestrator.paths import load_config, runtime_paths
 from orchestrator.agent_scorer import load_recent_metrics, findings_path as scorer_findings_path
 from orchestrator.gh_project import ensure_labels, query_project, set_item_status, gh
+from orchestrator.objectives import load_repo_objective, format_objective_for_prompt
 from orchestrator.outcome_attribution import get_repo_outcome_check_ids, format_outcome_checks_section
 from orchestrator.repo_context import (
     read_production_feedback_artifact,
@@ -463,13 +464,25 @@ def _open_issue_exists(repo: str, title: str) -> bool:
 ANALYSIS_PROMPT = """You are an AI agent system analyst performing backlog grooming.
 Review the data below and create exactly {num_issues} targeted, atomic improvement tasks.
 
+IMPORTANT: Your job is to create a BALANCED backlog that advances the repo's
+stated objectives — not just internal infrastructure. Read the objectives and
+strategy carefully. If the objective includes external metrics (e.g. GitHub
+stars, adoption, user growth), you MUST generate issues that move those metrics,
+not just internal plumbing. A system that only polishes its own engine but never
+does anything visible to users will fail its objectives.
+
 Focus on:
-1. Stale issues (open >30 days with no activity) — suggest closing or scoping down
-2. Known Issues from CODEBASE.md that have no linked GitHub issue — create one
-3. Risk flags from recently completed tasks — create follow-up mitigation tasks
-4. Recent blocked or partial task outcomes — create unblock or hardening follow-ups
-5. Repository foundation gaps (missing planning/research/ops scaffolding) — create enabling tasks
-6. Backlog pressure or blocked-work patterns visible in open issues — create high-leverage backlog items
+1. Objective-driven work — tasks that directly improve the metrics defined in the repo objective (adoption, stars, demos, quickstart, README, public proof, credibility)
+2. Stale issues (open >30 days with no activity) — suggest closing or scoping down
+3. Known Issues from CODEBASE.md that have no linked GitHub issue — create one
+4. Risk flags from recently completed tasks — create follow-up mitigation tasks
+5. Recent blocked or partial task outcomes — create unblock or hardening follow-ups
+6. Repository foundation gaps (missing planning/research/ops scaffolding) — create enabling tasks
+7. Backlog pressure or blocked-work patterns visible in open issues — create high-leverage backlog items
+
+Balance rule: At least 1 out of every 5 issues MUST target adoption, credibility,
+activation, or external-facing improvement — not internal infrastructure. If the
+objectives include external metrics, ensure the backlog contains work that can move them.
 
 Rules:
 - Each task must be atomic and clearly scoped (one specific thing to fix/improve)
@@ -477,8 +490,9 @@ Rules:
 - Do NOT create tasks that duplicate existing open issues
 - Issue body must use ## Goal, ## Success Criteria, ## Constraints sections
 - Order by priority (most impactful first)
-- Assign priority based on risk and impact — security/data-loss risks are high,
-  tech-debt cleanup is normal, nice-to-haves are low
+- Assign priority based on objective alignment first, then risk and impact —
+  work that moves tracked objective metrics is high priority;
+  security/data-loss risks are high; tech-debt cleanup is normal; nice-to-haves are low
 
 Return ONLY a JSON array (no markdown fences, no commentary) of exactly {num_issues} objects.
 Each object must have:
@@ -505,6 +519,9 @@ Each object must have:
 
 --- Open blocked issues that may need unblockers ---
 {blocked_issues}
+
+--- Repo Objectives (what this repo is measured on — generate work that moves these metrics) ---
+{objectives_context}
 
 --- Product goal (README.md) ---
 {readme_goal}
@@ -736,6 +753,8 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
     planning_principles = read_planning_principles(repo_path, max_chars=1400)
     production_feedback = read_production_feedback_artifact(repo_path, max_chars=1800)
     research_context = read_planning_research_artifact(repo_path, max_chars=1600)
+    objective = load_repo_objective(cfg, github_slug, repo_path)
+    objectives_context = format_objective_for_prompt(objective, max_chars=1600)
     print(f"  Blocked/partial task outcomes: {len(blocked_tasks)}")
     print(f"  Repo gaps: {len(repo_gaps)}, blocked issues: {len(blocked_issues)}")
     print(f"  Bootstrap doc issues: {len(bootstrap_issues)}")
@@ -809,6 +828,7 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
         blocked_tasks=blocked_tasks_text,
         repo_gaps=repo_gaps_text,
         blocked_issues=blocked_issues_text,
+        objectives_context=objectives_context,
         readme_goal=readme_goal,
         north_star=north_star,
         strategy_context=strategy_context,
