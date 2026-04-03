@@ -33,6 +33,7 @@ from uuid import uuid4
 from orchestrator.paths import load_config, runtime_paths
 from orchestrator.objectives import (
     build_objective_scorecard_section,
+    format_objective_for_prompt,
     load_repo_objective,
     objective_feedback_inputs,
     objective_outcome_checks,
@@ -2673,6 +2674,9 @@ Context about this repository:
 --- Product Goal (from README) ---
 {readme_goal}
 
+--- Repo Objectives (what this repo is measured on — select work that moves these metrics) ---
+{objectives_context}
+
 --- North Star (NORTH_STAR.md) ---
 {north_star}
 
@@ -2717,6 +2721,8 @@ Rules:
 - Tasks must NOT be vague epics — they should have clear, testable success criteria
 - Order by priority (most impactful first)
 - Build on last sprint's outcomes — continue momentum, fix regressions, advance strategy
+- CRITICAL: Read the Repo Objectives section. If the objective includes external metrics (e.g. GitHub stars, adoption, user growth), you MUST select work that moves those metrics. Do NOT fill the entire sprint with internal infrastructure if the objective says to grow adoption. A sprint that ignores the stated objective is a failed sprint.
+- Balance rule: At least 40%% of sprint capacity should target the primary objective metric. If the objective is adoption/stars, at least 2 of 5 tasks must be adoption-facing (demos, README, quickstart, public proof, credibility).
 - Treat the planning principles as the stable north-star rubric when strategy and backlog quality are ambiguous
 - When production feedback is present, prioritize measurable analytics, user feedback, product inspection, and incident/SLO outcomes over narrative summaries alone
 - Treat entries marked `Planning Use: guarded` as audit context only, not as drivers for roadmap or prioritization decisions
@@ -2820,6 +2826,7 @@ def _build_plan_prompt(
     plan_size: int,
     strategy_context: str,
     readme_goal: str,
+    objectives_context: str,
     north_star: str,
     planning_principles: str,
     codebase_context: str,
@@ -2838,6 +2845,7 @@ def _build_plan_prompt(
         plan_size=plan_size,
         strategy_context=strategy_context,
         readme_goal=readme_goal,
+        objectives_context=objectives_context,
         north_star=north_star,
         planning_principles=planning_principles,
         production_feedback_context=production_feedback_context,
@@ -3268,11 +3276,17 @@ def plan_repo(
     if cross_repo_context:
         print(f"  Cross-repo context: {len(cross_repo_context)} chars from sibling repos")
 
-    # 15. Build prompt with all context
+    # 15. Load repo objectives as first-class planning input
+    objective = load_repo_objective(cfg, github_slug, repo_path)
+    objectives_context = format_objective_for_prompt(objective, max_chars=2000)
+    print(f"  Objectives: {len(objectives_context)} chars")
+
+    # 16. Build prompt with all context
     prompt = _build_plan_prompt(
         plan_size=plan_size,
         strategy_context=strategy_context,
         readme_goal=readme_goal,
+        objectives_context=objectives_context,
         north_star=north_star,
         planning_principles=planning_principles,
         codebase_context=codebase_context,

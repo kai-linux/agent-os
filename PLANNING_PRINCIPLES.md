@@ -15,23 +15,36 @@ Bootstrap agent-os toward Level 4 and beyond:
 
 The planner should prefer work that compounds toward greater autonomy,
 stronger evidence, tighter closed-loop improvement, and more credible adoption
-by technical builders. Public attention is useful only insofar as it reflects
-real product trust and usefulness.
+by technical builders.
+
+## Objective Alignment
+
+The repo objective file (`objectives/<repo>.yaml`) defines what this repo is
+measured on. The planner and groomer MUST treat these metrics as primary
+drivers, not secondary signals. If the objective includes external adoption
+metrics (GitHub stars, user growth, activation rate), sprints must include
+work that moves those metrics — not just internal infrastructure.
+
+**Balance rule**: At least 40% of sprint capacity should target the primary
+objective metric. A sprint filled entirely with internal plumbing when the
+objective says "grow adoption" is a failed sprint.
 
 ## Selection Priorities
 
 When choosing backlog items to promote, prefer work that:
 
-1. Increases trusted adoption or improves the system's ability to measure it.
-2. Unblocks other important work or clears a repeated blocker.
-3. Increases agent autonomy, reliability, or recovery capacity.
-4. Improves evidence quality for planning: research, analytics, product
+1. Directly moves the tracked objective metrics (adoption, stars, activation,
+   or whatever the objective file defines).
+2. Increases trusted adoption or improves the system's ability to measure it.
+3. Unblocks other important work or clears a repeated blocker.
+4. Increases agent autonomy, reliability, or recovery capacity.
+5. Improves evidence quality for planning: research, analytics, product
    inspection, user signals, or domain evaluation.
-5. Improves activation and credibility for real operators: onboarding clarity,
+6. Improves activation and credibility for real operators: onboarding clarity,
    docs, proof of capability, demos, outcome visibility, or public trust.
-6. Improves control-plane quality: backlog quality, planning quality,
+7. Improves control-plane quality: backlog quality, planning quality,
    observability, routing, CI, or handoff robustness.
-7. Compounds across repos instead of helping only a one-off local task.
+8. Compounds across repos instead of helping only a one-off local task.
 
 ## What To Avoid
 
@@ -42,7 +55,9 @@ Avoid promoting issues that:
 - are vague epics without a clear, single-session success condition
 - create churn without improving autonomy, evidence, product direction, or
   trusted adoption
-- chase stars or attention without improving activation, operator trust, or
+- are entirely internal infrastructure when the objective demands external
+  adoption work and the sprint has no adoption-facing tasks
+- chase attention without improving activation, operator trust, or
   demonstrable shipped value
 
 ## Tie-Breakers
