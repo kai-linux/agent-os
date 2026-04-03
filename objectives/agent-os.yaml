@@ -1,0 +1,110 @@
+# Objective: agent-os
+# This file drives the business objective scorecard, outcome attribution
+# weighting, and metric-sourced feedback inputs for the strategic planner.
+
+primary_outcome: "Grow trusted adoption (GitHub stars, forks) through reliable autonomous execution and visible proof of capability"
+evaluation_window_days: 14
+
+metrics:
+  - id: agent_success_rate
+    name: "Agent task success rate"
+    weight: 3.0
+    direction: increase
+    source:
+      type: file
+      path: "runtime/analysis/metrics_report.md"
+      signal_class: operational
+      privacy_level: internal
+      trust_level: high
+    outcome_check:
+      type: file
+      path: "runtime/analysis/metrics_report.md"
+      measurement_window_days: 7
+      comparison_window: >
+        Compare the 'current week' success rates against the 'prior week' rates.
+        If overall success rate increased, interpret as improved.
+        If it decreased by more than 5 percentage points, interpret as regressed.
+        Otherwise unchanged.
+
+  - id: escalation_rate
+    name: "Escalation rate"
+    weight: 2.0
+    direction: decrease
+    source:
+      type: file
+      path: "runtime/analysis/metrics_report.md"
+      signal_class: operational
+      privacy_level: internal
+      trust_level: high
+    outcome_check:
+      type: file
+      path: "runtime/analysis/metrics_report.md"
+      measurement_window_days: 7
+      comparison_window: >
+        Compare the 'current week' escalation rate against the 'prior week'.
+        Lower escalation rate means improved. Higher means regressed.
+        A change of less than 5 percentage points is unchanged.
+
+  - id: task_completion_time
+    name: "Task completion time (hours)"
+    weight: 1.5
+    direction: decrease
+    source:
+      type: file
+      path: "runtime/analysis/metrics_report.md"
+      signal_class: operational
+      privacy_level: internal
+      trust_level: high
+    outcome_check:
+      type: file
+      path: "runtime/analysis/metrics_report.md"
+      measurement_window_days: 7
+      comparison_window: >
+        Compare the 'current week' mean completion time against the 'prior week'.
+        Lower completion time means improved. Significantly higher means regressed.
+        Small changes (under 10%) are unchanged.
+
+  - id: self_improvement_loop
+    name: "Self-improvement loop activity"
+    weight: 1.0
+    direction: increase
+    source:
+      type: file
+      path: "runtime/analysis/metrics_report.md"
+      signal_class: operational
+      privacy_level: internal
+      trust_level: high
+    outcome_check:
+      type: file
+      path: "runtime/analysis/metrics_report.md"
+      measurement_window_days: 7
+      comparison_window: >
+        Check whether the metrics report shows evidence of self-improvement
+        activity: scorer findings consumed, issues created from analysis,
+        outcome attributions recorded. If more activity than prior period,
+        improved. If less, regressed. If similar, unchanged.
+
+  - id: github_stars
+    name: "GitHub star count"
+    weight: 3.0
+    direction: increase
+    source:
+      type: file
+      path: "runtime/analysis/github_stars.yaml"
+      signal_class: adoption
+      privacy_level: public
+      trust_level: high
+    outcome_check:
+      type: file
+      path: "runtime/analysis/github_stars.yaml"
+      measurement_window_days: 7
+      comparison_window: >
+        Compare the current star count against the prior snapshot.
+        Any increase means improved. No change means unchanged.
+        A decrease means regressed (unlikely but possible from bot cleanup).
+
+interpretation_scores:
+  improved: 1.0
+  unchanged: 0.0
+  regressed: -1.0
+  inconclusive: -0.35

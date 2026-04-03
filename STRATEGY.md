@@ -7,17 +7,17 @@
 Agent OS should win by being the most credible autonomous software
 organization for technical founders and solo builders.
 
-The strategic target is not raw GitHub stars. Stars matter, but only as a
-lagging public signal. The real objective is trusted adoption: more builders
-trying Agent OS, getting to first value quickly, watching it ship useful work,
-and believing it can improve itself without collapsing into operational noise.
+The strategic target is GitHub stars as the primary proxy for trusted adoption.
+Stars measure whether technical builders find Agent OS credible enough to
+bookmark. Growing stars requires: clear proof the system works, fast activation,
+a compelling demo, and a README that sells in 10 seconds.
 
-That means sprint selection should favor work that increases:
+Sprint selection should balance:
 
-- execution reliability and recovery quality
-- evidence-driven planning and measurable post-merge learning
-- onboarding clarity, demos, and public proof that the system works
-- sustained operator trust, not just short-term attention spikes
+- adoption and credibility work (demos, README, quickstart, public proof) — at least 40% of sprint capacity
+- execution reliability and recovery quality — as needed to maintain trust
+- evidence-driven planning including external adoption metrics (stars, forks, traffic)
+- structural fixes that prevent the system from only optimizing its own plumbing
 
 ## Current Focus Areas
 
@@ -28,11 +28,11 @@ That means sprint selection should favor work that increases:
 
 
 <!-- auto-focus-areas -->
-- Prevent CI failure cascades with debug recovery loops
-- Ensure reliable task dispatch with agent health gating
-- Automate detection and escalation of blocked tasks
-- Enable evidence-driven planning from production feedback
-- Build control plane observability through execution auditing
+- Create visual demo and social proof showing the system works end-to-end
+- Condense README into a scannable pitch that converts visitors to stars
+- Reduce activation friction with a 5-minute quickstart sandbox
+- Add GitHub stars as a tracked objective metric to close the adoption feedback loop
+- Fix groomer to generate adoption-focused issues, not just internal plumbing
 
 ## Sprint History
 
