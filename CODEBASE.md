@@ -16,6 +16,18 @@
 
 ## Recent Changes
 
+### 2026-04-04 — [task-20260404-130317-add-github-stars-and-fork-count-as-tracked-objecti] (#124 kai-linux/agent-os)
+Added GitHub stars and fork count as tracked objective metrics by creating `objectives/agent-os.yaml` with five weighted metrics (github_stars at 29%, github_forks at 14%, plus existing operational metrics), a lightweight `bin/export_github_evidence.sh` that fetches current counts via `gh api` and writes YAML evidence files plus a JSONL history log, and a fix to `_allowed_research_file` to support tilde-expanded evidence paths. The existing objective system automatically integrates these metrics into production feedback, outcome attribution snapshots, and the planner prompt.
+
+**Files:** `- objectives/agent-os.yaml`, `- bin/export_github_evidence.sh`, `- orchestrator/strategic_planner.py`
+
+**Decisions:**
+  - - Used the existing objective file format so metrics auto-integrate into production feedback, outcome attribution, and planner prompts without additional code
+  - - Weighted github_stars at 29% (matching task_success_rate) and github_forks at 14% to reflect stars as the primary adoption proxy with forks as secondary
+  - - Evidence exporter writes both point-in-time YAML snapshots (for the objectives system) and a JSONL history log (for trend analysis)
+  - - Fixed _allowed_research_file to handle tilde-expanded paths rather than changing evidence paths to be relative, since the evidence directory is intentionally outside the repo
+
+
 ### 2026-04-04 — [task-20260404-130220-create-a-compelling-visual-demo-showing-agentos-sh] (#123 kai-linux/agent-os)
 Created an animated SVG terminal demo (docs/demo.svg) showing a real AgentOS task execution end-to-end — issue #115 "Cluster CI failures by error signature" flowing through dispatch → agent execution → PR #122 → CI pass → merge → closure. The animation uses SMIL which renders natively on GitHub. Embedded it prominently in README.md above the fold with links to the real issue and PR.
 
