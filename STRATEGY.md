@@ -27,14 +27,28 @@ Sprint selection should balance:
 
 
 
+
 <!-- auto-focus-areas -->
-- Create visual demo and social proof showing the system works end-to-end
-- Condense README into a scannable pitch that converts visitors to stars
-- Reduce activation friction with a 5-minute quickstart sandbox
-- Add GitHub stars as a tracked objective metric to close the adoption feedback loop
-- Fix groomer to generate adoption-focused issues, not just internal plumbing
+- Control-plane stability: prevent invalid agent assignments, auto-escalate and recover blocked tasks
+- Closed-loop optimization through production feedback: track metrics, auto-generate planning artifacts, drive evidence-based decisions
+- CI reliability and failure recovery: prevent cascading failures, capture diagnostics, gate closures on verified reruns
+- External adoption and credibility: streamlined messaging, working demos, GitHub metrics tracking, low-friction onboarding
+- Autonomous optimization: adaptive agent routing, health gating, self-directed remediation loops
 
 ## Sprint History
+
+### Sprint 2026-04-04
+
+**Retrospective:**
+(no activity in the last 0.5 days)
+
+**Plan:**
+- [prio:high] Condense README into a scannable 1-page pitch with demo link and quick proof: The README is the single highest-leverage adoption asset: every visitor sees it, and the current wall of text fails to convert — condensing it directly targets the 29%-weighted GitHub stars metric and the strategy's demand for a pitch that sells in 10 seconds.
+- [prio:high] Create a compelling visual demo showing AgentOS shipping a feature end-to-end: With 2 stars and 0 forks, the biggest adoption blocker is lack of visible proof the system works — a demo is the fastest way to build credibility with technical founders and compounds with the README rewrite (#125).
+- [prio:high] Add GitHub stars and fork count as tracked objective metrics: The objective weights stars at 29% but the system cannot currently measure them — without this wiring, every adoption task scores inconclusive and the closed-loop optimization the North Star demands cannot begin.
+- [prio:high] Teach the backlog groomer to generate adoption and credibility issues, not just infrastructure: Every prior sprint was 100% internal plumbing because the groomer only generates infrastructure issues — fixing this is the structural change that prevents the system from perpetually ignoring its own adoption objective.
+- [prio:normal] Add a 'try it in 5 minutes' sandbox quickstart with a toy repo: Activation friction is the second-biggest adoption barrier after credibility — a 5-minute sandbox directly reduces the gap between star-curious visitors and retained users, compounding with the condensed README (#125) and demo (#123).
+
 
 ### Sprint 2026-04-01
 
