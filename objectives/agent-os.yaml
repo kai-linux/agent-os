@@ -1,0 +1,82 @@
+version: 1
+repo: "kai-linux/agent-os"
+product_name: "Agent OS"
+primary_outcome: "Trusted adoption by technical builders"
+evaluation_window_days: 14
+
+interpretation_scores:
+  improved: 1.0
+  unchanged: 0.0
+  regressed: -1.0
+  inconclusive: -0.35
+
+metrics:
+  - id: "github_stars"
+    name: "GitHub stars"
+    weight: 0.29
+    direction: "increase"
+    source:
+      type: "file"
+      signal_class: "analytics"
+      path: "~/.local/share/agent-os/evidence/agent-os/github_stars_latest.yaml"
+      provenance: "gh api snapshot written by bin/export_github_evidence.sh"
+      trust_level: "high"
+      privacy: "public"
+    outcome_check:
+      type: "file"
+      path: "~/.local/share/agent-os/evidence/agent-os/github_stars_latest.yaml"
+      measurement_window_days: 3
+      comparison_window: "Compare current star count against the count recorded at the time of merge."
+
+  - id: "github_forks"
+    name: "GitHub forks"
+    weight: 0.14
+    direction: "increase"
+    source:
+      type: "file"
+      signal_class: "analytics"
+      path: "~/.local/share/agent-os/evidence/agent-os/github_forks_latest.yaml"
+      provenance: "gh api snapshot written by bin/export_github_evidence.sh"
+      trust_level: "high"
+      privacy: "public"
+    outcome_check:
+      type: "file"
+      path: "~/.local/share/agent-os/evidence/agent-os/github_forks_latest.yaml"
+      measurement_window_days: 3
+      comparison_window: "Compare current fork count against the count recorded at the time of merge."
+
+  - id: "task_success_rate"
+    name: "Task success rate"
+    weight: 0.29
+    direction: "increase"
+    source:
+      type: "file"
+      signal_class: "analytics"
+      path: "runtime/metrics/agent_stats.jsonl"
+      provenance: "Orchestrator runtime metrics"
+      trust_level: "high"
+      privacy: "internal"
+
+  - id: "completion_time"
+    name: "Average completion time"
+    weight: 0.14
+    direction: "decrease"
+    source:
+      type: "file"
+      signal_class: "analytics"
+      path: "runtime/metrics/agent_stats.jsonl"
+      provenance: "Orchestrator runtime metrics"
+      trust_level: "high"
+      privacy: "internal"
+
+  - id: "escalation_rate"
+    name: "Escalation rate"
+    weight: 0.14
+    direction: "decrease"
+    source:
+      type: "file"
+      signal_class: "analytics"
+      path: "runtime/metrics/agent_stats.jsonl"
+      provenance: "Orchestrator runtime metrics"
+      trust_level: "high"
+      privacy: "internal"
