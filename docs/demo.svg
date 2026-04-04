@@ -1,0 +1,196 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 840 620" font-family="'SF Mono','Cascadia Code','Consolas','Monaco','DejaVu Sans Mono',monospace" font-size="13">
+  <defs>
+    <linearGradient id="titlebar" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3d3d3d"/>
+      <stop offset="100%" stop-color="#2a2a2a"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Terminal window frame -->
+  <rect width="840" height="620" rx="10" fill="#1a1b26"/>
+  <rect width="840" height="36" rx="10" fill="url(#titlebar)"/>
+  <rect y="26" width="840" height="10" fill="url(#titlebar)"/>
+
+  <!-- Window buttons -->
+  <circle cx="20" cy="18" r="6" fill="#ff5f56"/>
+  <circle cx="40" cy="18" r="6" fill="#ffbd2e"/>
+  <circle cx="60" cy="18" r="6" fill="#27c93f"/>
+
+  <!-- Title -->
+  <text x="420" y="22" text-anchor="middle" fill="#999" font-size="12">agent-os — autonomous task execution</text>
+
+  <!-- Terminal content - each line appears with animation -->
+  <!-- Line 1: Header -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="0.3s" dur="0.15s" fill="freeze"/>
+    <text x="16" y="60" fill="#7aa2f7" font-size="12" font-weight="bold">▸ Agent OS — Real task execution from issue #115</text>
+  </g>
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="0.5s" dur="0.15s" fill="freeze"/>
+    <text x="16" y="76" fill="#565f89" font-size="11">  "Cluster CI failures by error signature to deduplicate debug issues"</text>
+  </g>
+
+  <!-- Separator -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="0.8s" dur="0.15s" fill="freeze"/>
+    <text x="16" y="96" fill="#3b4261">  ────────────────────────────────────────────────────────────────────────</text>
+  </g>
+
+  <!-- Phase 1: Issue Created -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="1.2s" dur="0.2s" fill="freeze"/>
+    <text x="16" y="118" fill="#565f89" font-size="11">[12:05:19]</text>
+    <text x="100" y="118" fill="#bb9af7">ISSUE</text>
+    <text x="148" y="118" fill="#c0caf5">#115 created → GitHub Projects board</text>
+  </g>
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="1.6s" dur="0.2s" fill="freeze"/>
+    <text x="16" y="136" fill="#565f89" font-size="11">[12:05:19]</text>
+    <text x="100" y="136" fill="#565f89">       labels:</text>
+    <text x="195" y="136" fill="#e0af68">prio:high</text>
+    <text x="270" y="136" fill="#e0af68">type:implementation</text>
+  </g>
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="2.0s" dur="0.2s" fill="freeze"/>
+    <text x="16" y="154" fill="#565f89" font-size="11">[12:05:20]</text>
+    <text x="100" y="154" fill="#9ece6a">READY</text>
+    <text x="148" y="154" fill="#c0caf5">Status → Ready (dispatch eligible)</text>
+  </g>
+
+  <!-- Phase 2: Dispatch -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="3.0s" dur="0.2s" fill="freeze"/>
+    <text x="16" y="180" fill="#565f89" font-size="11">[12:05:41]</text>
+    <text x="100" y="180" fill="#7dcfff">DISPATCH</text>
+    <text x="175" y="180" fill="#c0caf5">Formatting task with LLM (structured prompt)...</text>
+  </g>
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="3.6s" dur="0.2s" fill="freeze"/>
+    <text x="16" y="198" fill="#565f89" font-size="11">[12:05:42]</text>
+    <text x="100" y="198" fill="#7dcfff">ROUTE</text>
+    <text x="155" y="198" fill="#c0caf5">Agent selected:</text>
+    <text x="280" y="198" fill="#9ece6a" font-weight="bold">claude</text>
+    <text x="330" y="198" fill="#565f89">(implementation fallback chain)</text>
+  </g>
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="4.0s" dur="0.2s" fill="freeze"/>
+    <text x="16" y="216" fill="#565f89" font-size="11">[12:05:42]</text>
+    <text x="100" y="216" fill="#7dcfff">WORKTREE</text>
+    <text x="178" y="216" fill="#c0caf5">/srv/worktrees/agent-os/task-...-cluster-ci-failures</text>
+  </g>
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="4.4s" dur="0.2s" fill="freeze"/>
+    <text x="16" y="234" fill="#565f89" font-size="11">[12:05:43]</text>
+    <text x="100" y="234" fill="#ff9e64">EXEC</text>
+    <text x="145" y="234" fill="#c0caf5">Agent running... injecting CODEBASE.md + prior context</text>
+  </g>
+
+  <!-- Spinner animation during execution -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="5.0s" dur="0.15s" fill="freeze"/>
+    <animate attributeName="opacity" from="1" to="0" begin="7.5s" dur="0.15s" fill="freeze"/>
+    <text x="100" y="252" fill="#565f89" font-size="11">
+      <animate attributeName="textContent" values="       ⠋ working...;       ⠙ working...;       ⠹ working...;       ⠸ working...;       ⠼ working...;       ⠴ working...;       ⠦ working...;       ⠧ working..." begin="5s" dur="2s" repeatCount="indefinite" fill="freeze"/>
+      ⠋ working...
+    </text>
+  </g>
+
+  <!-- Phase 3: Agent completes -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="7.5s" dur="0.2s" fill="freeze"/>
+    <text x="16" y="270" fill="#565f89" font-size="11">[12:12:15]</text>
+    <text x="100" y="270" fill="#9ece6a" font-weight="bold">COMPLETE</text>
+    <text x="178" y="270" fill="#c0caf5">.agent_result.md → STATUS: complete</text>
+  </g>
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="8.0s" dur="0.2s" fill="freeze"/>
+    <text x="100" y="288" fill="#565f89" font-size="11">       files:</text>
+    <text x="178" y="288" fill="#c0caf5">ci_failure_signatures.py  github_dispatcher.py  github_sync.py</text>
+  </g>
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="8.4s" dur="0.2s" fill="freeze"/>
+    <text x="100" y="306" fill="#565f89" font-size="11">       tests:</text>
+    <text x="178" y="306" fill="#9ece6a">4 new tests, all passing</text>
+  </g>
+
+  <!-- Phase 4: PR -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="9.0s" dur="0.2s" fill="freeze"/>
+    <text x="16" y="332" fill="#565f89" font-size="11">[12:12:16]</text>
+    <text x="100" y="332" fill="#bb9af7">PR</text>
+    <text x="125" y="332" fill="#c0caf5">Branch pushed → PR</text>
+    <text x="290" y="332" fill="#7aa2f7" font-weight="bold">#122</text>
+    <text x="318" y="332" fill="#c0caf5">opened</text>
+  </g>
+
+  <!-- Phase 5: CI -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="10.0s" dur="0.2s" fill="freeze"/>
+    <text x="16" y="358" fill="#565f89" font-size="11">[12:17:22]</text>
+    <text x="100" y="358" fill="#7dcfff">CI</text>
+    <text x="125" y="358" fill="#c0caf5">PR Monitor checking CI for PR #122...</text>
+  </g>
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="10.6s" dur="0.2s" fill="freeze"/>
+    <text x="100" y="376" fill="#565f89" font-size="11">       lint:</text>
+    <text x="165" y="376" fill="#9ece6a">✓ passed</text>
+    <text x="250" y="376" fill="#565f89">pytest:</text>
+    <text x="305" y="376" fill="#9ece6a">✓ 47 passed</text>
+  </g>
+
+  <!-- Phase 6: Merge -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="11.4s" dur="0.2s" fill="freeze"/>
+    <text x="16" y="402" fill="#565f89" font-size="11">[12:17:24]</text>
+    <text x="100" y="402" fill="#9ece6a" font-weight="bold">MERGE</text>
+    <text x="155" y="402" fill="#c0caf5">Squash-merged PR #122 → main</text>
+  </g>
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="11.8s" dur="0.2s" fill="freeze"/>
+    <text x="16" y="420" fill="#565f89" font-size="11">[12:17:25]</text>
+    <text x="100" y="420" fill="#9ece6a" font-weight="bold">CLOSED</text>
+    <text x="162" y="420" fill="#c0caf5">Issue #115 → Done | Branch cleaned up</text>
+  </g>
+
+  <!-- Phase 7: Memory update -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="12.5s" dur="0.2s" fill="freeze"/>
+    <text x="16" y="446" fill="#565f89" font-size="11">[12:17:25]</text>
+    <text x="100" y="446" fill="#e0af68">MEMORY</text>
+    <text x="162" y="446" fill="#c0caf5">CODEBASE.md updated with decisions + file changes</text>
+  </g>
+
+  <!-- Separator -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="13.0s" dur="0.15s" fill="freeze"/>
+    <text x="16" y="470" fill="#3b4261">  ────────────────────────────────────────────────────────────────────────</text>
+  </g>
+
+  <!-- Summary -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="13.5s" dur="0.3s" fill="freeze"/>
+    <text x="16" y="492" fill="#9ece6a" font-size="12" font-weight="bold">  ✓ Task complete — zero human intervention</text>
+  </g>
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="14.0s" dur="0.3s" fill="freeze"/>
+    <text x="16" y="512" fill="#565f89" font-size="11">    Issue created → agent dispatched → code written → tests pass → PR merged → issue closed</text>
+  </g>
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="14.5s" dur="0.3s" fill="freeze"/>
+    <text x="16" y="532" fill="#565f89" font-size="11">    Duration: 12 minutes | Agent: claude | Files: 5 changed | Tests: 4 added</text>
+  </g>
+
+  <!-- Loop indicator -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="15.5s" dur="0.4s" fill="freeze"/>
+    <text x="16" y="562" fill="#7aa2f7" font-size="12">  ↻ Next Monday: log_analyzer.py reads this outcome → files improvement tickets → loop continues</text>
+  </g>
+
+  <!-- Blinking cursor -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="16.5s" dur="0.15s" fill="freeze"/>
+    <rect x="16" y="580" width="8" height="15" fill="#c0caf5">
+      <animate attributeName="opacity" values="1;0;1" dur="1s" repeatCount="indefinite"/>
+    </rect>
+  </g>
+</svg>

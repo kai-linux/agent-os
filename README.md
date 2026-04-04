@@ -8,6 +8,14 @@ It's not a copilot. It's not a chatbot. It's a **fully autonomous software organ
 
 You give it a backlog. It ships product.
 
+### See it work — real task, zero human intervention
+
+<p align="center">
+  <img src="docs/demo.svg" alt="Agent OS autonomously completing issue #115: from dispatch to merged PR in 12 minutes" width="800">
+</p>
+
+<p align="center"><em>Real execution: Issue <a href="https://github.com/kai-linux/agent-os/issues/115">#115</a> → agent dispatched → code written → tests pass → <a href="https://github.com/kai-linux/agent-os/pull/122">PR #122</a> merged → issue closed. No human touched it.</em></p>
+
 ---
 
 ## Goal
