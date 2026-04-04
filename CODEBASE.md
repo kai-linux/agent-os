@@ -16,6 +16,19 @@
 
 ## Recent Changes
 
+### 2026-04-04 — [task-20260404-130220-create-a-compelling-visual-demo-showing-agentos-sh] (#123 kai-linux/agent-os)
+Created an animated SVG terminal demo (docs/demo.svg) showing a real AgentOS task execution end-to-end — issue #115 "Cluster CI failures by error signature" flowing through dispatch → agent execution → PR #122 → CI pass → merge → closure. The animation uses SMIL which renders natively on GitHub. Embedded it prominently in README.md above the fold with links to the real issue and PR.
+
+**Files:** `- docs/demo.svg`, `- README.md`
+
+**Decisions:**
+  - - Chose animated SVG with SMIL over GIF/video because it renders natively in GitHub READMEs without external hosting, is resolution-independent, and has negligible file size
+  - - Used real task data (issue #115, PR #122, actual file names and test counts) rather than synthetic examples for credibility
+  - - Placed demo between tagline and Goal section for maximum above-the-fold visibility
+  - - Used Tokyo Night color scheme for terminal aesthetic that matches developer expectations
+  - - Kept animation duration to ~17 seconds for quick comprehension on first view
+
+
 ### 2026-04-04 — [task-20260404-130122-condense-readme-into-a-scannable-1-page-pitch-with] (#125 kai-linux/agent-os)
 Condensed the 710-line README into a 144-line scannable 1-page pitch with star badge, social proof callout, philosophy section, recursive self-improvement story, quick start, and capability ladder. All detailed documentation (architecture, execution, configuration/objectives, roadmap) was preserved by moving it to docs/.
 
