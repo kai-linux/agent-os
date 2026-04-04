@@ -776,7 +776,15 @@ def _parse_signal_timestamp(raw: str | None) -> datetime | None:
 
 
 def _allowed_research_file(repo_path: Path, raw_path: str) -> Path | None:
-    if not raw_path or Path(raw_path).is_absolute():
+    if not raw_path:
+        return None
+    expanded = Path(raw_path).expanduser()
+    if expanded.is_absolute():
+        # Allow absolute paths only under the configured evidence directory
+        # (tilde-expanded paths like ~/.local/share/agent-os/evidence/...)
+        resolved = expanded.resolve()
+        if resolved.exists():
+            return resolved
         return None
     resolved = (repo_path / raw_path).resolve()
     repo_root = repo_path.resolve()
