@@ -16,6 +16,18 @@
 
 ## Recent Changes
 
+### 2026-04-04 — [task-20260404-130122-condense-readme-into-a-scannable-1-page-pitch-with] (#125 kai-linux/agent-os)
+Condensed the 710-line README into a 144-line scannable 1-page pitch with star badge, social proof callout, philosophy section, recursive self-improvement story, quick start, and capability ladder. All detailed documentation (architecture, execution, configuration/objectives, roadmap) was preserved by moving it to docs/.
+
+**Files:** `- README.md`, `- docs/architecture.md`, `- docs/execution.md`, `- docs/configuration.md`, `- docs/roadmap.md`
+
+**Decisions:**
+  - - Split detailed docs into 4 files by topic (architecture, execution, configuration, roadmap) rather than one monolithic docs file
+  - - Kept the philosophy section and recursive self-improvement story as dedicated sections in the pitch rather than burying them
+  - - Used a blockquote for the social proof callout to make it visually distinct
+  - - Preserved the ASCII loop diagram in a slightly condensed form since it's the key visual
+
+
 ### 2026-04-01 — [task-20260401-120519-cluster-ci-failures-by-error-signature-to-deduplic] (#115 kai-linux/agent-os)
 Added conservative CI failure signature extraction and used it to cluster duplicate ready debug issues behind one primary task while keeping dependent issues for audit, then auto-resolved those dependents when the parent fix completed.
 
