@@ -9,8 +9,11 @@ import subprocess
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from orchestrator.backlog_groomer import (
+    _assess_demo_availability,
+    _assess_readme,
     _bootstrap_doc_issues,
     _filter_records_for_repo,
+    _gather_adoption_signals,
     _repo_gap_signals,
     _repo_groomer_cadence_days,
     _resolve_repos,
@@ -342,3 +345,76 @@ def test_call_haiku_falls_back_to_codex_when_claude_fails(monkeypatch):
     raw = bg._call_haiku("Return JSON")
 
     assert raw == '[{"title":"Fix thing"}]'
+
+
+def test_assess_readme_detects_missing(tmp_path):
+    info = _assess_readme(tmp_path)
+    assert info == {"exists": False}
+
+
+def test_assess_readme_detects_structure(tmp_path):
+    (tmp_path / "README.md").write_text(
+        "# My Project\n\n## Goal\n\nDo things.\n\n## Quick Start\n\n```sh\npip install foo\n```\n\n"
+        "![demo](docs/demo.svg)\n\n![stars](https://img.shields.io/github/stars/foo/bar)\n",
+        encoding="utf-8",
+    )
+    info = _assess_readme(tmp_path)
+    assert info["exists"] is True
+    assert info["has_quickstart"] is True
+    assert info["has_demo"] is True
+    assert info["has_badge"] is True
+    assert info["has_goal"] is True
+
+
+def test_assess_demo_availability(tmp_path):
+    assert _assess_demo_availability(tmp_path) is False
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "demo.svg").write_text("<svg/>", encoding="utf-8")
+    assert _assess_demo_availability(tmp_path) is True
+
+
+def test_gather_adoption_signals_includes_key_fields(tmp_path, monkeypatch):
+    (tmp_path / "README.md").write_text("# Hi\n\nSmall readme.\n", encoding="utf-8")
+    monkeypatch.setattr(bg, "_fetch_github_stars_forks", lambda slug: {"stars": 5, "forks": 1})
+    signals = _gather_adoption_signals("owner/repo", tmp_path)
+    assert "stars: 5" in signals
+    assert "forks: 1" in signals
+    assert "NO quickstart" in signals
+    assert "NO demo" in signals
+    assert "Demo asset available: NO" in signals
+
+
+def test_groom_repo_prompt_includes_adoption_signals(tmp_path, monkeypatch):
+    cfg = {
+        "root_dir": str(tmp_path),
+        "worktrees_dir": str(tmp_path / "worktrees"),
+    }
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "README.md").write_text("## Goal\n\nTest.\n", encoding="utf-8")
+    (repo / "CODEBASE.md").write_text("# Codebase\n", encoding="utf-8")
+    (repo / "STRATEGY.md").write_text("## Product Vision\nTest.\n", encoding="utf-8")
+    (repo / "PLANNING_PRINCIPLES.md").write_text("Prefer things.\n", encoding="utf-8")
+    (repo / "NORTH_STAR.md").write_text("# North Star\nTest.\n", encoding="utf-8")
+
+    monkeypatch.setattr(bg, "_list_open_issues", lambda repo, cfg: [])
+    monkeypatch.setattr(bg, "load_recent_metrics", lambda *a, **kw: [{"task_id": "t1", "repo": "owner/repo"}])
+    monkeypatch.setattr(bg, "_parse_known_issues", lambda p: [])
+    monkeypatch.setattr(bg, "_find_risk_flags", lambda c: [])
+    monkeypatch.setattr(bg, "_fetch_github_stars_forks", lambda slug: {"stars": 2, "forks": 0})
+    captured = {}
+
+    def fake_call(prompt):
+        captured["prompt"] = prompt
+        return "[]"
+
+    monkeypatch.setattr(bg, "_call_haiku", fake_call)
+    monkeypatch.setattr(bg, "_open_issue_exists", lambda repo, title: False)
+
+    bg.groom_repo(cfg, "owner/repo", repo)
+
+    prompt = captured["prompt"]
+    assert "Adoption and credibility signals" in prompt
+    assert "stars: 2" in prompt
+    assert "forks: 0" in prompt
+    assert "NO quickstart" in prompt
