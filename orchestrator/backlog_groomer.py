@@ -11,6 +11,7 @@ code.
 """
 from __future__ import annotations
 
+import glob as _glob_mod
 import json
 import os
 import re
@@ -327,6 +328,100 @@ def _blocked_issue_signals(open_issues: list[dict]) -> list[dict]:
     return blocked
 
 
+# ---------------------------------------------------------------------------
+# Adoption / credibility signal gathering
+# ---------------------------------------------------------------------------
+
+def _fetch_github_stars_forks(github_slug: str) -> dict:
+    """Fetch current star and fork count for a repo via gh api."""
+    try:
+        raw = _gh(["api", f"repos/{github_slug}", "--jq", ".stargazers_count,.forks_count"], check=True)
+        parts = raw.strip().splitlines()
+        if len(parts) >= 2:
+            return {"stars": int(parts[0]), "forks": int(parts[1])}
+    except Exception:
+        pass
+    return {}
+
+
+def _assess_readme(repo_path: Path) -> dict:
+    """Assess README structure for adoption-relevant qualities."""
+    readme = repo_path / "README.md"
+    if not readme.exists():
+        return {"exists": False}
+    content = readme.read_text(encoding="utf-8", errors="replace")
+    lower = content.lower()
+    lines = content.strip().splitlines()
+    return {
+        "exists": True,
+        "line_count": len(lines),
+        "has_quickstart": any(h in lower for h in ("quick start", "quickstart", "getting started", "## install")),
+        "has_demo": any(d in lower for d in ("demo", "demo.svg", "demo.gif", "screencast", "animation")),
+        "has_badge": "![" in content and ("badge" in lower or "shields.io" in lower or "stars" in lower),
+        "has_goal": "## goal" in lower or "## what" in lower,
+    }
+
+
+def _assess_demo_availability(repo_path: Path) -> bool:
+    """Check whether a visual demo asset exists in the repo."""
+    for pattern in ("docs/demo.*", "demo.*", "assets/demo.*", "docs/*.gif", "docs/*.svg"):
+        if _glob_mod.glob(str(repo_path / pattern)):
+            return True
+    return False
+
+
+def _gather_adoption_signals(github_slug: str, repo_path: Path) -> str:
+    """Build a compact text block of adoption/credibility signals for the LLM."""
+    lines: list[str] = []
+
+    gh_stats = _fetch_github_stars_forks(github_slug)
+    if gh_stats:
+        lines.append(f"GitHub stars: {gh_stats.get('stars', '?')}, forks: {gh_stats.get('forks', '?')}")
+    else:
+        lines.append("GitHub stars/forks: (could not fetch)")
+
+    readme_info = _assess_readme(repo_path)
+    if not readme_info.get("exists"):
+        lines.append("README: MISSING — critical adoption blocker")
+    else:
+        parts = [f"{readme_info.get('line_count', 0)} lines"]
+        if not readme_info.get("has_quickstart"):
+            parts.append("NO quickstart section")
+        else:
+            parts.append("has quickstart")
+        if not readme_info.get("has_demo"):
+            parts.append("NO demo reference")
+        else:
+            parts.append("has demo reference")
+        if not readme_info.get("has_badge"):
+            parts.append("NO star/social badge")
+        else:
+            parts.append("has badge")
+        if not readme_info.get("has_goal"):
+            parts.append("NO goal section")
+        else:
+            parts.append("has goal section")
+        lines.append(f"README assessment: {', '.join(parts)}")
+
+    has_demo = _assess_demo_availability(repo_path)
+    lines.append(f"Demo asset available: {'yes' if has_demo else 'NO — no visual demo found in repo'}")
+
+    # Quickstart friction: check if install/setup looks simple
+    readme = repo_path / "README.md"
+    if readme.exists():
+        content = readme.read_text(encoding="utf-8", errors="replace").lower()
+        if "pip install" in content or "npm install" in content or "brew install" in content:
+            lines.append("Quickstart friction: low (package manager install documented)")
+        elif "git clone" in content and ("make" in content or "setup" in content or "install" in content):
+            lines.append("Quickstart friction: medium (clone + manual setup)")
+        else:
+            lines.append("Quickstart friction: high (no clear install path in README)")
+    else:
+        lines.append("Quickstart friction: critical (no README)")
+
+    return "\n".join(lines)
+
+
 def _bootstrap_doc_issues(repo_path: Path, open_issues: list[dict]) -> list[dict]:
     """Return deterministic bootstrap issues for missing core context docs."""
     open_titles = [i.get("title", "") for i in open_issues]
@@ -540,6 +635,9 @@ Each object must have:
 
 --- Planning research artifact (PLANNING_RESEARCH.md) ---
 {research_context}
+
+--- Adoption and credibility signals (use these to generate adoption-focused issues) ---
+{adoption_signals}
 
 --- Agent performance degradation findings (from weekly scorer) ---
 {scorer_findings}
@@ -755,9 +853,11 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
     research_context = read_planning_research_artifact(repo_path, max_chars=1600)
     objective = load_repo_objective(cfg, github_slug, repo_path)
     objectives_context = format_objective_for_prompt(objective, max_chars=1600)
+    adoption_signals = _gather_adoption_signals(github_slug, repo_path)
     print(f"  Blocked/partial task outcomes: {len(blocked_tasks)}")
     print(f"  Repo gaps: {len(repo_gaps)}, blocked issues: {len(blocked_issues)}")
     print(f"  Bootstrap doc issues: {len(bootstrap_issues)}")
+    print(f"  Adoption signals: gathered")
 
     # Skip if no data to analyze
     if not stale and not known_issues and not risk_flags and not blocked_tasks and not blocked_issues and not repo_gaps and not bootstrap_issues and not records:
@@ -835,6 +935,7 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
         planning_principles=planning_principles,
         production_feedback=production_feedback,
         research_context=research_context,
+        adoption_signals=adoption_signals,
         scorer_findings=scorer_text,
         completions=completions_text,
         open_issues=open_text,
