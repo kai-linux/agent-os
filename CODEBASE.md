@@ -16,6 +16,18 @@
 
 ## Recent Changes
 
+### 2026-04-04 — [task-20260404-130416-teach-the-backlog-groomer-to-generate-adoption-and] (#127 kai-linux/agent-os)
+Updated the backlog groomer to gather and inject adoption/credibility signals (GitHub stars/forks, README structure assessment, quickstart friction level, demo availability) into the LLM prompt, so the groomer now produces a balanced mix of infrastructure and adoption-focused issues. The prompt already had balance rules requiring at least 1 in 5 issues to target adoption; the new concrete signals give the LLM the data it needs to actually generate actionable adoption issues.
+
+**Files:** `- orchestrator/backlog_groomer.py`, `- tests/test_backlog_groomer.py`
+
+**Decisions:**
+  - - Gathered adoption signals as a dedicated prompt section rather than modifying the existing objective format, keeping the diff minimal and focused on prompt/logic changes
+  - - Used `gh api` for star/fork counts since the evidence exporter may not have run yet; this gives the groomer fresh data each run
+  - - Assessed README structure locally (quickstart, demo, badge, goal) rather than requiring external tools, keeping the groomer self-contained
+  - - Kept the existing balance rules in the prompt (1 in 5 must target adoption) and added concrete data so the LLM can generate specific, actionable adoption issues
+
+
 ### 2026-04-04 — [task-20260404-130317-add-github-stars-and-fork-count-as-tracked-objecti] (#124 kai-linux/agent-os)
 Added GitHub stars and fork count as tracked objective metrics by creating `objectives/agent-os.yaml` with five weighted metrics (github_stars at 29%, github_forks at 14%, plus existing operational metrics), a lightweight `bin/export_github_evidence.sh` that fetches current counts via `gh api` and writes YAML evidence files plus a JSONL history log, and a fix to `_allowed_research_file` to support tilde-expanded evidence paths. The existing objective system automatically integrates these metrics into production feedback, outcome attribution snapshots, and the planner prompt.
 
