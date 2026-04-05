@@ -16,6 +16,17 @@
 
 ## Recent Changes
 
+### 2026-04-05 — [task-20260405-090117-add-domain-specific-evaluation-rubrics-for-plannin] (#42 kai-linux/agent-os)
+Added domain-specific evaluation rubrics so repos can declare what "good" looks like via `RUBRIC.md`. The rubric is read by `repo_context.read_evaluation_rubric()` and injected into the strategic planner prompt, backlog groomer prompt, and worker execution context (for architecture/research tasks). When present, planners and groomers use the rubric's quality dimensions and skill dimensions to evaluate and shape work. When absent, a fallback message is shown and behavior is unchanged.
+
+**Files:** `- orchestrator/repo_context.py`, `- orchestrator/strategic_planner.py`, `- orchestrator/backlog_groomer.py`, `- RUBRIC.md`, `- PLANNING_PRINCIPLES.md`, `- tests/test_queue.py`, `- tests/test_strategic_planner.py`
+
+**Decisions:**
+  - - Used a convention file (`RUBRIC.md`) in each managed repo rather than config.yaml entries, keeping rubrics inspectable and editable in-repo
+  - - Returns empty string (not a fallback message) from `read_evaluation_rubric()` when the file is absent, so the execution context omits the section entirely for repos without rubrics
+  - - Injected rubric as a new prompt section rather than modifying existing prompt sections, keeping the diff minimal and each context layer independent
+  - - Documented rubric usage in PLANNING_PRINCIPLES.md so the planner's stable rubric references domain evaluation as a first-class input
+
 ### 2026-04-04 — [task-20260404-130416-teach-the-backlog-groomer-to-generate-adoption-and] (#127 kai-linux/agent-os)
 Updated the backlog groomer to gather and inject adoption/credibility signals (GitHub stars/forks, README structure assessment, quickstart friction level, demo availability) into the LLM prompt, so the groomer now produces a balanced mix of infrastructure and adoption-focused issues. The prompt already had balance rules requiring at least 1 in 5 issues to target adoption; the new concrete signals give the LLM the data it needs to actually generate actionable adoption issues.
 

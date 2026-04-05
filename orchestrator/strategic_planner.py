@@ -55,7 +55,7 @@ from orchestrator.outcome_attribution import (
     load_outcome_records,
 )
 from orchestrator.repo_modes import is_dispatcher_only_repo
-from orchestrator.repo_context import read_north_star
+from orchestrator.repo_context import read_evaluation_rubric, read_north_star
 from orchestrator.trust import is_trusted
 
 DEFAULT_PLAN_SIZE = 5
@@ -2691,6 +2691,9 @@ Context about this repository:
 --- Stable Planning Principles (PLANNING_PRINCIPLES.md) ---
 {planning_principles}
 
+--- Domain Evaluation Rubric (RUBRIC.md — repo-specific quality criteria and skill dimensions) ---
+{evaluation_rubric}
+
 --- Production Feedback (PRODUCTION_FEEDBACK.md) ---
 {production_feedback_context}
 
@@ -2732,6 +2735,7 @@ Rules:
 - CRITICAL: Read the Repo Objectives section. If the objective includes external metrics (e.g. GitHub stars, adoption, user growth), you MUST select work that moves those metrics. Do NOT fill the entire sprint with internal infrastructure if the objective says to grow adoption. A sprint that ignores the stated objective is a failed sprint.
 - Balance rule: At least 40%% of sprint capacity should target the primary objective metric. If the objective is adoption/stars, at least 2 of 5 tasks must be adoption-facing (demos, README, quickstart, public proof, credibility).
 - Treat the planning principles as the stable north-star rubric when strategy and backlog quality are ambiguous
+- When a domain evaluation rubric is present, use its quality criteria and skill dimensions to evaluate backlog candidates — prefer work that closes gaps against the rubric over work that does not address any rubric dimension
 - When production feedback is present, prioritize measurable analytics, user feedback, product inspection, and incident/SLO outcomes over narrative summaries alone
 - Treat entries marked `Planning Use: guarded` as audit context only, not as drivers for roadmap or prioritization decisions
 - Use recent outcome evidence to reinforce work that improved results, repair regressions, and close measurement gaps
@@ -2837,6 +2841,7 @@ def _build_plan_prompt(
     objectives_context: str,
     north_star: str,
     planning_principles: str,
+    evaluation_rubric: str,
     codebase_context: str,
     production_feedback_context: str,
     outcome_context: str,
@@ -2856,6 +2861,7 @@ def _build_plan_prompt(
         objectives_context=objectives_context,
         north_star=north_star,
         planning_principles=planning_principles,
+        evaluation_rubric=evaluation_rubric or "(no domain rubric defined — using generic evaluation criteria)",
         production_feedback_context=production_feedback_context,
         outcome_context=outcome_context,
         codebase_context=codebase_context,
@@ -3242,6 +3248,11 @@ def plan_repo(
     planning_principles = _read_planning_principles(repo_path)
     print(f"  PLANNING_PRINCIPLES.md: {len(planning_principles)} chars")
 
+    # 4b. Read domain evaluation rubric
+    evaluation_rubric = read_evaluation_rubric(repo_path, max_chars=1800)
+    if evaluation_rubric:
+        print(f"  RUBRIC.md: {len(evaluation_rubric)} chars")
+
     # 5. Read CODEBASE.md
     codebase_context = _read_codebase_md(repo_path)
     print(f"  CODEBASE.md: {len(codebase_context)} chars")
@@ -3299,6 +3310,7 @@ def plan_repo(
         objectives_context=objectives_context,
         north_star=north_star,
         planning_principles=planning_principles,
+        evaluation_rubric=evaluation_rubric,
         codebase_context=codebase_context,
         production_feedback_context=production_feedback_context,
         outcome_context=outcome_context,
