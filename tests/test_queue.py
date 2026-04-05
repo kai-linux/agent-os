@@ -11,6 +11,7 @@ import pytest
 # Ensure orchestrator package is importable
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from orchestrator.repo_context import read_evaluation_rubric
 from orchestrator.queue import (
     CommandExecutionError,
     _format_runner_failure,
@@ -286,6 +287,74 @@ def test_write_prompt_skips_research_for_plain_implementation(tmp_path):
     assert "Planning Research (PLANNING_RESEARCH.md)" not in text
     snapshot = root / "runtime" / "prompts" / "task-2.txt"
     assert snapshot.read_text(encoding="utf-8") == text
+
+
+def test_read_evaluation_rubric_returns_content(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "RUBRIC.md").write_text("### Quality\nShip reliable code.\n", encoding="utf-8")
+    result = read_evaluation_rubric(repo)
+    assert "Quality" in result
+    assert "Ship reliable code." in result
+
+
+def test_read_evaluation_rubric_returns_empty_when_missing(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    result = read_evaluation_rubric(repo)
+    assert result == ""
+
+
+def test_read_evaluation_rubric_truncates_at_max_chars(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "RUBRIC.md").write_text("x" * 5000, encoding="utf-8")
+    result = read_evaluation_rubric(repo, max_chars=100)
+    assert len(result) == 100
+
+
+def test_write_prompt_includes_rubric_when_present(tmp_path):
+    root = tmp_path / "root"
+    worktree = tmp_path / "repo"
+    root.mkdir()
+    worktree.mkdir()
+    (worktree / "README.md").write_text("## Goal\n\nShip stuff.\n", encoding="utf-8")
+    (worktree / "RUBRIC.md").write_text("### Execution Reliability\nTasks complete reliably.\n", encoding="utf-8")
+
+    prompt_file = write_prompt(
+        "task-rubric",
+        {"task_type": "architecture"},
+        "Design domain rubric system.",
+        "claude",
+        [],
+        root,
+        worktree=worktree,
+    )
+
+    text = prompt_file.read_text(encoding="utf-8")
+    assert "Domain Evaluation Rubric (RUBRIC.md)" in text
+    assert "Execution Reliability" in text
+
+
+def test_write_prompt_omits_rubric_when_absent(tmp_path):
+    root = tmp_path / "root"
+    worktree = tmp_path / "repo"
+    root.mkdir()
+    worktree.mkdir()
+    (worktree / "README.md").write_text("## Goal\n\nShip stuff.\n", encoding="utf-8")
+
+    prompt_file = write_prompt(
+        "task-no-rubric",
+        {"task_type": "architecture"},
+        "Design something.",
+        "claude",
+        [],
+        root,
+        worktree=worktree,
+    )
+
+    text = prompt_file.read_text(encoding="utf-8")
+    assert "Domain Evaluation Rubric (RUBRIC.md)" not in text
 
 
 # ---------------------------------------------------------------------------

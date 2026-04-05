@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 
+EVALUATION_RUBRIC_DEFAULT = "RUBRIC.md"
 RESEARCH_ARTIFACT_DEFAULT = "PLANNING_RESEARCH.md"
 PRODUCTION_FEEDBACK_ARTIFACT_DEFAULT = "PRODUCTION_FEEDBACK.md"
 SIGNALS_ARTIFACT_DEFAULT = "PLANNING_SIGNALS.md"
@@ -59,6 +60,20 @@ def read_planning_principles(repo_path: Path, max_chars: int = 1800) -> str:
     )
 
 
+def read_evaluation_rubric(repo_path: Path, max_chars: int = 2000) -> str:
+    """Read domain-specific evaluation rubric from RUBRIC.md (or custom path).
+
+    The rubric lets each repo declare what 'good' looks like for its domain —
+    quality criteria, skills, and evaluation dimensions that planners and
+    groomers should use when shaping work beyond generic README/CODEBASE context.
+    """
+    rubric = repo_path / EVALUATION_RUBRIC_DEFAULT
+    if not rubric.exists():
+        return ""
+    content = rubric.read_text(encoding="utf-8", errors="replace").strip()
+    return content[:max_chars] if content else ""
+
+
 def read_codebase_context(repo_path: Path, max_chars: int = 3000) -> str:
     codebase = repo_path / "CODEBASE.md"
     if not codebase.exists():
@@ -111,6 +126,9 @@ def build_execution_context(repo_path: Path, task_type: str, body: str) -> str:
         ("Strategy Context (STRATEGY.md)", read_strategy_context(repo_path)),
         ("Planning Principles (PLANNING_PRINCIPLES.md)", read_planning_principles(repo_path)),
     ]
+    rubric = read_evaluation_rubric(repo_path)
+    if rubric:
+        sections.append(("Domain Evaluation Rubric (RUBRIC.md)", rubric))
     if should_include_research(task_type, body):
         sections.append(("Production Feedback (PRODUCTION_FEEDBACK.md)", read_production_feedback_artifact(repo_path)))
         sections.append(("Planning Research (PLANNING_RESEARCH.md)", read_planning_research_artifact(repo_path)))

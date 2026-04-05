@@ -26,6 +26,7 @@ from orchestrator.gh_project import ensure_labels, query_project, set_item_statu
 from orchestrator.objectives import load_repo_objective, format_objective_for_prompt
 from orchestrator.outcome_attribution import get_repo_outcome_check_ids, format_outcome_checks_section
 from orchestrator.repo_context import (
+    read_evaluation_rubric,
     read_production_feedback_artifact,
     read_north_star,
     read_planning_principles,
@@ -568,12 +569,13 @@ does anything visible to users will fail its objectives.
 
 Focus on:
 1. Objective-driven work — tasks that directly improve the metrics defined in the repo objective (adoption, stars, demos, quickstart, README, public proof, credibility)
-2. Stale issues (open >30 days with no activity) — suggest closing or scoping down
-3. Known Issues from CODEBASE.md that have no linked GitHub issue — create one
-4. Risk flags from recently completed tasks — create follow-up mitigation tasks
-5. Recent blocked or partial task outcomes — create unblock or hardening follow-ups
-6. Repository foundation gaps (missing planning/research/ops scaffolding) — create enabling tasks
-7. Backlog pressure or blocked-work patterns visible in open issues — create high-leverage backlog items
+2. Domain rubric gaps — if a domain evaluation rubric is present, identify work that closes gaps against the rubric's quality criteria and skill dimensions
+3. Stale issues (open >30 days with no activity) — suggest closing or scoping down
+4. Known Issues from CODEBASE.md that have no linked GitHub issue — create one
+5. Risk flags from recently completed tasks — create follow-up mitigation tasks
+6. Recent blocked or partial task outcomes — create unblock or hardening follow-ups
+7. Repository foundation gaps (missing planning/research/ops scaffolding) — create enabling tasks
+8. Backlog pressure or blocked-work patterns visible in open issues — create high-leverage backlog items
 
 Balance rule: At least 1 out of every 5 issues MUST target adoption, credibility,
 activation, or external-facing improvement — not internal infrastructure. If the
@@ -638,6 +640,9 @@ Each object must have:
 
 --- Adoption and credibility signals (use these to generate adoption-focused issues) ---
 {adoption_signals}
+
+--- Domain evaluation rubric (repo-specific quality criteria — use to shape issue goals and success criteria) ---
+{evaluation_rubric}
 
 --- Agent performance degradation findings (from weekly scorer) ---
 {scorer_findings}
@@ -854,6 +859,7 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
     objective = load_repo_objective(cfg, github_slug, repo_path)
     objectives_context = format_objective_for_prompt(objective, max_chars=1600)
     adoption_signals = _gather_adoption_signals(github_slug, repo_path)
+    evaluation_rubric = read_evaluation_rubric(repo_path, max_chars=1600)
     print(f"  Blocked/partial task outcomes: {len(blocked_tasks)}")
     print(f"  Repo gaps: {len(repo_gaps)}, blocked issues: {len(blocked_issues)}")
     print(f"  Bootstrap doc issues: {len(bootstrap_issues)}")
@@ -936,6 +942,7 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
         production_feedback=production_feedback,
         research_context=research_context,
         adoption_signals=adoption_signals,
+        evaluation_rubric=evaluation_rubric or "(no domain rubric defined — using generic evaluation criteria)",
         scorer_findings=scorer_text,
         completions=completions_text,
         open_issues=open_text,
