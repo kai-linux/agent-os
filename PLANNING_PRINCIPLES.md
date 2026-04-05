@@ -71,6 +71,23 @@ clearly does one of the following:
 - increases evidence-driven planning capability
 - reduces repeated operational failure modes
 
+## Domain Evaluation Rubric
+
+If a repo contains `RUBRIC.md`, the planner and groomer should use its quality
+dimensions and skill dimensions as additional evaluation criteria when shaping
+work. The rubric defines what "good" looks like for this specific repo's domain
+— it is not a generic checklist. Different repos may have entirely different
+rubrics (a website repo cares about page speed and accessibility; an automation
+harness cares about execution reliability and self-improvement loops).
+
+When a rubric is present:
+
+- Prefer work that closes gaps against rubric quality dimensions
+- Use rubric skill dimensions to identify underdeveloped capabilities
+- Reference rubric criteria in task success criteria where applicable
+- Do not treat the rubric as a mandatory checklist — it informs priority, not
+  gates completion
+
 ## Blocked Work
 
 Blocked issues should not normally be promoted directly. Prefer the issue that

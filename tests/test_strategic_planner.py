@@ -465,6 +465,7 @@ def test_build_plan_prompt_includes_research_context():
         objectives_context="(no objective configured)",
         north_star="north star",
         planning_principles="north-star rubric",
+        evaluation_rubric="",
         codebase_context="codebase",
         production_feedback_context="signals",
         outcome_context="outcomes",
@@ -489,6 +490,7 @@ def test_build_plan_prompt_includes_planning_principles():
         objectives_context="(no objective configured)",
         north_star="north star",
         planning_principles="Prefer autonomy and evidence.",
+        evaluation_rubric="",
         codebase_context="codebase",
         production_feedback_context="signals",
         outcome_context="outcomes",
@@ -513,6 +515,7 @@ def test_build_plan_prompt_includes_north_star():
         objectives_context="(no objective configured)",
         north_star="Closed-loop self-improvement.",
         planning_principles="Prefer autonomy and evidence.",
+        evaluation_rubric="",
         codebase_context="codebase",
         production_feedback_context="signals",
         outcome_context="outcomes",
@@ -1018,6 +1021,7 @@ def test_build_plan_prompt_includes_production_feedback():
         objectives_context="(no objective configured)",
         north_star="north star",
         planning_principles="Prefer autonomy and evidence.",
+        evaluation_rubric="",
         codebase_context="codebase",
         production_feedback_context="# Production Feedback\n\nActivation dropped 20%.",
         outcome_context="Outcome evidence here.",
@@ -1722,3 +1726,53 @@ def test_format_sprint_report_message_empty_fields():
     assert "📊 Sprint Report — owner/repo" in msg
     assert "No headline." in msg
     assert "No movement summary." in msg
+
+
+def test_build_plan_prompt_includes_evaluation_rubric():
+    prompt = _build_plan_prompt(
+        plan_size=3,
+        strategy_context="strategy",
+        readme_goal="goal",
+        objectives_context="(no objective configured)",
+        north_star="north star",
+        planning_principles="Prefer autonomy and evidence.",
+        evaluation_rubric="### Execution Reliability\nTasks complete without manual intervention.",
+        codebase_context="codebase",
+        production_feedback_context="signals",
+        outcome_context="outcomes",
+        research_context="research",
+        retrospective="retro",
+        git_log="abc123 commit",
+        counts={"open": 1, "closed": 2, "blocked": 0},
+        metrics_summary="metrics",
+        backlog_text="- #1: Task",
+        open_issues="(none)",
+        cross_repo_context="(single repo)",
+    )
+    assert "--- Domain Evaluation Rubric (RUBRIC.md" in prompt
+    assert "Execution Reliability" in prompt
+    assert "Tasks complete without manual intervention." in prompt
+
+
+def test_build_plan_prompt_rubric_fallback_when_empty():
+    prompt = _build_plan_prompt(
+        plan_size=3,
+        strategy_context="strategy",
+        readme_goal="goal",
+        objectives_context="(no objective configured)",
+        north_star="north star",
+        planning_principles="Prefer autonomy and evidence.",
+        evaluation_rubric="",
+        codebase_context="codebase",
+        production_feedback_context="signals",
+        outcome_context="outcomes",
+        research_context="research",
+        retrospective="retro",
+        git_log="abc123 commit",
+        counts={"open": 1, "closed": 2, "blocked": 0},
+        metrics_summary="metrics",
+        backlog_text="- #1: Task",
+        open_issues="(none)",
+        cross_repo_context="(single repo)",
+    )
+    assert "no domain rubric defined" in prompt
