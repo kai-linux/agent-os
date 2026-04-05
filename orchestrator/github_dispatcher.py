@@ -10,6 +10,7 @@ from pathlib import Path
 
 import yaml
 
+from orchestrator.ci_artifact_validator import validate_ci_artifacts, format_validation_log
 from orchestrator.ci_failure_signatures import extract_ci_failure_signature, extract_signature_from_body
 from orchestrator.paths import load_config, runtime_paths
 from orchestrator.gh_project import (
@@ -1351,6 +1352,79 @@ def _skip_agent_unavailable(
     )
 
 
+CI_ARTIFACTS_MISSING_LABEL = "dispatch:ci-artifacts-missing"
+CI_ARTIFACTS_MISSING_CODE = "ci_artifacts_missing"
+
+_CHECK_LINK_RE = re.compile(r"\[link\]\(([^)]+)\)")
+
+
+def _extract_ci_checks_from_body(body: str) -> list[dict]:
+    """Build a minimal checks list from the issue body's Failed checks section.
+
+    Returns a list of dicts with ``name``, ``state``, and ``link`` keys so
+    that ``validate_ci_artifacts`` can extract the run ID.
+    """
+    checks: list[dict] = []
+    in_checks = False
+    for line in (body or "").splitlines():
+        stripped = line.strip()
+        if stripped.lower().startswith("- failed checks"):
+            in_checks = True
+            continue
+        if in_checks:
+            if stripped.startswith("- **"):
+                name_end = stripped.find("**", 4)
+                name = stripped[4:name_end] if name_end > 4 else "unknown"
+                link_match = _CHECK_LINK_RE.search(stripped)
+                link = link_match.group(1) if link_match else ""
+                checks.append({"name": name, "state": "FAILURE", "link": link})
+            elif stripped.startswith("##") or (stripped and not stripped.startswith("-")):
+                break
+    return checks
+
+
+def _skip_ci_artifacts_missing(
+    repo_full: str,
+    item: dict,
+    info: dict | None,
+    project_cfg: dict,
+    validation,
+):
+    blocked_value = project_cfg.get("blocked_value", "Blocked")
+    if info is not None and item.get("item_id"):
+        try:
+            _set_project_status(info, item["item_id"], blocked_value)
+        except Exception as e:
+            print(f"Warning: failed to set project status: {e}")
+
+    edit_issue_labels(
+        repo_full,
+        item["number"],
+        add=["blocked", CI_ARTIFACTS_MISSING_LABEL],
+        remove=["ready", "in-progress", "agent-dispatched"],
+    )
+
+    payload = json.dumps(
+        {
+            "code": CI_ARTIFACTS_MISSING_CODE,
+            "run_id": validation.run_id,
+            "errors": validation.errors,
+        },
+        sort_keys=True,
+    )
+    guidance = "; ".join(validation.errors) or "CI artifacts incomplete or inaccessible."
+    add_issue_comment(
+        repo_full,
+        item["number"],
+        "\n".join([
+            "<!-- agent-os-dispatch-skip",
+            payload,
+            "-->",
+            f"Blocked automatically: CI artifacts missing or incomplete. {guidance}",
+        ]),
+    )
+
+
 def _requeue_unblocked_items(queried, repo_to_project, issue_lookup):
     for info, _ready_items in queried.values():
         for item in info.get("items", []):
@@ -1538,6 +1612,21 @@ def _dispatch_item(cfg, paths, owner, repo_to_project, info, ready_items, issue_
                 continue
 
         _cluster_duplicate_debug_issues(cfg, repo_full, item, info, pcfg, ready_items)
+
+        # --- CI artifact validation for debugging tasks ---
+        parsed_body = parse_issue_body(item.get("body", "") or "")
+        if parsed_body.get("task_type") == "debugging":
+            ci_checks = _extract_ci_checks_from_body(item.get("body", "") or "")
+            if ci_checks:
+                validation = validate_ci_artifacts(repo_full, ci_checks)
+                print(format_validation_log(validation, task_context=f"dispatch#{item['number']}"))
+                if not validation.valid:
+                    _skip_ci_artifacts_missing(repo_full, item, info, pcfg, validation)
+                    print(
+                        f"Skipped {repo_full}#{item['number']} — ci_artifacts_missing: "
+                        f"{'; '.join(validation.errors)}"
+                    )
+                    continue
 
         # --- Task decomposition: split epics into sub-issues ---
         decomp = _try_decompose(cfg, repo_full, item, info, pcfg)
