@@ -22,6 +22,10 @@ from orchestrator.gh_project import (
     gh,
     gh_json,
 )
+from orchestrator.ci_artifact_validator import (
+    validate_ci_artifacts,
+    format_validation_log,
+)
 from orchestrator.privacy import redact_text
 from orchestrator.repo_modes import is_dispatcher_only_repo
 
@@ -871,8 +875,20 @@ def _ensure_ci_remediation_issue(cfg: dict, repo: str, pr: dict, checks: list[di
     if existing:
         return existing.get("url"), False
 
+    # Validate CI artifacts before creating debug task
+    validation = validate_ci_artifacts(repo, checks)
+    log_line = format_validation_log(validation, task_context=f"PR#{pr_number}")
+    print(log_line)
+    if not validation.valid:
+        print(
+            f"Skipping CI remediation issue for PR #{pr_number}: "
+            f"{'; '.join(validation.errors)}"
+        )
+        return None, False
+
     check_lines = _format_failed_checks(checks)
     linked_issue_line = f"- Original issue: #{linked_issue_number}\n" if linked_issue_number else ""
+    artifact_names = ", ".join(a.get("name", "?") for a in validation.artifacts)
     body = f"""## Goal
 Repair the failing CI on PR #{pr_number} by updating its existing branch so the current pull request can merge cleanly.
 
@@ -899,6 +915,11 @@ debugging
 - PR: {pr_url}
 {linked_issue_line}- Failed checks:
 {check_lines}
+
+## CI Artifacts
+- Run ID: {validation.run_id}
+- Artifacts: {artifact_names}
+- Total size: {validation.total_bytes} bytes
 """
     labels = ["bug", "prio:high", "ready"]
     issue_url = _create_issue(repo, title, body, labels)

@@ -102,6 +102,12 @@ def test_ensure_ci_remediation_issue_creates_ready_debugging_issue(monkeypatch):
     monkeypatch.setattr(pm, "_create_issue", fake_create)
     monkeypatch.setattr(pm, "_set_issue_ready", lambda cfg, repo, url: ready_calls.append((repo, url)))
 
+    from orchestrator.ci_artifact_validator import ArtifactValidation
+    monkeypatch.setattr(pm, "validate_ci_artifacts", lambda repo, checks: ArtifactValidation(
+        valid=True, run_id=555, artifacts=[{"name": "pr-ci-failure-test-1", "size_in_bytes": 5000}],
+        total_bytes=5000,
+    ))
+
     cfg = {
         "github_owner": "owner",
         "github_projects": {
