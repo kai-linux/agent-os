@@ -9,6 +9,7 @@ EVALUATION_RUBRIC_DEFAULT = "RUBRIC.md"
 RESEARCH_ARTIFACT_DEFAULT = "PLANNING_RESEARCH.md"
 PRODUCTION_FEEDBACK_ARTIFACT_DEFAULT = "PRODUCTION_FEEDBACK.md"
 SIGNALS_ARTIFACT_DEFAULT = "PLANNING_SIGNALS.md"
+PRODUCT_INSPECTION_ARTIFACT_DEFAULT = "PRODUCT_INSPECTION.md"
 EXECUTION_RESEARCH_TASK_TYPES = {"architecture", "research", "docs", "design", "content"}
 EXECUTION_RESEARCH_HINTS = {
     "strategy", "roadmap", "research", "competitor", "analytics", "conversion",
@@ -98,6 +99,18 @@ def read_planning_signals_artifact(repo_path: Path, artifact_name: str = SIGNALS
     return content[:max_chars] if content else "(empty planning signals artifact)"
 
 
+def read_product_inspection_artifact(
+    repo_path: Path,
+    artifact_name: str = PRODUCT_INSPECTION_ARTIFACT_DEFAULT,
+    max_chars: int = 4000,
+) -> str:
+    artifact = repo_path / artifact_name
+    if not artifact.exists():
+        return "(no product inspection artifact)"
+    content = artifact.read_text(encoding="utf-8", errors="replace").strip()
+    return content[:max_chars] if content else "(empty product inspection artifact)"
+
+
 def read_production_feedback_artifact(
     repo_path: Path,
     artifact_name: str = PRODUCTION_FEEDBACK_ARTIFACT_DEFAULT,
@@ -131,6 +144,7 @@ def build_execution_context(repo_path: Path, task_type: str, body: str) -> str:
         sections.append(("Domain Evaluation Rubric (RUBRIC.md)", rubric))
     if should_include_research(task_type, body):
         sections.append(("Production Feedback (PRODUCTION_FEEDBACK.md)", read_production_feedback_artifact(repo_path)))
+        sections.append(("Product Inspection (PRODUCT_INSPECTION.md)", read_product_inspection_artifact(repo_path)))
         sections.append(("Planning Research (PLANNING_RESEARCH.md)", read_planning_research_artifact(repo_path)))
 
     lines = ["", "", "---", "# Repository Context (read-only)", ""]
