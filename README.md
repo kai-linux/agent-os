@@ -81,24 +81,31 @@ These generated issues are indistinguishable from human-written ones. They enter
 
 ---
 
-## Quick Start
+## Try It in 5 Minutes
 
 ```bash
-# 1. Clone and configure
 git clone https://github.com/kai-linux/agent-os && cd agent-os
+gh auth login          # only prerequisite besides claude CLI
+./demo.sh              # or: make demo
+```
+
+That's it. The demo creates a test issue, dispatches it to Claude, and shows the agent writing code — no config editing, no GitHub Projects, no cron setup.
+
+**Requirements:** `gh` (authenticated), `python3`, `claude` CLI.
+
+<details>
+<summary>Full production setup</summary>
+
+```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp example.config.yaml config.yaml   # edit: github_owner, repos, Telegram token
-
-# 2. Authenticate
-gh auth login && gh auth refresh -s project
-# Ensure codex, claude, gemini CLIs are installed and authenticated
-
-# 3. Start the system
+gh auth refresh -s project
 crontab -e   # see docs/configuration.md for full cron reference
 ```
 
 Create your first issue. Set it to **Ready**. Watch the system work.
+</details>
 
 ---
 
