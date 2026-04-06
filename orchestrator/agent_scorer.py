@@ -19,6 +19,9 @@ from orchestrator.repo_modes import is_dispatcher_only_repo
 
 DEGRADED_THRESHOLD = 0.60
 WINDOW_DAYS = 7
+# Sentinel agent names that represent exhausted fallback chains, not real agents.
+# These must be excluded from degradation analysis to avoid spurious remediation tasks.
+_SENTINEL_AGENTS = frozenset({"none", "unknown"})
 HEALTH_CHECK_WINDOW_DAYS = 1
 HEALTHY_SUCCESS_RATE_THRESHOLD = 0.80
 MIN_TASKS_FOR_DEGRADED_FINDING = 4
@@ -63,10 +66,17 @@ def load_recent_metrics(metrics_file: Path, window_days: int = WINDOW_DAYS) -> l
 
 
 def compute_success_rates(records: list[dict]) -> dict[str, dict]:
-    """Return {agent: {total, successes, rate}} for agents with >= 1 task."""
+    """Return {agent: {total, successes, rate}} for agents with >= 1 task.
+
+    Sentinel agent names (e.g. ``"none"``, ``"unknown"``) that represent
+    exhausted fallback chains rather than real agents are excluded from the
+    result so they cannot trigger spurious degradation findings.
+    """
     counts: dict[str, dict] = defaultdict(lambda: {"total": 0, "successes": 0})
     for rec in records:
         agent = rec.get("agent", "unknown")
+        if agent in _SENTINEL_AGENTS:
+            continue
         counts[agent]["total"] += 1
         if rec.get("status") == "complete":
             counts[agent]["successes"] += 1
@@ -314,6 +324,13 @@ def build_degradation_findings(
     threshold: float = DEGRADED_THRESHOLD,
     min_total: int = MIN_TASKS_FOR_DEGRADED_FINDING,
 ) -> list[dict]:
+    # Warn about sentinel-agent records so operators can see fallback-exhaustion volume.
+    sentinel_count = sum(1 for r in records if r.get("agent", "unknown") in _SENTINEL_AGENTS)
+    if sentinel_count:
+        print(
+            f"[agent_scorer] Excluded {sentinel_count} sentinel-agent record(s) "
+            f"(fallback-exhausted) from degradation analysis."
+        )
     rates = compute_success_rates(records)
     findings: list[dict] = []
     for agent, rate, total in degraded_agents(rates, threshold):
