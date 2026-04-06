@@ -664,3 +664,79 @@ checks=pytest | error=ImportError | location=src/app.py:17 | frame=load_config
     assert ("item-64", "opt-done") in project_status_calls
     assert ("item-88", "opt-done") in project_status_calls
     assert ("item-89", "opt-done") in project_status_calls
+
+
+def test_partial_debug_followup_carries_resolved_agent_label(monkeypatch):
+    """Follow-up issues created for partial debug outcomes include the resolved agent label."""
+    created = []
+
+    monkeypatch.setattr(github_sync, "load_config", lambda: {
+        "github_owner": "owner",
+        "github_projects": {
+            "proj": {
+                "project_number": 1,
+                "ready_value": "Ready",
+                "blocked_value": "Blocked",
+                "done_value": "Done",
+                "repos": [{"github_repo": "owner/repo", "local_repo": "/tmp/repo"}],
+            }
+        },
+    })
+    monkeypatch.setattr(github_sync, "edit_issue_labels", lambda *args, **kwargs: None)
+    monkeypatch.setattr(github_sync, "create_pr_for_branch", lambda *args, **kwargs: None)
+    monkeypatch.setattr(github_sync, "query_project", lambda *args, **kwargs: {
+        "project_id": "proj-id",
+        "status_field_id": "status-field",
+        "status_options": {"Blocked": "blocked-option", "Ready": "ready-option"},
+        "items": [{"url": "https://github.com/owner/repo/issues/7", "item_id": "item-7"}],
+    })
+    monkeypatch.setattr(github_sync, "set_item_status", lambda *args, **kwargs: None)
+    monkeypatch.setattr(github_sync, "gh", lambda *args, **kwargs: '{"id":"item-99"}')
+    monkeypatch.setattr(github_sync, "add_issue_comment", lambda *args, **kwargs: None)
+
+    def fake_gh_json(cmd):
+        if cmd == ["issue", "view", "7", "-R", "owner/repo", "--json", "body"]:
+            return {"body": "## Context\nSome context\n"}
+        if cmd == ["issue", "view", "7", "-R", "owner/repo", "--json", "number,state,body,labels,url"]:
+            return {
+                "number": 7, "state": "OPEN",
+                "url": "https://github.com/owner/repo/issues/7",
+                "labels": [{"name": "in-progress"}],
+                "body": "## Context\nSome context\n",
+            }
+        if cmd[:6] == ["issue", "list", "-R", "owner/repo", "--state", "open"]:
+            return []
+        return {}
+
+    monkeypatch.setattr(github_sync, "gh_json", fake_gh_json)
+    monkeypatch.setattr(github_sync, "_create_issue", lambda repo, title, body, labels: (created.append(labels), "https://github.com/owner/repo/issues/99")[-1])
+
+    meta = {
+        "task_id": "task-abc",
+        "task_type": "debugging",
+        "branch": "agent/task-abc",
+        "base_branch": "main",
+        "priority": "prio:normal",
+        "github_project_key": "proj",
+        "github_repo": "owner/repo",
+        "github_issue_number": 7,
+        "github_issue_url": "https://github.com/owner/repo/issues/7",
+        "resolved_agent": "claude",
+    }
+    result = {
+        "status": "partial",
+        "summary": "Partial progress on fix.",
+        "next_step": "Continue debugging the parser.",
+        "blocker_code": "test_failure",
+        "done": ["- Some work"],
+        "blockers": ["- Test still failing"],
+        "files_changed": ["- file.py"],
+        "tests_run": ["- pytest -> fail"],
+        "attempted_approaches": ["- First try"],
+        "manual_steps": "- None",
+    }
+
+    github_sync.sync_result(meta, result, None)
+    assert len(created) == 1
+    assert "claude" in created[0]
+    assert "ready" in created[0]

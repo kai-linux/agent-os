@@ -1742,10 +1742,16 @@ def create_followup_task(
     slug = sanitize_slug(next_step)
     new_task_id = f"task-{now_ts()}-{slug}"
 
+    # Inherit resolved agent from the original task when available, so
+    # follow-ups are routed to a concrete agent instead of stalling unassigned.
+    inherited_agent = str(original_meta.get("resolved_agent", "") or "").strip().lower()
+    if inherited_agent not in VALID_FALLBACK_AGENTS:
+        inherited_agent = "auto"
+
     frontmatter = {
         "task_id": new_task_id,
         "repo": repo,
-        "agent": "auto",
+        "agent": inherited_agent,
         "task_type": task_type,
         "branch": original_branch,
         "base_branch": base_branch,
@@ -2293,6 +2299,8 @@ def main():
                 break
 
         meta["model_attempts"] = model_attempts
+        if final_agent and final_agent != "none":
+            meta["resolved_agent"] = final_agent
 
         rescued_result = None
         rescued_push = False

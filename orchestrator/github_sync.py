@@ -431,6 +431,11 @@ Original issue: #{issue_number}
     priority = str(meta.get("priority", "")).strip().lower()
     if priority.startswith("prio:"):
         labels.append(priority)
+    # Carry over the resolved agent so follow-up issues are dispatched to a
+    # concrete agent instead of defaulting to unassigned.
+    resolved_agent = str(meta.get("resolved_agent", "") or "").strip().lower()
+    if resolved_agent in {"claude", "codex", "gemini", "deepseek"}:
+        labels.append(resolved_agent)
     issue_url = _create_issue(repo, title, body, labels)
     _set_issue_ready(cfg, repo, issue_url)
     return issue_url
