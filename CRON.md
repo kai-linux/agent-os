@@ -44,6 +44,13 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # Important: cron frequency is the upper bound. If you want ~15 min cadence,
 # cron must also run at least every 15 min.
 0 * * * * /path/to/agent-os/bin/run_strategic_planner.sh >> /path/to/agent-os/runtime/logs/strategic_planner.log 2>&1
+
+# ── Evidence and product inspection ────────────────────────────────────
+# Export GitHub stars/forks evidence every 6 hours (one invocation per managed repo)
+0 */6 * * * /path/to/agent-os/bin/export_github_evidence.sh owner/repo >> /path/to/agent-os/runtime/logs/evidence_export.log 2>&1
+
+# Live product inspection: fetch configured public surfaces and refresh PRODUCT_INSPECTION.md (daily 06:00)
+0 6 * * * /path/to/agent-os/bin/run_product_inspector.sh >> /path/to/agent-os/runtime/logs/product_inspector.log 2>&1
 ```
 
 Each wrapper emits a timestamp banner like `[2026-03-30T12:34:56+0200] queue start` to stderr before running, so the existing `>> ... 2>&1` redirection captures one timestamped entry per cron invocation.
@@ -52,6 +59,7 @@ Each wrapper emits a timestamp banner like `[2026-03-30T12:34:56+0200] queue sta
 
 | Schedule | Script | Role |
 |---|---|---|
+| `* * * * *` | `run_autopull.sh` | Fast-forwards the orchestrator checkout so cron always runs the latest code |
 | `* * * * *` | `run_dispatcher.sh` | Picks up Ready issues, formats them, writes to mailbox |
 | `* * * * *` | `run_queue.sh` | Executes tasks in isolated worktrees, manages agent fallback |
 | `*/5 * * * *` | `run_pr_monitor.sh` | CI gate + auto-merge + auto-rebase for agent PRs |
@@ -60,3 +68,5 @@ Each wrapper emits a timestamp banner like `[2026-03-30T12:34:56+0200] queue sta
 | `0 8 * * *` | `run_daily_digest.sh` | Summarizes the last 24h of completions, blockers, escalations, agent success, and PR activity to Telegram |
 | `0 * * * *` | `run_backlog_groomer.sh` | Per-repo cadence gate in config decides when each repo is groomed |
 | `0 * * * *` | `run_strategic_planner.sh` | Per-repo cadence gate in config decides when each repo is planned |
+| `0 */6 * * *` | `export_github_evidence.sh` | Snapshots GitHub stars/forks for the tracked objective metrics (one invocation per managed repo) |
+| `0 6 * * *` | `run_product_inspector.sh` | Fetches configured public product surfaces and refreshes `PRODUCT_INSPECTION.md` for the planner/groomer |
