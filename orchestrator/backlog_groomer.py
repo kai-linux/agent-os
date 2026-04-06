@@ -27,6 +27,7 @@ from orchestrator.objectives import load_repo_objective, format_objective_for_pr
 from orchestrator.outcome_attribution import get_repo_outcome_check_ids, format_outcome_checks_section
 from orchestrator.repo_context import (
     read_evaluation_rubric,
+    read_product_inspection_artifact,
     read_production_feedback_artifact,
     read_north_star,
     read_planning_principles,
@@ -635,6 +636,9 @@ Each object must have:
 --- Production feedback artifact (PRODUCTION_FEEDBACK.md) ---
 {production_feedback}
 
+--- Live product inspection (PRODUCT_INSPECTION.md) ---
+{product_inspection}
+
 --- Planning research artifact (PLANNING_RESEARCH.md) ---
 {research_context}
 
@@ -855,6 +859,7 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
     strategy_context = read_strategy_context(repo_path, max_chars=1600)
     planning_principles = read_planning_principles(repo_path, max_chars=1400)
     production_feedback = read_production_feedback_artifact(repo_path, max_chars=1800)
+    product_inspection = read_product_inspection_artifact(repo_path, max_chars=1600)
     research_context = read_planning_research_artifact(repo_path, max_chars=1600)
     objective = load_repo_objective(cfg, github_slug, repo_path)
     objectives_context = format_objective_for_prompt(objective, max_chars=1600)
@@ -940,6 +945,7 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
         strategy_context=strategy_context,
         planning_principles=planning_principles,
         production_feedback=production_feedback,
+        product_inspection=product_inspection,
         research_context=research_context,
         adoption_signals=adoption_signals,
         evaluation_rubric=evaluation_rubric or "(no domain rubric defined — using generic evaluation criteria)",

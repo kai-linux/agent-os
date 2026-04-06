@@ -94,6 +94,23 @@ planning_research:
       kind: "repo_reference"
       path: "../shared/launch-notes.md"
 
+product_inspection:
+  enabled: false                   # Opt-in: set true to inspect live product surfaces before planning
+  max_age_hours: 24                # Re-inspect after this many hours
+  max_targets: 4                   # Hard cap on URLs inspected per cycle
+  max_target_chars: 6000           # Per-target fetch cap (text-only, after HTML stripping)
+  allowed_domains:                 # Only HTTPS URLs on these domains are fetched
+    - app.example.com
+    - www.example.com
+  artifact_file: "PRODUCT_INSPECTION.md"
+  targets:
+    - name: "Landing page"
+      url: "https://www.example.com"
+      description: "Public landing page — check messaging, CTA, broken links"
+    - name: "Signup flow"
+      url: "https://app.example.com/signup"
+      description: "Public signup page — check form presence, error states, UX clarity"
+
 production_feedback:
   enabled: false
   max_age_hours: 24                # Refresh stale feedback every 24h before planning
@@ -215,6 +232,14 @@ github_projects:
               type: "web"
               kind: "official_docs"
               url: "https://docs.example.com/repo1"
+        product_inspection:
+          enabled: true
+          allowed_domains:
+            - app.example.com
+          targets:
+            - name: "Repo1 app"
+              url: "https://app.example.com/repo1"
+              description: "Main product surface for repo1"
         production_feedback:
           enabled: true
           stale_after_hours: 48
@@ -250,6 +275,8 @@ github_projects:
         # Pair this repo with ~/agent-os/objectives/repo2.yaml if you still want
         # external objective scoring for manually dispatched work.
         planning_research:
+          enabled: false
+        product_inspection:
           enabled: false
         production_feedback:
           enabled: false
