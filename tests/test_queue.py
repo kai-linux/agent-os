@@ -18,6 +18,7 @@ from orchestrator.queue import (
     _validate_workflow_files,
     agent_available,
     build_escalation_message,
+    create_followup_task,
     get_agent_chain,
     handle_telegram_callback,
     maybe_requeue_prompt_inspection_recovery,
@@ -1147,3 +1148,98 @@ def test_handle_telegram_callback_blocked_task_skip(tmp_path, monkeypatch):
     assert "skipped" in outcome["text"].lower()
     note_text = note_path.read_text(encoding="utf-8")
     assert "action: skip" in note_text
+
+
+def test_create_followup_task_inherits_resolved_agent(tmp_path):
+    """Follow-up tasks inherit the resolved_agent from the parent task meta."""
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    meta = {
+        "task_id": "task-orig",
+        "repo": "/tmp/repo",
+        "base_branch": "main",
+        "branch": "agent/task-orig",
+        "allow_push": True,
+        "task_type": "implementation",
+        "attempt": 1,
+        "max_attempts": 3,
+        "max_runtime_minutes": 40,
+        "resolved_agent": "claude",
+    }
+    result = {
+        "status": "partial",
+        "next_step": "Fix the remaining test failure",
+        "summary": "Partial progress",
+    }
+    logfile = tmp_path / "log.txt"
+    logfile.touch()
+    summary_log = tmp_path / "summary.log"
+    summary_log.touch()
+
+    path = create_followup_task(meta, "original body", result, logfile, 3, ["claude"], inbox, summary_log)
+    assert path is not None
+    content = path.read_text(encoding="utf-8")
+    assert "agent: claude" in content
+
+
+def test_create_followup_task_defaults_auto_without_resolved_agent(tmp_path):
+    """Follow-up tasks default to auto when no resolved_agent is present."""
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    meta = {
+        "task_id": "task-orig",
+        "repo": "/tmp/repo",
+        "base_branch": "main",
+        "branch": "agent/task-orig",
+        "allow_push": True,
+        "task_type": "implementation",
+        "attempt": 1,
+        "max_attempts": 3,
+        "max_runtime_minutes": 40,
+    }
+    result = {
+        "status": "blocked",
+        "next_step": "Investigate auth failure",
+        "summary": "Blocked on auth",
+    }
+    logfile = tmp_path / "log.txt"
+    logfile.touch()
+    summary_log = tmp_path / "summary.log"
+    summary_log.touch()
+
+    path = create_followup_task(meta, "original body", result, logfile, 3, ["deepseek"], inbox, summary_log)
+    assert path is not None
+    content = path.read_text(encoding="utf-8")
+    assert "agent: auto" in content
+
+
+def test_create_followup_task_rejects_invalid_resolved_agent(tmp_path):
+    """Follow-up tasks fall back to auto when resolved_agent is invalid."""
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    meta = {
+        "task_id": "task-orig",
+        "repo": "/tmp/repo",
+        "base_branch": "main",
+        "branch": "agent/task-orig",
+        "allow_push": True,
+        "task_type": "implementation",
+        "attempt": 1,
+        "max_attempts": 3,
+        "max_runtime_minutes": 40,
+        "resolved_agent": "none",
+    }
+    result = {
+        "status": "partial",
+        "next_step": "Continue work",
+        "summary": "Partial",
+    }
+    logfile = tmp_path / "log.txt"
+    logfile.touch()
+    summary_log = tmp_path / "summary.log"
+    summary_log.touch()
+
+    path = create_followup_task(meta, "original body", result, logfile, 3, [], inbox, summary_log)
+    assert path is not None
+    content = path.read_text(encoding="utf-8")
+    assert "agent: auto" in content
