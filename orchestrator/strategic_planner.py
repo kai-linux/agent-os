@@ -56,6 +56,7 @@ from orchestrator.outcome_attribution import (
 )
 from orchestrator.repo_modes import is_dispatcher_only_repo
 from orchestrator.repo_context import read_evaluation_rubric, read_north_star
+from orchestrator.product_inspector import inspect_product
 from orchestrator.trust import is_trusted
 
 DEFAULT_PLAN_SIZE = 5
@@ -2697,6 +2698,9 @@ Context about this repository:
 --- Production Feedback (PRODUCTION_FEEDBACK.md) ---
 {production_feedback_context}
 
+--- Live Product Inspection (PRODUCT_INSPECTION.md) ---
+{product_inspection_context}
+
 --- Recent Outcome Evidence ---
 {outcome_context}
 
@@ -2739,6 +2743,7 @@ Rules:
 - When production feedback is present, prioritize measurable analytics, user feedback, product inspection, and incident/SLO outcomes over narrative summaries alone
 - Treat entries marked `Planning Use: guarded` as audit context only, not as drivers for roadmap or prioritization decisions
 - Use recent outcome evidence to reinforce work that improved results, repair regressions, and close measurement gaps
+- When live product inspection is present, treat HIGH-severity observations as strong candidates for sprint inclusion — broken flows and regressions visible to users should be prioritized
 - When fresh research is present, use it to inform prioritization and rationale. Prefer work that is supported by repo-local strategy plus bounded external evidence.
 - Prefer unblockers, autonomy gains, planning-quality gains, and evidence-driven improvements over local churn
 - When the backlog contains both human-filed and bot-generated issues of similar impact, prefer human-filed issues — they represent stakeholder intent and should not be crowded out by automated self-improvement churn
@@ -2844,6 +2849,7 @@ def _build_plan_prompt(
     evaluation_rubric: str,
     codebase_context: str,
     production_feedback_context: str,
+    product_inspection_context: str,
     outcome_context: str,
     research_context: str,
     retrospective: str,
@@ -2863,6 +2869,7 @@ def _build_plan_prompt(
         planning_principles=planning_principles,
         evaluation_rubric=evaluation_rubric or "(no domain rubric defined — using generic evaluation criteria)",
         production_feedback_context=production_feedback_context,
+        product_inspection_context=product_inspection_context,
         outcome_context=outcome_context,
         codebase_context=codebase_context,
         research_context=research_context,
@@ -3261,6 +3268,10 @@ def plan_repo(
     production_feedback_context = _production_feedback_context(cfg, github_slug, repo_path)
     print(f"  Production feedback: {len(production_feedback_context)} chars")
 
+    # 6b. Live product inspection
+    product_inspection_context = inspect_product(cfg, github_slug, repo_path)
+    print(f"  Product inspection: {len(product_inspection_context)} chars")
+
     # 7. Recent outcome evidence
     outcome_context = _recent_outcome_summary(cfg, github_slug, repo_path, days=sprint_cadence_days)
     print(f"  Outcome context: {len(outcome_context)} chars")
@@ -3313,6 +3324,7 @@ def plan_repo(
         evaluation_rubric=evaluation_rubric,
         codebase_context=codebase_context,
         production_feedback_context=production_feedback_context,
+        product_inspection_context=product_inspection_context,
         outcome_context=outcome_context,
         research_context=research_context,
         retrospective=retrospective,
