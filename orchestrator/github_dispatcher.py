@@ -31,6 +31,7 @@ from orchestrator.trust import is_trusted
 from orchestrator.queue import (
     send_telegram,
     save_telegram_action,
+    write_unblock_notes_artifact,
 )
 
 
@@ -1304,6 +1305,23 @@ def _skip_push_not_ready(
             "Blocked automatically: task requires publish capability but push-readiness checks failed.",
         ]),
     )
+
+    # Persist structured block reason for backlog grooming and retry logic
+    failure_codes = [f["code"] for f in readiness.get("failures", [])]
+    reason = f"Push readiness failed: {', '.join(failure_codes)}" if failure_codes else "Push readiness checks failed"
+    task_id = f"dispatch-{repo_full.replace('/', '-')}-{item['number']}"
+    unblock_notes = {
+        "blocking_cause": reason,
+        "next_action": "Resolve push-readiness failures and re-dispatch.",
+    }
+    result = {
+        "status": "blocked",
+        "blocker_code": PUSH_NOT_READY_CODE,
+    }
+    try:
+        write_unblock_notes_artifact(task_id, unblock_notes, result)
+    except Exception as e:
+        print(f"Warning: failed to write push-not-ready unblock artifact: {e}")
 
 
 def _skip_agent_unavailable(
