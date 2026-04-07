@@ -12,18 +12,22 @@ from orchestrator.backlog_groomer import (
     _assess_demo_availability,
     _assess_readme,
     _bootstrap_doc_issues,
+    _count_backlog_issues,
     _filter_records_for_repo,
     _gather_adoption_signals,
+    _repo_backlog_depth_target,
     _repo_gap_signals,
     _repo_groomer_cadence_days,
+    _repo_plan_size,
     _resolve_repos,
 )
 from orchestrator import backlog_groomer as bg
 
 
-def test_repo_groomer_cadence_defaults_to_sprint_cadence():
+def test_repo_groomer_cadence_defaults_to_half_sprint_cadence():
+    """The groomer must run ahead of the planner so the backlog refills in time."""
     cfg = {"sprint_cadence_days": 2}
-    assert _repo_groomer_cadence_days(cfg, "owner/repo") == 2.0
+    assert _repo_groomer_cadence_days(cfg, "owner/repo") == 1.0
 
 
 def test_repo_groomer_cadence_uses_top_level_override():
@@ -43,8 +47,79 @@ def test_repo_groomer_cadence_uses_per_repo_override():
             }
         },
     }
+    # Explicit per-repo override of 0 (dormant) wins.
     assert _repo_groomer_cadence_days(cfg, "owner/repo-a") == 0.0
-    assert _repo_groomer_cadence_days(cfg, "owner/repo-b") == 1.5
+    # Top-level explicit groomer_cadence_days wins over per-repo sprint_cadence_days
+    # because the operator chose to set it explicitly.
+    assert _repo_groomer_cadence_days(cfg, "owner/repo-b") == 7.0
+
+
+def test_repo_groomer_cadence_per_repo_sprint_with_no_explicit_groomer_halves():
+    """When no explicit groomer cadence is set anywhere, per-repo sprint cadence halves."""
+    cfg = {
+        "github_projects": {
+            "proj": {
+                "repos": [
+                    {"github_repo": "owner/repo-b", "sprint_cadence_days": 1.5},
+                ]
+            }
+        },
+    }
+    assert _repo_groomer_cadence_days(cfg, "owner/repo-b") == 0.75
+
+
+def test_repo_backlog_depth_target_defaults_to_2x_plan_size():
+    cfg = {"plan_size": 5}
+    assert _repo_backlog_depth_target(cfg, "owner/repo") == 10
+
+
+def test_repo_backlog_depth_target_honors_absolute_override():
+    cfg = {"plan_size": 5, "target_backlog_depth": 15}
+    assert _repo_backlog_depth_target(cfg, "owner/repo") == 15
+
+
+def test_repo_backlog_depth_target_honors_multiplier_override():
+    cfg = {"plan_size": 5, "backlog_depth_multiplier": 3}
+    assert _repo_backlog_depth_target(cfg, "owner/repo") == 15
+
+
+def test_repo_backlog_depth_target_per_repo_override():
+    cfg = {
+        "plan_size": 5,
+        "github_projects": {
+            "proj": {
+                "repos": [
+                    {"github_repo": "owner/repo-a", "target_backlog_depth": 4},
+                    {"github_repo": "owner/repo-b", "plan_size": 3},
+                ]
+            }
+        },
+    }
+    assert _repo_backlog_depth_target(cfg, "owner/repo-a") == 4
+    assert _repo_backlog_depth_target(cfg, "owner/repo-b") == 6
+
+
+def test_repo_plan_size_default_and_override():
+    assert _repo_plan_size({}, "owner/repo") == 5
+    cfg = {
+        "github_projects": {
+            "proj": {"repos": [{"github_repo": "owner/repo", "plan_size": 8}]}
+        }
+    }
+    assert _repo_plan_size(cfg, "owner/repo") == 8
+
+
+def test_count_backlog_issues_excludes_active_and_done():
+    issues = [
+        {"number": 1, "labels": [{"name": "enhancement"}]},                       # backlog
+        {"number": 2, "labels": [{"name": "ready"}]},                             # excluded
+        {"number": 3, "labels": [{"name": "in-progress"}]},                       # excluded
+        {"number": 4, "labels": [{"name": "done"}]},                              # excluded
+        {"number": 5, "labels": [{"name": "blocked"}]},                           # excluded
+        {"number": 6, "labels": [{"name": "agent-dispatched"}]},                  # excluded
+        {"number": 7, "labels": [{"name": "bug"}, {"name": "prio:high"}]},        # backlog
+    ]
+    assert _count_backlog_issues(issues) == 2
 
 
 def test_groom_repo_no_data_status(tmp_path, monkeypatch):
@@ -84,6 +159,7 @@ def test_groom_repo_adds_created_issue_to_backlog(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / "README.md").write_text("## Goal\n\nKeep the repo healthy.\n", encoding="utf-8")
+    (repo / "NORTH_STAR.md").write_text("# North Star\n", encoding="utf-8")
     (repo / "STRATEGY.md").write_text("# Strategy\n", encoding="utf-8")
     (repo / "PLANNING_PRINCIPLES.md").write_text("# Planning Principles\n", encoding="utf-8")
     (repo / "CODEBASE.md").write_text("# Codebase\n", encoding="utf-8")
@@ -418,3 +494,170 @@ def test_groom_repo_prompt_includes_adoption_signals(tmp_path, monkeypatch):
     assert "stars: 2" in prompt
     assert "forks: 0" in prompt
     assert "NO quickstart" in prompt
+
+
+def _make_groomable_repo(tmp_path: Path) -> Path:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "README.md").write_text("## Goal\n\nTest.\n", encoding="utf-8")
+    (repo / "CODEBASE.md").write_text("# Codebase\n", encoding="utf-8")
+    (repo / "STRATEGY.md").write_text("## Product Vision\nTest.\n", encoding="utf-8")
+    (repo / "PLANNING_PRINCIPLES.md").write_text("Prefer things.\n", encoding="utf-8")
+    (repo / "NORTH_STAR.md").write_text("# North Star\nTest.\n", encoding="utf-8")
+    return repo
+
+
+def test_groom_repo_skips_when_backlog_already_at_target(tmp_path, monkeypatch):
+    """If the backlog already meets target depth, the groomer should not
+    generate more issues — preventing infrastructure-issue churn on top of an
+    already-healthy backlog."""
+    cfg = {
+        "root_dir": str(tmp_path),
+        "worktrees_dir": str(tmp_path / "worktrees"),
+        "plan_size": 5,  # target_depth = 10
+    }
+    repo = _make_groomable_repo(tmp_path)
+
+    # Simulate 12 already-open backlog issues (none in active/done/blocked state)
+    fake_open = [
+        {"number": n, "title": f"Issue {n}", "labels": [{"name": "enhancement"}]}
+        for n in range(1, 13)
+    ]
+    monkeypatch.setattr(bg, "_list_open_issues", lambda repo, cfg: fake_open)
+    monkeypatch.setattr(bg, "load_recent_metrics", lambda *a, **kw: [{"task_id": "t1", "repo": "owner/repo"}])
+    monkeypatch.setattr(bg, "_parse_known_issues", lambda p: [])
+    monkeypatch.setattr(bg, "_find_risk_flags", lambda c: [])
+    monkeypatch.setattr(bg, "_fetch_github_stars_forks", lambda slug: {"stars": 2, "forks": 0})
+
+    def fail_call(prompt):
+        raise AssertionError("LLM should not be called when backlog is already at target")
+
+    monkeypatch.setattr(bg, "_call_haiku", fail_call)
+    monkeypatch.setattr(bg, "_open_issue_exists", lambda repo, title: False)
+
+    result = bg.groom_repo(cfg, "owner/repo", repo)
+
+    assert result["status"] == "skipped"
+    assert result["created"] == 0
+
+
+def test_groom_repo_generates_only_gap_to_target(tmp_path, monkeypatch):
+    """When the backlog is partially full, generate only the deficit (capped
+    by per-run budget), not a fixed 3-5 every cycle."""
+    cfg = {
+        "root_dir": str(tmp_path),
+        "worktrees_dir": str(tmp_path / "worktrees"),
+        "plan_size": 5,  # target_depth = 10
+    }
+    repo = _make_groomable_repo(tmp_path)
+
+    # 8 existing backlog issues → only 2 new ones needed to hit target.
+    fake_open = [
+        {"number": n, "title": f"Existing {n}", "labels": [{"name": "enhancement"}]}
+        for n in range(1, 9)
+    ]
+    monkeypatch.setattr(bg, "_list_open_issues", lambda repo, cfg: fake_open)
+    monkeypatch.setattr(bg, "load_recent_metrics", lambda *a, **kw: [{"task_id": "t1", "repo": "owner/repo"}])
+    monkeypatch.setattr(bg, "_parse_known_issues", lambda p: [])
+    monkeypatch.setattr(bg, "_find_risk_flags", lambda c: [])
+    monkeypatch.setattr(bg, "_fetch_github_stars_forks", lambda slug: {"stars": 2, "forks": 0})
+
+    captured = {}
+
+    def fake_call(prompt):
+        captured["prompt"] = prompt
+        return "[]"  # we only care about prompt sizing here
+
+    monkeypatch.setattr(bg, "_call_haiku", fake_call)
+    monkeypatch.setattr(bg, "_open_issue_exists", lambda repo, title: False)
+
+    bg.groom_repo(cfg, "owner/repo", repo)
+
+    prompt = captured["prompt"]
+    # The prompt must instruct the LLM to generate exactly 2 issues this run.
+    assert "create exactly 2 targeted" in prompt
+    # Backlog state must be visible in the prompt.
+    assert "8 open backlog issues vs target depth 10" in prompt
+
+
+def test_groom_repo_prompt_enforces_40_percent_adoption_floor(tmp_path, monkeypatch):
+    """The prompt must compute and pass an adoption floor of ceil(num_issues * 0.4)."""
+    cfg = {
+        "root_dir": str(tmp_path),
+        "worktrees_dir": str(tmp_path / "worktrees"),
+        "plan_size": 5,  # target_depth = 10, num_issues = 5 with empty backlog
+    }
+    repo = _make_groomable_repo(tmp_path)
+
+    monkeypatch.setattr(bg, "_list_open_issues", lambda repo, cfg: [])
+    monkeypatch.setattr(bg, "load_recent_metrics", lambda *a, **kw: [{"task_id": "t1", "repo": "owner/repo"}])
+    monkeypatch.setattr(bg, "_parse_known_issues", lambda p: [])
+    monkeypatch.setattr(bg, "_find_risk_flags", lambda c: [])
+    monkeypatch.setattr(bg, "_fetch_github_stars_forks", lambda slug: {"stars": 2, "forks": 0})
+
+    captured = {}
+
+    def fake_call(prompt):
+        captured["prompt"] = prompt
+        return "[]"
+
+    monkeypatch.setattr(bg, "_call_haiku", fake_call)
+    monkeypatch.setattr(bg, "_open_issue_exists", lambda repo, title: False)
+
+    bg.groom_repo(cfg, "owner/repo", repo)
+
+    prompt = captured["prompt"]
+    # ceil(5 * 0.4) = 2 adoption-facing issues required out of 5 generated.
+    assert "At least 2 of the 5 issues" in prompt
+    assert "≥40%" in prompt
+
+
+def test_groom_repo_calls_llm_after_partial_bootstrap(tmp_path, monkeypatch):
+    """Bootstrap doc issues should AUGMENT the LLM, not silence it. The previous
+    behavior set remaining_slots=0 whenever any bootstrap issue existed, which
+    crowded out adoption work whenever a doc gap was present."""
+    cfg = {
+        "root_dir": str(tmp_path),
+        "worktrees_dir": str(tmp_path / "worktrees"),
+        "plan_size": 5,
+    }
+    # Repo has README + STRATEGY + PLANNING_PRINCIPLES + CODEBASE but is
+    # missing NORTH_STAR.md, so exactly one bootstrap issue is generated.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "README.md").write_text("## Goal\n\nTest.\n", encoding="utf-8")
+    (repo / "CODEBASE.md").write_text("# Codebase\n", encoding="utf-8")
+    (repo / "STRATEGY.md").write_text("## Product Vision\nTest.\n", encoding="utf-8")
+    (repo / "PLANNING_PRINCIPLES.md").write_text("Prefer things.\n", encoding="utf-8")
+
+    monkeypatch.setattr(bg, "_list_open_issues", lambda repo, cfg: [])
+    monkeypatch.setattr(bg, "load_recent_metrics", lambda *a, **kw: [{"task_id": "t1", "repo": "owner/repo"}])
+    monkeypatch.setattr(bg, "_parse_known_issues", lambda p: [])
+    monkeypatch.setattr(bg, "_find_risk_flags", lambda c: [])
+    monkeypatch.setattr(bg, "_fetch_github_stars_forks", lambda slug: {"stars": 2, "forks": 0})
+
+    llm_called = {"count": 0}
+
+    def fake_call(prompt):
+        llm_called["count"] += 1
+        return (
+            '[{"title":"Make a compelling demo video","body":"## Goal\\nx\\n## Success Criteria\\ny\\n## Constraints\\n- minimal","priority":"prio:high","labels":["enhancement"]}]'
+        )
+
+    monkeypatch.setattr(bg, "_call_haiku", fake_call)
+    monkeypatch.setattr(bg, "_open_issue_exists", lambda repo, title: False)
+
+    created = []
+    monkeypatch.setattr(
+        bg,
+        "_create_issue",
+        lambda repo, title, body, labels: created.append(title) or f"https://github.com/owner/repo/issues/{len(created)}",
+    )
+    monkeypatch.setattr(bg, "_set_issue_backlog", lambda cfg, github_slug, issue_url: None)
+
+    result = bg.groom_repo(cfg, "owner/repo", repo)
+
+    assert result["status"] == "created"
+    assert llm_called["count"] == 1, "LLM must still be called when bootstrap issues only fill some of the slots"
+    # The LLM-generated adoption issue must be among the created titles.
+    assert "Make a compelling demo video" in created
