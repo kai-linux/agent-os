@@ -490,6 +490,10 @@ def sync_result(meta: dict, result: dict, commit_hash: str | None):
     if blocker_code:
         comment += f"\n### Blocker code\n`{blocker_code}`\n"
 
+    unblock_notes = result.get("unblock_notes") or {}
+    if unblock_notes:
+        comment += f"\n### Unblock notes\n- **Blocking cause:** {redact_text(unblock_notes.get('blocking_cause', ''))}\n- **Next action:** {redact_text(unblock_notes.get('next_action', ''))}\n"
+
     if followup_issue_url:
         comment += f"\n### Follow-up issue\n{followup_issue_url}\n"
 

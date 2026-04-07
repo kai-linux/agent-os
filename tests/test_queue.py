@@ -3,6 +3,8 @@ import json
 import sys
 import textwrap
 import tempfile
+
+import yaml
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -15,6 +17,7 @@ from orchestrator.repo_context import read_evaluation_rubric
 from orchestrator.queue import (
     CommandExecutionError,
     _format_runner_failure,
+    _parse_unblock_notes,
     _validate_workflow_files,
     agent_available,
     build_escalation_message,
@@ -30,6 +33,7 @@ from orchestrator.queue import (
     split_section,
     telegram_action_expired,
     verify_pr_ci_debug_completion,
+    write_unblock_notes_artifact,
     WorkflowValidationError,
     write_prompt,
 )
@@ -475,10 +479,100 @@ def test_parse_agent_result_partial_accepts_valid_blocker_code():
 
             NEXT_STEP:
             Add the schema details and continue.
+
+            UNBLOCK_NOTES:
+            - blocking_cause: API response schema is undocumented
+            - next_action: Request API schema from the team and continue implementation.
         """))
         result = parse_agent_result(tmp)
         assert result["status"] == "partial"
         assert result["blocker_code"] == "missing_context"
+        assert result["unblock_notes"]["blocking_cause"] == "API response schema is undocumented"
+        assert result["unblock_notes"]["next_action"] == "Request API schema from the team and continue implementation."
+
+
+def test_parse_agent_result_partial_requires_unblock_notes():
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d)
+        _write_result(tmp, textwrap.dedent("""\
+            STATUS: partial
+
+            BLOCKER_CODE:
+            missing_context
+
+            SUMMARY:
+            Made progress but the API contract is missing.
+
+            DONE:
+            - Implemented the scaffolding
+
+            BLOCKERS:
+            - API response schema is undocumented
+
+            NEXT_STEP:
+            Add the schema details and continue.
+        """))
+        result = parse_agent_result(tmp)
+        assert result["status"] == "blocked"
+        assert result["blocker_code"] == "invalid_result_contract"
+        assert "UNBLOCK_NOTES" in result["blockers"][0]
+
+
+def test_parse_agent_result_complete_does_not_require_unblock_notes():
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d)
+        _write_result(tmp, textwrap.dedent("""\
+            STATUS: complete
+
+            BLOCKER_CODE:
+            none
+
+            SUMMARY:
+            Done.
+
+            DONE:
+            - Finished
+
+            BLOCKERS:
+            - None
+
+            NEXT_STEP:
+            None
+        """))
+        result = parse_agent_result(tmp)
+        assert result["status"] == "complete"
+        assert result.get("unblock_notes") == {}
+
+
+def test_parse_unblock_notes_valid():
+    raw = "- blocking_cause: API schema missing\n- next_action: Request schema from team"
+    result = _parse_unblock_notes(raw)
+    assert result == {"blocking_cause": "API schema missing", "next_action": "Request schema from team"}
+
+
+def test_parse_unblock_notes_empty_returns_empty_dict():
+    assert _parse_unblock_notes("") == {}
+    assert _parse_unblock_notes("- blocking_cause: none\n- next_action: do something") == {}
+    assert _parse_unblock_notes("- blocking_cause: real cause\n- next_action: none") == {}
+
+
+def test_write_unblock_notes_artifact(monkeypatch):
+    with tempfile.TemporaryDirectory() as d:
+        monkeypatch.setenv("ORCH_ROOT", d)
+        notes = {"blocking_cause": "Missing credentials", "next_action": "Add API key to secrets"}
+        result = {"status": "blocked", "blocker_code": "missing_credentials"}
+        path = write_unblock_notes_artifact("task-123", notes, result)
+        assert path is not None
+        assert path.exists()
+        content = yaml.safe_load(path.read_text())
+        assert content["task_id"] == "task-123"
+        assert content["blocking_cause"] == "Missing credentials"
+        assert content["next_action"] == "Add API key to secrets"
+        assert content["blocker_code"] == "missing_credentials"
+
+
+def test_write_unblock_notes_artifact_skips_empty():
+    assert write_unblock_notes_artifact("task-123", {}, {}) is None
 
 
 def test_verify_pr_ci_debug_completion_requires_post_attempt_rerun(monkeypatch):
