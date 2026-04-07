@@ -28,14 +28,43 @@ Sprint selection should balance:
 
 
 
+
 <!-- auto-focus-areas -->
-- Control-plane stability: prevent invalid agent assignments, auto-escalate and recover blocked tasks
-- Closed-loop optimization through production feedback: track metrics, auto-generate planning artifacts, drive evidence-based decisions
-- CI reliability and failure recovery: prevent cascading failures, capture diagnostics, gate closures on verified reruns
-- External adoption and credibility: streamlined messaging, working demos, GitHub metrics tracking, low-friction onboarding
-- Autonomous optimization: adaptive agent routing, health gating, self-directed remediation loops
+- Close blocked task recovery loops with automation and escalation
+- Build production evidence infrastructure for closed-loop optimization
+- Improve external adoption signals and credibility (README, demo, metrics)
+- Harden CI reliability and cascade-prevention for debug automation
+- Strengthen agent health checks and adaptive routing decisions
 
 ## Sprint History
+
+### Sprint 2026-04-07
+
+**Retrospective:**
+Issues completed:
+- #92: Stabilize none runtime in agent-os [bug, prio:high, done] — COMPLETED
+- #87: Auto-assign an owner to blocked follow-up tasks on creation [enhancement, prio:normal, done, tech-debt] — COMPLETED
+
+PRs merged:
+- PR #141: Agent: task-20260405-090318-add-live-product-inspection-as-a-planning-input (branch: agent/task-20260405-090318-add-live-product-inspection-as-a-planning-input)
+- PR #140: Agent: task-20260406-120316-auto-assign-an-owner-to-blocked-follow-up-tasks-on (branch: agent/task-20260406-120316-auto-assign-an-owner-to-blocked-follow-up-tasks-on)
+- PR #139: Agent: task-20260406-120217-extend-pr-monitor-from-ci-gate-to-semantic-review- (branch: agent/task-20260406-120217-extend-pr-monitor-from-ci-gate-to-semantic-review-)
+- PR #138: Agent: task-20260406-120116-stabilize-none-runtime-in-agent-os (branch: agent/task-20260406-120116-stabilize-none-runtime-in-agent-os)
+- PR #134: Add live-product inspection as a planning input (branch: agent/task-20260405-090318-add-live-product-inspection-as-a-planning-input)
+
+Outcome evidence:
+- #? / PR #139 / No measurable external metric: inconclusive — Merged work had no configured outcome check, so it is explicitly tracked as inconclusive instead of being treated as impact-free or automatically successful.
+- #? / PR #140 / No measurable external metric: inconclusive — Merged work had no configured outcome check, so it is explicitly tracked as inconclusive instead of being treated as impact-free or automatically successful.
+- #? / PR #138 / No measurable external metric: inconclusive — Merged work had no configured outcome check, so it is explicitly tracked as inconclusive instead of being treated as impact-free or automatically successful.
+- #? / PR #141 / No measurable external metric: inconclusive — Merged work had no configured outcome check, so it is explicitly tracked as inconclusive instead of being treated as impact-free or automatically successful.
+
+**Plan:**
+- [prio:high] Harden PRODUCT_INSPECTION.md: per-observation provenance, staleness vs planner cadence, and coverage-boundary framing: Last sprint shipped live product inspection (#141) but external review flagged three structural weaknesses — hardening this now improves evidence quality for every future sprint and directly advances the rubric's Planning Quality dimension while the implementation is fresh.
+- [prio:high] Consume PR review signals for task routing and follow-up: Last sprint added semantic risk assessment to pr_monitor (#139) — consuming those signals in routing closes the feedback loop and advances the system from Level 3 toward Level 4 closed-loop optimization, compounding directly on shipped work.
+- [prio:normal] Sprint plan skip/auto-skip should write a signal the groomer reads next cycle: Without skip signals the groomer wastes cycles regenerating rejected plans — this is a control-plane coordination fix that improves planning quality and reduces churn, which the planning principles rank above local feature work.
+- [prio:normal] Require unblock notes for partial and blocked task outcomes: With 27 blocked and 27 partial tasks in recent metrics and missing_context as the top blocker code, requiring unblock notes closes a recovery-quality gap that compounds with the auto-assign and escalation improvements from recent sprints.
+- [prio:normal] Persist publish-block reasons on git push readiness failures: Git push readiness gating was added in sprint 2026-03-20 (#50) but block reasons are not persisted — adding structured reasons improves operator trust and auditability while enabling smarter automated recovery routing.
+
 
 ### Sprint 2026-04-04
 
