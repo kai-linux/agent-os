@@ -16,6 +16,19 @@
 
 ## Recent Changes
 
+### 2026-04-07 — [task-20260407-100318-consume-pr-review-signals-for-task-routing-and-fol] (#96 kai-linux/agent-os)
+Integrated PR review signal extraction into pr_monitor's post-merge flow. When a PR merges, risk assessment signals (coverage gap, risk level, diff size) are recorded to a JSONL log at runtime/metrics/review_signals.jsonl. A query layer identifies flagged signals (coverage gaps, high-risk merges) and a bounded follow-up generator creates deduped GitHub issues for PRs with quality flags, capped at 3 per sprint window.
+
+**Files:** `- orchestrator/review_signals.py`, `- orchestrator/pr_monitor.py`, `- tests/test_review_signals.py`
+
+**Decisions:**
+  - - Used the same JSONL persistence pattern as outcome_attribution for review signals, storing to runtime/metrics/review_signals.jsonl
+  - - Started with 2 high-confidence signals: coverage_gap (source changes without tests) and high_risk (from existing risk assessment)
+  - - Bounded follow-ups to MAX_FOLLOWUPS_PER_SPRINT=3 and deduped by exact title match against open issues
+  - - Re-assessed PR risk at merge time rather than caching RiskAssessment objects in state, since diff stat calls are cheap
+  - - Kept follow-up generation in the monitor_prs cycle rather than a separate job, since it runs alongside existing PR processing
+
+
 ### 2026-04-07 — [task-20260407-100119-require-unblock-notes-for-partial-and-blocked-task] (#52 kai-linux/agent-os)
 Implemented structured unblock notes enforcement for partial and blocked task outcomes. The UNBLOCK_NOTES section (with blocking_cause and next_action fields) is now required in .agent_result.md for non-complete outcomes, validated during parsing, written as a machine-readable YAML artifact to runtime/unblock_notes/{task_id}.yaml, and carried through to follow-up tasks, escalation notes, and GitHub sync comments.
 
