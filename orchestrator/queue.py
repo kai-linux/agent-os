@@ -246,6 +246,10 @@ def _invalid_result_contract_result(
         "risks": risks or ["- Automatic recovery routing may be degraded until the contract is fixed."],
         "attempted_approaches": attempted_approaches or ["- Parsed the worker result and rejected it during validation."],
         "manual_steps": manual_steps,
+        "unblock_notes": {
+            "blocking_cause": reason,
+            "next_action": "Fix the task outcome contract and rerun the task.",
+        },
         "raw": raw,
     }
 
@@ -279,6 +283,9 @@ def _result_contract_text(result: dict) -> str:
         ("ATTEMPTED_APPROACHES", "\n".join(result.get("attempted_approaches", ["- None"]))),
         ("MANUAL_STEPS", str(result.get("manual_steps", "- None")).strip() or "- None"),
     ]
+    unblock = result.get("unblock_notes") or {}
+    if unblock:
+        sections.append(("UNBLOCK_NOTES", f"- blocking_cause: {unblock['blocking_cause']}\n- next_action: {unblock['next_action']}"))
     return "\n\n".join(f"{name}:\n{value}" for name, value in sections) + "\n"
 
 
@@ -347,6 +354,10 @@ def _ci_completion_partial_result(
     decisions.append("- Queue requires a post-fix CI rerun with the previously failing job passing before closing PR CI remediation tasks.")
     updated["decisions"] = decisions
     updated["next_step"] = next_step
+    updated["unblock_notes"] = {
+        "blocking_cause": f"CI rerun verification for PR #{pr_number} incomplete: {reason}",
+        "next_action": next_step,
+    }
     return updated
 
 
@@ -1261,6 +1272,53 @@ def parse_bullets(section_text: str):
     return lines or ["- None"]
 
 
+def _parse_unblock_notes(raw: str) -> dict:
+    """Parse UNBLOCK_NOTES section into {blocking_cause, next_action}.
+
+    Accepts bullet-style (``- blocking_cause: ...``) or label-style
+    (``blocking_cause: ...``) lines.  Returns an empty dict when either
+    required field is missing or trivially empty.
+    """
+    cause = ""
+    action = ""
+    for line in raw.splitlines():
+        stripped = line.strip().lstrip("- ").strip()
+        if stripped.lower().startswith("blocking_cause:"):
+            cause = stripped.split(":", 1)[1].strip()
+        elif stripped.lower().startswith("next_action:"):
+            action = stripped.split(":", 1)[1].strip()
+    if not cause or cause.lower() in ("none", "n/a"):
+        return {}
+    if not action or action.lower() in ("none", "n/a"):
+        return {}
+    return {"blocking_cause": cause, "next_action": action}
+
+
+def _format_unblock_notes_for_followup(unblock_notes: dict | None) -> str:
+    if not unblock_notes:
+        return "- None"
+    return f"- blocking_cause: {unblock_notes['blocking_cause']}\n- next_action: {unblock_notes['next_action']}"
+
+
+def write_unblock_notes_artifact(task_id: str, unblock_notes: dict, result: dict) -> Path | None:
+    """Write a machine-readable YAML unblock-notes artifact for downstream automation."""
+    if not unblock_notes:
+        return None
+    artifact_dir = Path(os.environ.get("ORCH_ROOT", Path(__file__).resolve().parents[1])) / "runtime" / "unblock_notes"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    artifact = {
+        "task_id": task_id,
+        "status": result.get("status", "blocked"),
+        "blocker_code": result.get("blocker_code", ""),
+        "blocking_cause": unblock_notes["blocking_cause"],
+        "next_action": unblock_notes["next_action"],
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    path = artifact_dir / f"{task_id}.yaml"
+    path.write_text(yaml.safe_dump(artifact, sort_keys=False), encoding="utf-8")
+    return path
+
+
 def _git_fetch_with_retry(repo: Path, logfile: Path, queue_summary_log: Path, max_retries: int = 3):
     """Fetch origin with retries to handle git lock contention from concurrent cron pulls."""
     import time
@@ -1568,13 +1626,17 @@ def parse_agent_result(worktree: Path):
             "decisions": ["- None"],
             "risks": ["- Missing result contract"],
             "attempted_approaches": ["- Worker failed to write the required handoff file"],
+            "unblock_notes": {
+                "blocking_cause": "Worker did not produce .agent_result.md",
+                "next_action": "Inspect the worker prompt and rerun the task.",
+            },
             "raw": raw,
         }
 
     text = result_file.read_text(encoding="utf-8")
 
     status_match = re.search(r"^STATUS:\s*(.+)$", text, flags=re.MULTILINE)
-    all_sections = ["BLOCKER_CODE", "DONE", "BLOCKERS", "NEXT_STEP", "FILES_CHANGED", "TESTS_RUN", "DECISIONS", "RISKS", "ATTEMPTED_APPROACHES", "MANUAL_STEPS"]
+    all_sections = ["BLOCKER_CODE", "DONE", "BLOCKERS", "NEXT_STEP", "FILES_CHANGED", "TESTS_RUN", "DECISIONS", "RISKS", "ATTEMPTED_APPROACHES", "MANUAL_STEPS", "UNBLOCK_NOTES"]
     summary = split_section(text, "SUMMARY", all_sections)
     blocker_code = split_section(text, "BLOCKER_CODE", ["SUMMARY", *all_sections[1:]])
     done = split_section(text, "DONE", all_sections[2:])
@@ -1585,7 +1647,8 @@ def parse_agent_result(worktree: Path):
     decisions = split_section(text, "DECISIONS", all_sections[7:])
     risks = split_section(text, "RISKS", all_sections[8:])
     attempted_approaches = split_section(text, "ATTEMPTED_APPROACHES", all_sections[9:])
-    manual_steps = split_section(text, "MANUAL_STEPS", [])
+    manual_steps = split_section(text, "MANUAL_STEPS", all_sections[10:])
+    unblock_notes_raw = split_section(text, "UNBLOCK_NOTES", [])
 
     status = status_match.group(1).strip().lower() if status_match else "blocked"
     if status not in {"complete", "partial", "blocked"}:
@@ -1621,6 +1684,21 @@ def parse_agent_result(worktree: Path):
             manual_steps=manual_steps.strip() if manual_steps else "",
         )
 
+    unblock_notes = _parse_unblock_notes(unblock_notes_raw) if unblock_notes_raw else {}
+
+    if status in {"partial", "blocked"} and not unblock_notes:
+        return _invalid_result_contract_result(
+            reason="Blocked and partial outcomes must include UNBLOCK_NOTES with blocking_cause and next_action.",
+            raw=text,
+            done=parse_bullets(done),
+            files_changed=parse_bullets(files_changed),
+            tests_run=parse_bullets(tests_run),
+            decisions=parse_bullets(decisions),
+            risks=parse_bullets(risks),
+            attempted_approaches=parse_bullets(attempted_approaches),
+            manual_steps=manual_steps.strip() if manual_steps else "",
+        )
+
     return {
         "status": status,
         "blocker_code": blocker_code_value,
@@ -1634,6 +1712,7 @@ def parse_agent_result(worktree: Path):
         "risks": parse_bullets(risks),
         "attempted_approaches": parse_bullets(attempted_approaches),
         "manual_steps": manual_steps.strip() if manual_steps else "",
+        "unblock_notes": unblock_notes,
         "raw": text,
     }
 
@@ -1830,6 +1909,10 @@ def create_followup_task(
 
 {chr(10).join(result.get("attempted_approaches", ["- None"]))}
 
+# Prior Unblock Notes
+
+{_format_unblock_notes_for_followup(result.get("unblock_notes"))}
+
 # Models Already Tried In This Task Lineage
 
 {chr(10).join(f"- {m}" for m in model_attempts) if model_attempts else "- None"}
@@ -1898,6 +1981,9 @@ def create_escalation_note(original_meta: dict, original_body: str, result: dict
 
 ## Attempted Approaches
 {chr(10).join(result.get("attempted_approaches", ["- None"]))}
+
+## Unblock Notes
+{_format_unblock_notes_for_followup(result.get("unblock_notes"))}
 """
     esc_path.write_text(content, encoding="utf-8")
     log(f"Created escalation note: {esc_path}", logfile, also_summary=True, queue_summary_log=queue_summary_log)
@@ -1979,6 +2065,10 @@ def run_tests(cfg: dict, repo: Path, worktree: Path, logfile: Path, queue_summar
         else:
             text = text.rstrip('\n') + f'\n\nBLOCKERS:\n{blocker}\n'
 
+        # Add UNBLOCK_NOTES for the test-failure downgrade
+        if not re.search(r'^UNBLOCK_NOTES:', text, re.MULTILINE):
+            text = text.rstrip('\n') + f'\n\nUNBLOCK_NOTES:\n- blocking_cause: Tests failed ({test_command} → {status_label})\n- next_action: Fix the failing tests and rerun the task.\n'
+
     result_path.write_text(text, encoding="utf-8")
 
 
@@ -2045,6 +2135,10 @@ def synthesize_exhausted_result(model_attempts: list[str]) -> dict:
         "decisions": ["- Exhausted configured model fallback chain"],
         "risks": ["- Further automated retries may repeat unproductive behavior"],
         "attempted_approaches": [f"- Models tried so far: {', '.join(model_attempts) if model_attempts else 'none'}"],
+        "unblock_notes": {
+            "blocking_cause": f"All fallback models exhausted ({', '.join(model_attempts) if model_attempts else 'none'})",
+            "next_action": "Review the escalation note and decide whether to refine the task, add missing context, or intervene manually.",
+        },
         "raw": "",
     }
 
@@ -2212,6 +2306,10 @@ def main():
                     "decisions": ["- Timed out during execution"],
                     "risks": ["- Long-running task may be too broad for one attempt"],
                     "attempted_approaches": ["- Timed run exceeded timeout budget"],
+                    "unblock_notes": {
+                        "blocking_cause": f"{current_agent} execution exceeded timeout budget",
+                        "next_action": "Try the next fallback model or split the task into a smaller step.",
+                    },
                     "raw": "",
                 }
                 model_attempts.append(current_agent)
@@ -2239,6 +2337,10 @@ def main():
                     "decisions": ["- Treat runner failure as model-level failure and continue fallback chain if possible."],
                     "risks": ["- Model quota/auth/CLI issues may affect multiple tasks."],
                     "attempted_approaches": [f"- Attempted model: {current_agent}", f"- Failure detail: {failure_summary}"],
+                    "unblock_notes": {
+                        "blocking_cause": f"{current_agent} runner failure: {failure_summary}",
+                        "next_action": "Try the next fallback model. If all models fail, inspect runner config, credentials, or quotas.",
+                    },
                     "raw": "",
                 }
                 model_attempts.append(current_agent)
@@ -2343,6 +2445,10 @@ def main():
                 "risks": list((final_result or {}).get("risks", ["- None"])) + ["- Pushing this branch would strand the PR without the required CI status."],
                 "attempted_approaches": list((final_result or {}).get("attempted_approaches", ["- None"])) + ["- Queue validated modified workflow files before push and rejected the invalid configuration."],
                 "manual_steps": "",
+                "unblock_notes": {
+                    "blocking_cause": push_validation_error,
+                    "next_action": "Update the workflow file to satisfy local validation, then rerun the task.",
+                },
                 "raw": (final_result or {}).get("raw", ""),
             }
             log(push_validation_error, logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
@@ -2371,6 +2477,15 @@ def main():
             record_metrics(cfg, meta, final_result, final_agent, model_attempts, start_time, logfile, QUEUE_SUMMARY_LOG)
         except Exception as e:
             log(f"Metrics recording warning: {e}", logfile, queue_summary_log=QUEUE_SUMMARY_LOG)
+
+        # Write machine-readable unblock notes artifact for partial/blocked outcomes.
+        if final_result.get("unblock_notes"):
+            try:
+                artifact_path = write_unblock_notes_artifact(task_id, final_result["unblock_notes"], final_result)
+                if artifact_path:
+                    log(f"Wrote unblock notes artifact: {artifact_path}", logfile, queue_summary_log=QUEUE_SUMMARY_LOG)
+            except Exception as e:
+                log(f"Unblock notes artifact warning: {e}", logfile, queue_summary_log=QUEUE_SUMMARY_LOG)
 
         # Sync back to GitHub if this task originated from an issue.
         sync_info = {}
@@ -2541,6 +2656,10 @@ def main():
                 "decisions": ["- Execution aborted on runner error"],
                 "risks": ["- GitHub issue may remain in-progress without sync unless updated here"],
                 "attempted_approaches": [f"- Queue attempted {max_infra_retries} infrastructure retries"],
+                "unblock_notes": {
+                    "blocking_cause": f"Infrastructure failure after {max_infra_retries} retries: {e}",
+                    "next_action": "Inspect the task log and agent runner configuration, then retry.",
+                },
                 "raw": "",
             }
 
