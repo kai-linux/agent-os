@@ -16,6 +16,18 @@
 
 ## Recent Changes
 
+### 2026-04-07 — [task-20260407-100119-require-unblock-notes-for-partial-and-blocked-task] (#52 kai-linux/agent-os)
+Implemented structured unblock notes enforcement for partial and blocked task outcomes. The UNBLOCK_NOTES section (with blocking_cause and next_action fields) is now required in .agent_result.md for non-complete outcomes, validated during parsing, written as a machine-readable YAML artifact to runtime/unblock_notes/{task_id}.yaml, and carried through to follow-up tasks, escalation notes, and GitHub sync comments.
+
+**Files:** `- orchestrator/queue.py`, `- orchestrator/github_sync.py`, `- tests/test_queue.py`
+
+**Decisions:**
+  - - Used bullet-style format (- blocking_cause: ..., - next_action: ...) for UNBLOCK_NOTES in .agent_result.md to match existing section conventions
+  - - Wrote machine-readable artifact as YAML to runtime/unblock_notes/ directory, consistent with other runtime artifacts
+  - - Made all system-generated blocked/partial results include unblock_notes so they pass their own validation when re-parsed
+  - - Kept validation in parse_agent_result() alongside existing blocker_code validation for consistency
+
+
 ### 2026-04-05 — [task-20260405-090117-add-domain-specific-evaluation-rubrics-for-plannin] (#42 kai-linux/agent-os)
 Added domain-specific evaluation rubrics so repos can declare what "good" looks like via `RUBRIC.md`. The rubric is read by `repo_context.read_evaluation_rubric()` and injected into the strategic planner prompt, backlog groomer prompt, and worker execution context (for architecture/research tasks). When present, planners and groomers use the rubric's quality dimensions and skill dimensions to evaluate and shape work. When absent, a fallback message is shown and behavior is unchanged.
 
