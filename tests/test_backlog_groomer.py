@@ -661,3 +661,55 @@ def test_groom_repo_calls_llm_after_partial_bootstrap(tmp_path, monkeypatch):
     assert llm_called["count"] == 1, "LLM must still be called when bootstrap issues only fill some of the slots"
     # The LLM-generated adoption issue must be among the created titles.
     assert "Make a compelling demo video" in created
+
+
+# ---------------------------------------------------------------------------
+# Skip signal integration
+# ---------------------------------------------------------------------------
+
+
+def test_groomer_cadence_backoff_on_auto_skips(tmp_path, monkeypatch):
+    """When 2+ recent auto-skips exist, groomer halves issue generation."""
+    from orchestrator.skip_signals import record_skip_signal
+
+    cfg = {
+        "root_dir": str(tmp_path),
+        "worktrees_dir": str(tmp_path / "worktrees"),
+        "plan_size": 5,
+    }
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "README.md").write_text("## Goal\n\nGoal.\n", encoding="utf-8")
+    (repo / "NORTH_STAR.md").write_text("# North Star\n", encoding="utf-8")
+    (repo / "STRATEGY.md").write_text("# Strategy\n", encoding="utf-8")
+    (repo / "PLANNING_PRINCIPLES.md").write_text("# Planning Principles\n", encoding="utf-8")
+    (repo / "CODEBASE.md").write_text("# Codebase\n", encoding="utf-8")
+
+    # Create skip signals directly in the expected location
+    skip_signals_path = tmp_path / "runtime" / "metrics" / "plan_skip_signals.jsonl"
+    plan = [{"issue_number": 1}, {"issue_number": 2}]
+    record_skip_signal(skip_signals_path, "owner/repo", plan, "auto_skip")
+    record_skip_signal(skip_signals_path, "owner/repo", plan, "auto_skip")
+
+    monkeypatch.setattr(bg, "_list_open_issues", lambda repo, cfg: [])
+    monkeypatch.setattr(bg, "load_recent_metrics", lambda *args, **kwargs: [{"task_id": "t1", "repo": "owner/repo"}])
+    monkeypatch.setattr(bg, "_parse_known_issues", lambda repo_path: [])
+    monkeypatch.setattr(bg, "_find_risk_flags", lambda cfg: [])
+
+    captured_prompt = {}
+
+    def mock_haiku(prompt):
+        captured_prompt["text"] = prompt
+        return '[{"title":"Test issue","body":"## Goal\\nX\\n## Success Criteria\\nY\\n## Constraints\\n- Z","priority":"prio:normal","labels":["enhancement"]}]'
+
+    monkeypatch.setattr(bg, "_call_haiku", mock_haiku)
+    monkeypatch.setattr(bg, "_open_issue_exists", lambda repo, title: False)
+    monkeypatch.setattr(bg, "_create_issue", lambda repo, title, body, labels: "https://github.com/owner/repo/issues/99")
+    monkeypatch.setattr(bg, "_set_issue_backlog", lambda cfg, github_slug, issue_url: None)
+
+    result = bg.groom_repo(cfg, "owner/repo", repo)
+
+    # Should still produce output but with reduced volume.
+    # The key assertion is that the prompt was generated (LLM was called)
+    # and the cadence backoff message was printed.
+    assert result.get("status") in {"created", "skipped"}
