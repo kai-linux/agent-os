@@ -16,6 +16,17 @@
 
 ## Recent Changes
 
+### 2026-04-07 — [task-20260407-100426-persist-publish-block-reasons-on-git-push-readines] (#88 kai-linux/agent-os)
+Added `push_not_ready` as a first-class blocker code and wired the dispatcher's push-readiness skip path to persist a structured unblock-notes artifact to `runtime/unblock_notes/`, making publish-block reasons queryable by backlog grooming and retry logic.
+
+**Files:** `- orchestrator/queue.py`, `- orchestrator/github_dispatcher.py`, `- tests/test_github_dispatcher.py`
+
+**Decisions:**
+  - - Used synthetic task ID `dispatch-{owner}-{repo}-{issue_number}` for the artifact since no mailbox task_id exists at dispatch time
+  - - Wrapped artifact write in try/except so failures don't break dispatch flow
+  - - Kept the existing GitHub issue comment payload unchanged; the artifact is additive
+
+
 ### 2026-04-07 — [task-20260407-100229-sprint-plan-skip-auto-skip-should-write-a-signal-t] (#136 kai-linux/agent-os)
 Implemented skip signal persistence so sprint plan skips (explicit and auto-skip) are recorded to a JSONL store at runtime/metrics/plan_skip_signals.jsonl. The planner reads recent skip signals on next cycle, injects skip history into the LLM prompt to avoid identical compositions, and includes a diff line in the Telegram plan message (e.g., "No change from previous plan" or "Reordered: #96↔#52"). The groomer reads skip signals to apply cadence backoff (halves issue generation after 2+ auto-skips) and anti-repeat penalties (injects explicitly-skipped issue context into the LLM prompt). Penalties decay with a 7-day half-life so issues can resurface.
 
