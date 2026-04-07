@@ -71,6 +71,7 @@ def runtime_paths(cfg: dict):
         "QUEUE_SUMMARY_LOG": logs / "queue-summary.log",
         "TELEGRAM_ACTIONS": ROOT / "runtime" / "telegram_actions",
         "TELEGRAM_OFFSET": ROOT / "runtime" / "telegram_update_offset.txt",
+        "SKIP_SIGNALS": ROOT / "runtime" / "metrics" / "plan_skip_signals.jsonl",
     }
 
     for p in [

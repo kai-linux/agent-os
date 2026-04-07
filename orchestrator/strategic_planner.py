@@ -57,6 +57,15 @@ from orchestrator.outcome_attribution import (
 from orchestrator.repo_modes import is_dispatcher_only_repo
 from orchestrator.repo_context import read_evaluation_rubric, read_north_star
 from orchestrator.product_inspector import inspect_product
+from orchestrator.skip_signals import (
+    load_skip_signals,
+    plan_diff_line as _plan_diff_line,
+    plan_fingerprint as _plan_fingerprint,
+    plan_issue_set as _plan_issue_set,
+    record_skip_signal,
+    skip_context_for_prompt as _skip_context_for_prompt,
+    skip_penalty_for_issue as _skip_penalty_for_issue,
+)
 from orchestrator.trust import is_trusted
 
 DEFAULT_PLAN_SIZE = 5
@@ -2731,6 +2740,9 @@ Open issues: {open_count} | Recently closed: {closed_count} | Blocked: {blocked_
 --- Sibling repositories (cross-repo context) ---
 {cross_repo_context}
 
+--- Skip History ---
+{skip_context}
+
 Rules:
 - Each task must be atomic and executable by an AI agent in a single session
 - Tasks must NOT be vague epics — they should have clear, testable success criteria
@@ -2859,6 +2871,7 @@ def _build_plan_prompt(
     backlog_text: str,
     open_issues: str,
     cross_repo_context: str,
+    skip_context: str = "",
 ) -> str:
     return PLAN_PROMPT.format(
         plan_size=plan_size,
@@ -2882,6 +2895,7 @@ def _build_plan_prompt(
         backlog_issues=backlog_text,
         open_issues=open_issues,
         cross_repo_context=cross_repo_context or "(single-repo mode — no sibling repos configured)",
+        skip_context=skip_context or "(no recent skip history)",
     )
 
 
@@ -2934,7 +2948,12 @@ def _format_sprint_report_message(report: dict, repo: str) -> str:
     return "\n".join(lines)
 
 
-def _format_plan_message(plan: list[dict], repo: str, cadence_days: float) -> str:
+def _format_plan_message(
+    plan: list[dict],
+    repo: str,
+    cadence_days: float,
+    skip_signals: list[dict] | None = None,
+) -> str:
     """Format the sprint plan for Telegram display."""
     approval_timeout_hours = _approval_timeout_hours(cadence_days)
 
@@ -2944,6 +2963,12 @@ def _format_plan_message(plan: list[dict], repo: str, cadence_days: float) -> st
         f"Generated: {datetime.now(tz=timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
         "",
     ]
+
+    diff_line = _plan_diff_line(plan, skip_signals or [])
+    if diff_line:
+        lines.append(f"📊 {diff_line}")
+        lines.append("")
+
     for i, task in enumerate(plan, 1):
         priority = task.get("priority", "prio:normal")
         action = task.get("action", "create")
@@ -3090,6 +3115,9 @@ def _complete_plan_action(
         _send_telegram(cfg, skip_msg)
         # Do NOT record_run here — a rejected plan should not reset the cadence
         # timer. The planner should generate a new plan on the next cron tick.
+        plan = action.get("plan") or []
+        if plan:
+            record_skip_signal(paths["SKIP_SIGNALS"], repo, plan, "explicit")
         action["status"] = "rejected"
         action["completed_at"] = now
         save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
@@ -3101,6 +3129,9 @@ def _complete_plan_action(
         _send_telegram(cfg, skip_msg)
         # Do NOT record_run here — an expired plan should not reset the cadence
         # timer. The planner should generate a new plan on the next cron tick.
+        plan = action.get("plan") or []
+        if plan:
+            record_skip_signal(paths["SKIP_SIGNALS"], repo, plan, "auto_skip")
         action["status"] = "expired"
         action["expired_at"] = now
         save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
@@ -3230,6 +3261,7 @@ def plan_repo(
     github_slug: str,
     repo_path: Path,
     cross_repo_context: str = "",
+    skip_signals: list[dict] | None = None,
 ) -> tuple[list[dict] | None, str, str | None]:
     """Generate a sprint plan for one repo. Returns (plan, retrospective, empty_reason)."""
     plan_size, sprint_cadence_days = _repo_planner_config(cfg, github_slug)
@@ -3313,6 +3345,11 @@ def plan_repo(
     objectives_context = format_objective_for_prompt(objective, max_chars=2000)
     print(f"  Objectives: {len(objectives_context)} chars")
 
+    # 15b. Skip signal context
+    skip_context = _skip_context_for_prompt(skip_signals or [])
+    if skip_context:
+        print(f"  Skip context: {len(skip_signals or [])} recent skip signals")
+
     # 16. Build prompt with all context
     prompt = _build_plan_prompt(
         plan_size=plan_size,
@@ -3334,6 +3371,7 @@ def plan_repo(
         backlog_text=backlog_text,
         open_issues=open_issues,
         cross_repo_context=cross_repo_context,
+        skip_context=skip_context,
     )
 
     # 16. Call Sonnet
@@ -3543,6 +3581,9 @@ def run():
             else:
                 _notify_sprint_completed(cfg, github_slug, repo_path, sprint_cadence_days)
 
+            # Load skip signals for this repo
+            repo_skip_signals = load_skip_signals(paths["SKIP_SIGNALS"], github_slug)
+
             # Build cross-repo context from sibling repos
             cross_repo_ctx = _gather_cross_repo_context(
                 repos,
@@ -3551,7 +3592,10 @@ def run():
                 dependencies=dependencies,
             )
             # Phase 1: Generate plan with retrospective
-            plan, retrospective, empty_reason = plan_repo(cfg, github_slug, repo_path, cross_repo_ctx)
+            plan, retrospective, empty_reason = plan_repo(
+                cfg, github_slug, repo_path, cross_repo_ctx,
+                skip_signals=repo_skip_signals,
+            )
             if plan is None:
                 print(f"  No plan generated for {github_slug}; skipping.")
                 continue
@@ -3568,7 +3612,10 @@ def run():
                 continue
 
             # Phase 2: Post to Telegram and wait for approval
-            plan_text = _format_plan_message(plan, github_slug, sprint_cadence_days)
+            plan_text = _format_plan_message(
+                plan, github_slug, sprint_cadence_days,
+                skip_signals=repo_skip_signals,
+            )
             print(f"\n{plan_text}\n")
 
             action = _create_plan_approval_action(cfg, github_slug, sprint_cadence_days)
