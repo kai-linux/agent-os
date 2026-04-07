@@ -16,6 +16,19 @@
 
 ## Recent Changes
 
+### 2026-04-07 — [task-20260407-100229-sprint-plan-skip-auto-skip-should-write-a-signal-t] (#136 kai-linux/agent-os)
+Implemented skip signal persistence so sprint plan skips (explicit and auto-skip) are recorded to a JSONL store at runtime/metrics/plan_skip_signals.jsonl. The planner reads recent skip signals on next cycle, injects skip history into the LLM prompt to avoid identical compositions, and includes a diff line in the Telegram plan message (e.g., "No change from previous plan" or "Reordered: #96↔#52"). The groomer reads skip signals to apply cadence backoff (halves issue generation after 2+ auto-skips) and anti-repeat penalties (injects explicitly-skipped issue context into the LLM prompt). Penalties decay with a 7-day half-life so issues can resurface.
+
+**Files:** `- orchestrator/skip_signals.py`, `- orchestrator/strategic_planner.py`, `- orchestrator/backlog_groomer.py`, `- orchestrator/paths.py`, `- tests/test_strategic_planner.py`, `- tests/test_backlog_groomer.py`
+
+**Decisions:**
+  - - Extracted skip signal logic to orchestrator/skip_signals.py to avoid circular import between strategic_planner and backlog_groomer
+  - - Used JSONL at runtime/metrics/plan_skip_signals.jsonl consistent with existing metrics pattern (agent_stats.jsonl, review_signals.jsonl)
+  - - Fingerprint is sorted comma-joined issue numbers for stable deduplication
+  - - Explicit skip penalty weight (3.0) is 3x auto-skip weight (1.0) to distinguish signal strength
+  - - Penalty half-life of 7 days matches sprint cadence so issues can resurface after one cycle
+
+
 ### 2026-04-07 — [task-20260407-100318-consume-pr-review-signals-for-task-routing-and-fol] (#96 kai-linux/agent-os)
 Integrated PR review signal extraction into pr_monitor's post-merge flow. When a PR merges, risk assessment signals (coverage gap, risk level, diff size) are recorded to a JSONL log at runtime/metrics/review_signals.jsonl. A query layer identifies flagged signals (coverage gaps, high-risk merges) and a bounded follow-up generator creates deduped GitHub issues for PRs with quality flags, capped at 3 per sprint window.
 
