@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
+import yaml
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -874,6 +875,62 @@ def test_dispatch_item_blocks_publish_task_when_push_not_ready(tmp_path, monkeyp
         "requirements": ["git_commit", "git_push", "push_branch", "open_pr", "publish_changes"],
         "runtime_allow_push": False,
     }
+
+
+def test_skip_push_not_ready_persists_unblock_artifact(tmp_path, monkeypatch):
+    """Push readiness block writes a structured unblock-notes artifact."""
+    monkeypatch.setenv("ORCH_ROOT", str(tmp_path))
+    cfg = {"default_allow_push": False, "github_owner": "owner"}
+    paths = {"INBOX": tmp_path / "inbox"}
+    paths["INBOX"].mkdir()
+    info = {
+        "status_field_id": "status-field",
+        "status_options": {"Blocked": "blocked-option"},
+        "project_id": "project-1",
+    }
+    ready_items = [{
+        "item_id": "item-1",
+        "number": 99,
+        "title": "Push hotfix branch",
+        "body": "Please git push the fix.",
+        "url": "https://github.com/owner/repo/issues/99",
+        "labels": {"ready"},
+        "repo": "owner/repo",
+        "author": "trusted-user",
+        "state": "OPEN",
+    }]
+    repo_to_project = {
+        "owner/repo": (
+            "proj",
+            {"blocked_value": "Blocked"},
+            {"local_repo": "/tmp/repo", "github_repo": "owner/repo"},
+        ),
+    }
+
+    monkeypatch.setattr(gd, "is_trusted", lambda author, _cfg: True)
+    monkeypatch.setattr(gd, "_resolve_issue_dependencies", lambda *args, **kwargs: {"status": "clear"})
+    monkeypatch.setattr(
+        gd,
+        "_check_push_readiness",
+        lambda cfg, repo_cfg: {
+            "ready": False,
+            "failures": [{"code": "allow_push_disabled", "detail": "default_allow_push is false"}],
+        },
+    )
+    monkeypatch.setattr(gd, "add_issue_comment", lambda *a, **kw: None)
+    monkeypatch.setattr(gd, "edit_issue_labels", lambda *a, **kw: None)
+    monkeypatch.setattr(gd, "set_item_status", lambda *a, **kw: None)
+
+    gd._dispatch_item(cfg, paths, "owner", repo_to_project, info, ready_items, {})
+
+    artifact_dir = tmp_path / "runtime" / "unblock_notes"
+    artifacts = list(artifact_dir.glob("dispatch-owner-repo-99.yaml"))
+    assert len(artifacts) == 1
+    data = yaml.safe_load(artifacts[0].read_text())
+    assert data["blocker_code"] == "push_not_ready"
+    assert data["status"] == "blocked"
+    assert "allow_push_disabled" in data["blocking_cause"]
+    assert data["task_id"] == "dispatch-owner-repo-99"
 
 
 def test_dispatch_item_blocks_task_when_agent_fallbacks_are_invalid(tmp_path, monkeypatch):

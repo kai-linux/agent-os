@@ -40,6 +40,7 @@ BLOCKER_CODE_DESCRIPTIONS = {
     "manual_intervention_required": "A human or out-of-band action is required before automation can continue.",
     "fallback_exhausted": "All configured automated fallback attempts were exhausted.",
     "invalid_result_contract": "The worker produced an invalid or missing task outcome contract.",
+    "push_not_ready": "Task requires git publish capability but push-readiness checks failed.",
 }
 VALID_BLOCKER_CODES = set(BLOCKER_CODE_DESCRIPTIONS)
 PROMPT_INSPECTION_BLOCKER_CODES = {"invalid_result_contract"}
