@@ -28,7 +28,7 @@ from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 from pathlib import Path
 
-from orchestrator.paths import load_config, runtime_paths
+from orchestrator.paths import load_config
 from orchestrator.agent_scorer import load_recent_metrics, findings_path as scorer_findings_path
 from orchestrator.gh_project import ensure_labels, query_project, set_item_status, gh
 from orchestrator.objectives import load_repo_objective, format_objective_for_prompt
@@ -45,6 +45,7 @@ from orchestrator.repo_context import (
 )
 from orchestrator.scheduler_state import is_due, record_run, job_lock
 from orchestrator.repo_modes import is_dispatcher_only_repo
+from orchestrator.skip_signals import load_skip_signals, skip_penalty_for_issue as _skip_penalty_for_issue
 from orchestrator.trust import is_trusted
 
 WINDOW_DAYS = 30
@@ -743,6 +744,9 @@ Each object must have:
 --- Currently open issues (for dedup reference) ---
 {open_issues}
 
+--- Recently skipped plan issues (anti-repeat signal) ---
+{skip_signal_context}
+
 Return ONLY the JSON array."""
 
 
@@ -974,6 +978,18 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
         f"generating up to {num_issues} this run"
     )
 
+    # Cadence backoff: if recent plans were auto-skipped (user may be away),
+    # reduce generation volume to avoid filling the backlog with unreviewed work.
+    skip_signals_path = root / "runtime" / "metrics" / "plan_skip_signals.jsonl"
+    repo_skip_signals = load_skip_signals(skip_signals_path, github_slug, max_age_days=14)
+    recent_auto_skips = sum(
+        1 for s in repo_skip_signals if s.get("skip_type") == "auto_skip"
+    )
+    if recent_auto_skips >= 2 and num_issues > 1:
+        reduced = max(1, num_issues // 2)
+        print(f"  Cadence backoff: {recent_auto_skips} recent auto-skips → reducing generation from {num_issues} to {reduced}")
+        num_issues = reduced
+
     if num_issues == 0 and not bootstrap_issues:
         print(f"  Backlog already at target depth ({current_backlog} ≥ {target_depth}); skipping generation.")
         return {"status": "skipped", "created": 0, "skipped": 0, "cleaned": len(cleaned)}
@@ -1025,6 +1041,32 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
         f"- #{i.get('number')}: {i.get('title')}" for i in open_issues[:30]
     ) or "(none)"
 
+    # Build anti-repeat context from explicit skips so the groomer avoids
+    # creating more issues similar to recently-rejected plan items.
+    explicit_skips = [s for s in repo_skip_signals if s.get("skip_type") == "explicit"]
+    if explicit_skips:
+        skipped_issue_nums: set[int] = set()
+        for s in explicit_skips:
+            skipped_issue_nums.update(s.get("issues", []))
+        # Match skipped issue numbers to open issue titles for LLM context
+        skip_lines = []
+        for oi in open_issues:
+            num = oi.get("number")
+            if num in skipped_issue_nums:
+                penalty = _skip_penalty_for_issue(num, repo_skip_signals)
+                skip_lines.append(
+                    f"- #{num}: {oi.get('title', '?')} (skip penalty: {penalty:.1f})"
+                )
+        skip_signal_text = "\n".join(skip_lines) if skip_lines else "(none)"
+        if skip_lines:
+            skip_signal_text += (
+                "\nThese issues were in plans that the operator explicitly skipped. "
+                "Avoid creating new issues that overlap with these topics unless "
+                "context has clearly changed."
+            )
+    else:
+        skip_signal_text = "(none)"
+
     prompt = ANALYSIS_PROMPT.format(
         num_issues=num_issues,
         adoption_min=adoption_min,
@@ -1049,6 +1091,7 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
         scorer_findings=scorer_text,
         completions=completions_text,
         open_issues=open_text,
+        skip_signal_context=skip_signal_text,
     )
 
     # Bootstrap issues consume slots first, but the LLM is still called for any

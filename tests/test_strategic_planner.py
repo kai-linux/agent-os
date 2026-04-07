@@ -64,6 +64,14 @@ from orchestrator.strategic_planner import (
     _format_sprint_report_message,
     _write_sprint_report_artifact,
 )
+from orchestrator.skip_signals import (
+    load_skip_signals,
+    plan_diff_line,
+    plan_fingerprint,
+    record_skip_signal,
+    skip_context_for_prompt,
+    skip_penalty_for_issue,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -1782,3 +1790,178 @@ def test_build_plan_prompt_rubric_fallback_when_empty():
         cross_repo_context="(single repo)",
     )
     assert "no domain rubric defined" in prompt
+
+
+# ---------------------------------------------------------------------------
+# Skip signal store
+# ---------------------------------------------------------------------------
+
+def test_record_and_load_skip_signals(tmp_path):
+    signals_path = tmp_path / "plan_skip_signals.jsonl"
+    plan = [
+        {"issue_number": 92, "title": "A"},
+        {"issue_number": 46, "title": "B"},
+        {"issue_number": 96, "title": "C"},
+    ]
+    record_skip_signal(signals_path, "owner/repo", plan, "explicit")
+    record_skip_signal(signals_path, "owner/repo", plan, "auto_skip")
+    record_skip_signal(signals_path, "other/repo", plan, "explicit")
+
+    signals = load_skip_signals(signals_path, "owner/repo")
+    assert len(signals) == 2
+    assert signals[0]["skip_type"] == "explicit"
+    assert signals[1]["skip_type"] == "auto_skip"
+    assert signals[0]["fingerprint"] == "46,92,96"
+    assert sorted(signals[0]["issues"]) == [46, 92, 96]
+
+
+def test_load_skip_signals_filters_old(tmp_path):
+    signals_path = tmp_path / "plan_skip_signals.jsonl"
+    old_ts = (datetime.now(timezone.utc) - timedelta(days=60)).isoformat()
+    record = json.dumps({
+        "timestamp": old_ts,
+        "repo": "owner/repo",
+        "skip_type": "explicit",
+        "fingerprint": "1,2",
+        "issues": [1, 2],
+    })
+    signals_path.write_text(record + "\n")
+    assert load_skip_signals(signals_path, "owner/repo", max_age_days=30) == []
+
+
+def test_plan_fingerprint_is_sorted():
+    plan = [
+        {"issue_number": 96},
+        {"issue_number": 52},
+        {"issue_number": 88},
+    ]
+    assert plan_fingerprint(plan) == "52,88,96"
+
+
+def test_skip_penalty_decays():
+    now = datetime.now(timezone.utc)
+    recent_signal = {
+        "timestamp": now.isoformat(),
+        "issues": [42],
+        "skip_type": "explicit",
+    }
+    old_signal = {
+        "timestamp": (now - timedelta(days=14)).isoformat(),
+        "issues": [42],
+        "skip_type": "explicit",
+    }
+    recent_penalty = skip_penalty_for_issue(42, [recent_signal])
+    old_penalty = skip_penalty_for_issue(42, [old_signal])
+    assert recent_penalty > old_penalty
+    # Issue not in signal gets 0
+    assert skip_penalty_for_issue(99, [recent_signal]) == 0.0
+
+
+def test_explicit_skip_stronger_than_auto():
+    now = datetime.now(timezone.utc).isoformat()
+    explicit = {"timestamp": now, "issues": [42], "skip_type": "explicit"}
+    auto = {"timestamp": now, "issues": [42], "skip_type": "auto_skip"}
+    assert skip_penalty_for_issue(42, [explicit]) > skip_penalty_for_issue(42, [auto])
+
+
+def testplan_diff_line_no_change():
+    plan = [{"issue_number": 1}, {"issue_number": 2}]
+    signals = [{"fingerprint": "1,2", "issues": [1, 2]}]
+    assert plan_diff_line(plan, signals) == "No change from previous skipped plan"
+
+
+def testplan_diff_line_reordered():
+    plan = [{"issue_number": 2}, {"issue_number": 1}]
+    signals = [{"fingerprint": "1,2", "issues": [1, 2]}]
+    result = plan_diff_line(plan, signals)
+    assert "Reordered" in result
+
+
+def testplan_diff_line_changed():
+    plan = [{"issue_number": 1}, {"issue_number": 3}]
+    signals = [{"fingerprint": "1,2", "issues": [1, 2]}]
+    result = plan_diff_line(plan, signals)
+    assert "+#3" in result
+    assert "-#2" in result
+
+
+def testplan_diff_line_empty_signals():
+    plan = [{"issue_number": 1}]
+    assert plan_diff_line(plan, []) == ""
+
+
+def testskip_context_for_prompt_groups_by_fingerprint():
+    signals = [
+        {"fingerprint": "1,2", "issues": [1, 2], "skip_type": "explicit"},
+        {"fingerprint": "1,2", "issues": [1, 2], "skip_type": "auto_skip"},
+        {"fingerprint": "3,4", "issues": [3, 4], "skip_type": "explicit"},
+    ]
+    ctx = skip_context_for_prompt(signals)
+    assert "1x explicit skip" in ctx
+    assert "1x auto-skip" in ctx
+    assert "#3" in ctx
+    assert "avoid repeating" in ctx.lower() or "different issues" in ctx.lower()
+
+
+def test_skip_context_empty_for_no_signals():
+    assert skip_context_for_prompt([]) == ""
+
+
+def test_format_plan_message_includes_diff_line():
+    plan = [{"issue_number": 1, "priority": "prio:normal", "action": "promote",
+             "task_type": "implementation", "title": "Test", "rationale": "reason"}]
+    signals = [{"fingerprint": "1", "issues": [1]}]
+    msg = _format_plan_message(plan, "owner/repo", 7.0, skip_signals=signals)
+    assert "No change from previous skipped plan" in msg
+
+
+def test_build_plan_prompt_includes_skip_context():
+    ctx = "Recent skip history"
+    prompt = _build_plan_prompt(
+        plan_size=5,
+        strategy_context="strategy",
+        readme_goal="goal",
+        objectives_context="objectives",
+        north_star="north star",
+        planning_principles="principles",
+        evaluation_rubric="",
+        codebase_context="codebase",
+        production_feedback_context="signals",
+        product_inspection_context="(product inspection disabled)",
+        outcome_context="outcomes",
+        research_context="research",
+        retrospective="retro",
+        git_log="abc123 commit",
+        counts={"open": 1, "closed": 2, "blocked": 0},
+        metrics_summary="metrics",
+        backlog_text="- #1: Task",
+        open_issues="(none)",
+        cross_repo_context="(single repo)",
+        skip_context=ctx,
+    )
+    assert "Recent skip history" in prompt
+
+
+def test_build_plan_prompt_default_skip_context():
+    prompt = _build_plan_prompt(
+        plan_size=5,
+        strategy_context="strategy",
+        readme_goal="goal",
+        objectives_context="objectives",
+        north_star="north star",
+        planning_principles="principles",
+        evaluation_rubric="",
+        codebase_context="codebase",
+        production_feedback_context="signals",
+        product_inspection_context="(product inspection disabled)",
+        outcome_context="outcomes",
+        research_context="research",
+        retrospective="retro",
+        git_log="abc123 commit",
+        counts={"open": 1, "closed": 2, "blocked": 0},
+        metrics_summary="metrics",
+        backlog_text="- #1: Task",
+        open_issues="(none)",
+        cross_repo_context="(single repo)",
+    )
+    assert "no recent skip history" in prompt
