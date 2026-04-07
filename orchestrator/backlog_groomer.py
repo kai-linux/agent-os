@@ -2,9 +2,16 @@
 
 Reviews each repository's open issues, recent task completions, CODEBASE.md
 Known Issues section, and risk flags from completed tasks to identify gaps
-and technical debt.  Creates 3-5 targeted, scoped improvement tasks per repo
-with priorities assigned. Issues land in Backlog for the strategic planner
-to review and promote to Ready.
+and technical debt. Generates new improvement issues into Backlog so the
+strategic planner always has roughly twice the next sprint's worth of
+candidates to choose from.
+
+Sizing is target-driven, not data-driven: each run computes
+``target_depth = plan_size * 2`` (configurable) and only generates issues to
+refill the gap, capped to ``MAX_ISSUES_PER_RUN`` per cycle. The groomer also
+runs at half the planner cadence by default so the backlog refills before the
+next sprint plan, and reserves at least 40% of generated slots for
+adoption-facing work.
 
 Cron can invoke this frequently; per-repo cadence and dormancy are enforced in
 code.
@@ -13,6 +20,7 @@ from __future__ import annotations
 
 import glob as _glob_mod
 import json
+import math
 import os
 import re
 import subprocess
@@ -41,25 +49,93 @@ from orchestrator.trust import is_trusted
 
 WINDOW_DAYS = 30
 STALE_DAYS = 30
-MAX_ISSUES_PER_REPO = 5
+MAX_ISSUES_PER_RUN = 5  # Per-run generation budget (not steady-state backlog depth)
+DEFAULT_BACKLOG_DEPTH_MULTIPLIER = 2  # Target backlog = plan_size * multiplier
+DEFAULT_PLAN_SIZE = 5
+ADOPTION_BALANCE_FRACTION = 0.4  # At least 40% of generated issues must be adoption-facing
 ANALYSIS_MODEL = "haiku"
 SIMILARITY_THRESHOLD = 0.75  # Title similarity threshold for dedup
 PR_NUMBER_RE = re.compile(r"\bPR\s*#(\d+)\b|/pull/(\d+)\b", re.IGNORECASE)
+_BACKLOG_EXCLUDE_LABELS = {"in-progress", "agent-dispatched", "ready", "done", "blocked"}
+
+
+def _repo_plan_size(cfg: dict, github_slug: str) -> int:
+    """Return the configured planner plan_size for a repo (mirrors strategic_planner)."""
+    plan_size = cfg.get("plan_size", DEFAULT_PLAN_SIZE)
+    for pv in cfg.get("github_projects", {}).values():
+        if not isinstance(pv, dict):
+            continue
+        for rc in pv.get("repos", []):
+            if rc.get("github_repo") == github_slug:
+                return int(rc.get("plan_size", plan_size))
+    return int(plan_size)
+
+
+def _repo_backlog_depth_target(cfg: dict, github_slug: str) -> int:
+    """Return the target number of open backlog issues for a repo.
+
+    Defaults to ``plan_size * DEFAULT_BACKLOG_DEPTH_MULTIPLIER`` so the planner
+    always has roughly twice the next sprint's worth of candidates to choose
+    from. Overridable per repo via ``target_backlog_depth`` (absolute) or
+    ``backlog_depth_multiplier`` (relative to plan_size).
+    """
+    multiplier = cfg.get("backlog_depth_multiplier", DEFAULT_BACKLOG_DEPTH_MULTIPLIER)
+    for pv in cfg.get("github_projects", {}).values():
+        if not isinstance(pv, dict):
+            continue
+        for rc in pv.get("repos", []):
+            if rc.get("github_repo") == github_slug:
+                if "target_backlog_depth" in rc:
+                    return max(0, int(rc["target_backlog_depth"]))
+                multiplier = rc.get("backlog_depth_multiplier", multiplier)
+                break
+    if "target_backlog_depth" in cfg:
+        return max(0, int(cfg["target_backlog_depth"]))
+    return max(0, int(_repo_plan_size(cfg, github_slug) * float(multiplier)))
+
+
+def _count_backlog_issues(open_issues: list[dict]) -> int:
+    """Count open issues that are still candidates for promotion.
+
+    Mirrors ``strategic_planner._backlog_issues``: excludes anything already
+    ready/in-progress/done/blocked. Used to decide how much new work the
+    groomer should generate this cycle.
+    """
+    n = 0
+    for i in open_issues:
+        names = {(l.get("name") or "").lower() for l in i.get("labels", [])}
+        if names & _BACKLOG_EXCLUDE_LABELS:
+            continue
+        n += 1
+    return n
 
 
 def _repo_groomer_cadence_days(cfg: dict, github_slug: str) -> float:
-    """Return cadence in days for backlog grooming, checking per-repo overrides."""
-    cadence = cfg.get("groomer_cadence_days", cfg.get("sprint_cadence_days", 7))
+    """Return cadence in days for backlog grooming.
+
+    Defaults to **half** the planner cadence so the groomer runs ahead of the
+    planner and can refill the backlog before the next sprint plan. Explicit
+    ``groomer_cadence_days`` overrides this at top level, per project, or per
+    repo. ``0`` means dormant.
+    """
+    top_explicit = cfg.get("groomer_cadence_days")
+    top_sprint = float(cfg.get("sprint_cadence_days", 7))
 
     for pv in cfg.get("github_projects", {}).values():
         if not isinstance(pv, dict):
             continue
         for rc in pv.get("repos", []):
             if rc.get("github_repo") == github_slug:
-                cadence = rc.get("groomer_cadence_days", rc.get("sprint_cadence_days", cadence))
-                return float(cadence)
+                if "groomer_cadence_days" in rc:
+                    return float(rc["groomer_cadence_days"])
+                if top_explicit is not None:
+                    return float(top_explicit)
+                sprint = float(rc.get("sprint_cadence_days", top_sprint))
+                return sprint * 0.5
 
-    return float(cadence)
+    if top_explicit is not None:
+        return float(top_explicit)
+    return top_sprint * 0.5
 
 
 # ---------------------------------------------------------------------------
@@ -561,6 +637,11 @@ def _open_issue_exists(repo: str, title: str) -> bool:
 ANALYSIS_PROMPT = """You are an AI agent system analyst performing backlog grooming.
 Review the data below and create exactly {num_issues} targeted, atomic improvement tasks.
 
+Backlog state: {current_backlog} open backlog issues vs target depth {target_depth}.
+You are refilling the backlog so the next sprint planner has at least 2x the
+sprint plan size to choose from. Quality over volume — do not pad with
+duplicates or low-value churn.
+
 IMPORTANT: Your job is to create a BALANCED backlog that advances the repo's
 stated objectives — not just internal infrastructure. Read the objectives and
 strategy carefully. If the objective includes external metrics (e.g. GitHub
@@ -578,9 +659,14 @@ Focus on:
 7. Repository foundation gaps (missing planning/research/ops scaffolding) — create enabling tasks
 8. Backlog pressure or blocked-work patterns visible in open issues — create high-leverage backlog items
 
-Balance rule: At least 1 out of every 5 issues MUST target adoption, credibility,
-activation, or external-facing improvement — not internal infrastructure. If the
-objectives include external metrics, ensure the backlog contains work that can move them.
+Balance rule: At least {adoption_min} of the {num_issues} issues you generate
+this run (≥40%) MUST target adoption, credibility, activation, demos,
+quickstart, README, public proof, or external-facing improvement — not internal
+infrastructure. This is a hard floor, not a target. If the objectives include
+external metrics (stars, forks, user growth), the floor applies regardless of
+how many internal signals are present in the data below. Use the
+"Adoption and credibility signals" section to ground these issues in concrete
+gaps (low star/fork counts, missing demo, weak README, friction in quickstart).
 
 Rules:
 - Each task must be atomic and clearly scoped (one specific thing to fix/improve)
@@ -875,17 +961,25 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
         print("  No data to analyze, skipping.")
         return {"status": "no-data", "created": 0, "skipped": 0, "cleaned": len(cleaned)}
 
-    # 5. Determine how many issues to propose (3-5, based on data richness)
-    data_signals = (
-        len(stale)
-        + len(known_issues)
-        + len(risk_flags)
-        + len(blocked_tasks)
-        + len(blocked_issues)
-        + len(repo_gaps)
-        + len(bootstrap_issues)
+    # 5. Determine how many issues to propose based on backlog depth target.
+    # Goal: keep open backlog at ~plan_size * 2 so the planner always has
+    # twice the next sprint's worth of candidates to choose from.
+    plan_size = _repo_plan_size(cfg, github_slug)
+    target_depth = _repo_backlog_depth_target(cfg, github_slug)
+    current_backlog = _count_backlog_issues(open_issues)
+    needed = max(0, target_depth - current_backlog)
+    num_issues = min(MAX_ISSUES_PER_RUN, needed)
+    print(
+        f"  Backlog depth: {current_backlog}/{target_depth} (plan_size={plan_size}); "
+        f"generating up to {num_issues} this run"
     )
-    num_issues = min(MAX_ISSUES_PER_REPO, max(3, data_signals))
+
+    if num_issues == 0 and not bootstrap_issues:
+        print(f"  Backlog already at target depth ({current_backlog} ≥ {target_depth}); skipping generation.")
+        return {"status": "skipped", "created": 0, "skipped": 0, "cleaned": len(cleaned)}
+
+    # Reserve at least 40% of generated slots for adoption-facing work.
+    adoption_min = math.ceil(num_issues * ADOPTION_BALANCE_FRACTION) if num_issues > 0 else 0
 
     # 6. Build prompt
     stale_text = "\n".join(
@@ -933,6 +1027,9 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
 
     prompt = ANALYSIS_PROMPT.format(
         num_issues=num_issues,
+        adoption_min=adoption_min,
+        current_backlog=current_backlog,
+        target_depth=target_depth,
         stale_issues=stale_text,
         known_issues=known_text,
         risk_flags=risk_text,
@@ -954,9 +1051,11 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
         open_issues=open_text,
     )
 
-    proposed: list[dict] = list(bootstrap_issues[:MAX_ISSUES_PER_REPO])
-
-    remaining_slots = 0 if bootstrap_issues else max(MAX_ISSUES_PER_REPO - len(proposed), 0)
+    # Bootstrap issues consume slots first, but the LLM is still called for any
+    # remaining slots so adoption-facing issues are not silenced when bootstrap
+    # docs need creating.
+    proposed: list[dict] = list(bootstrap_issues[:num_issues])
+    remaining_slots = max(num_issues - len(proposed), 0)
     if remaining_slots > 0:
         # 7. Call LLM for the remaining slots
         try:
@@ -990,7 +1089,7 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
     created_urls: list[str] = []
     skipped: list[str] = []
 
-    for issue in proposed[:MAX_ISSUES_PER_REPO]:
+    for issue in proposed[:MAX_ISSUES_PER_RUN]:
         title = (issue.get("title") or "").strip()
         labels = [str(l) for l in issue.get("labels", []) if l]
         if "bot-generated" not in labels:

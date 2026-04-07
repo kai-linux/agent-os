@@ -41,7 +41,9 @@ test_timeout_minutes: 5             # Timeout for test commands (default: 5)
 plan_size: 5                         # Number of tasks per sprint plan (default: 5)
 sprint_cadence_days: 7               # Planner cadence + retrospective window in days; supports fractions, 0=dormant; actual run frequency is still capped by cron frequency
 planner_allow_early_refresh: true    # If true, planner may refresh early when the current sprint empties before the next cadence tick
-groomer_cadence_days: 7              # Backlog grooming cadence in days; supports fractions, 0=dormant; actual run frequency is still capped by cron frequency
+groomer_cadence_days: 7              # Backlog grooming cadence in days; supports fractions, 0=dormant; if unset, defaults to sprint_cadence_days * 0.5 so the groomer runs ahead of the planner
+backlog_depth_multiplier: 2          # Target open backlog = plan_size * multiplier (default: 2). The groomer refills toward this target each run instead of always emitting 3-5 issues.
+# target_backlog_depth: 12           # Optional absolute override for the target backlog depth; takes precedence over backlog_depth_multiplier
 
 priority_weights:                   # Score added per priority label (default: prio:normal=10)
   prio:high: 30
