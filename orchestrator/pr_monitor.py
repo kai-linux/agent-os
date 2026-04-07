@@ -29,6 +29,7 @@ from orchestrator.ci_artifact_validator import (
 from orchestrator.pr_risk_assessment import assess_pr_risk, RiskAssessment
 from orchestrator.privacy import redact_text
 from orchestrator.repo_modes import is_dispatcher_only_repo
+from orchestrator.review_signals import record_review_signal, generate_followup_issues
 
 MAX_MERGE_ATTEMPTS = 3
 STATE_FILE_NAME = "pr_monitor_state.json"
@@ -705,6 +706,21 @@ def _cleanup_merged_pr_issues(cfg: dict, repo: str, pr: dict):
             },
         )
 
+    # Record review signals for the merged PR
+    try:
+        risk = assess_pr_risk(repo, pr_number)
+        record_review_signal(
+            cfg,
+            repo=repo,
+            pr_number=pr_number,
+            task_id=task_id,
+            issue_number=issue_number,
+            risk=risk,
+            branch=pr.get("headRefName"),
+        )
+    except Exception as e:
+        print(f"Warning: failed to record review signal for PR #{pr_number}: {e}")
+
     if issue_number:
         _mark_issue_done(
             cfg,
@@ -1274,6 +1290,16 @@ def monitor_prs():
                 _purge_stale_inbox_tasks(paths, repo, pr)
             else:
                 print(f"  PR #{pr_number}: merge failed")
+
+
+    # Generate follow-up issues from review signals across all repos
+    for repo in sorted(repos):
+        try:
+            created = generate_followup_issues(cfg, repo)
+            if created:
+                print(f"{repo}: created {len(created)} review follow-up(s)")
+        except Exception as e:
+            print(f"Warning: review follow-up generation failed for {repo}: {e}")
 
 
 if __name__ == "__main__":
