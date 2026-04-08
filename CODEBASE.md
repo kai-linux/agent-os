@@ -16,6 +16,18 @@
 
 ## Recent Changes
 
+### 2026-04-08 — [task-20260408-150317-rca-and-fix-for-pr-98-cascading-ci-failure-pattern] (#148 kai-linux/agent-os)
+Root cause identified and fixed for the PR-98 cascading CI failure pattern. The CI completion verification gate (`verify_pr_ci_debug_completion`) was extracting failed job names from markdown prose in issue bodies, which got lost when follow-up tasks reformatted the body text. This caused `missing_failed_job_context` downgrades on successful fixes, spawning 8+ cascading debug tasks. Fix: persist `failed_checks` as structured frontmatter metadata at dispatch time, read it in the verification gate before falling back to body parsing, and propagate it through follow-up task creation.
+
+**Files:** `- orchestrator/queue.py`, `- orchestrator/github_dispatcher.py`, `- tests/test_queue.py`, `- CODEBASE.md`
+
+**Decisions:**
+  - - Persisted failed_checks as structured task frontmatter rather than relying on markdown prose parsing, because markdown survives zero reformatting guarantees across follow-up handoffs
+  - - Used meta-first fallback pattern (read meta["failed_checks"], fall back to body parsing) for backward compatibility with existing tasks that lack the field
+  - - Propagated failed_checks in follow-up task creation to prevent metadata loss across the full debug task chain
+  - - Extracted check names from issue body at dispatch time using the existing _extract_ci_checks_from_body helper
+
+
 ### 2026-04-08 — [task-20260408-150222-publish-first-external-adoption-proof-managed-repo] (#147 kai-linux/agent-os)
 Created a public case study (docs/case-study-agent-os.md) documenting agent-os managing its own repository over 23 days with auditable before/after metrics (79 issues closed, 59 PRs merged, 275 commits, 55.7% first-attempt success rate). Added a "Built with agent-os" section to README with a metrics table and link to the case study. PR #152 opened.
 
