@@ -29,14 +29,28 @@ Sprint selection should balance:
 
 
 
+
 <!-- auto-focus-areas -->
-- Close blocked task recovery loops with automation and escalation
-- Build production evidence infrastructure for closed-loop optimization
-- Improve external adoption signals and credibility (README, demo, metrics)
-- Harden CI reliability and cascade-prevention for debug automation
-- Strengthen agent health checks and adaptive routing decisions
+- Adoption credibility and external visibility (GitHub metrics, README, demo, case studies)
+- Operational reliability through control-plane hardening (CI cascades, agent routing, deepseek auth fixes)
+- Evidence-driven feedback loops and closed-loop outcome tracking (production metrics, attribution, blocker codes)
+- Blocked task recovery automation (escalation, auto-rerun, unblock notes)
+- Self-directed optimization through adaptive routing and signal persistence
 
 ## Sprint History
+
+### Sprint 2026-04-08
+
+**Retrospective:**
+(no activity in the last 0.5 days)
+
+**Plan:**
+- [prio:high] Improve GitHub discoverability with trending signals and SEO: Product inspection flagged weak adoption signals (2 stars, 0 forks) despite strong content — discoverability is the highest-leverage adoption blocker and directly targets the 29%-weighted GitHub stars metric.
+- [prio:high] Publish first external adoption proof: managed repo case study: The rubric's Adoption & Credibility dimension requires visible public proof of capability — a verifiable case study is the strongest credibility signal for technical founders evaluating whether to adopt.
+- [prio:high] RCA and fix for PR-98 cascading CI failure pattern: The PR-98 cascade is the most visible repeated operational failure — 6+ wasted tasks directly drag down the 29%-weighted task success rate and block reliability gains.
+- [prio:normal] Add GitHub adoption metrics to PRODUCTION_FEEDBACK.md: All recent outcome evidence is inconclusive because external metrics are not tracked in feedback — closing this measurement gap is prerequisite to evidence-driven adoption work.
+- [prio:normal] Implement adaptive agent health checks in task dispatcher: Production metrics show deepseek and none agents at 0% success — routing around them reduces the 14% escalation rate and improves the task success rate metric without requiring agent-side fixes.
+
 
 ### Sprint 2026-04-07
 
