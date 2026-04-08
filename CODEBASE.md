@@ -12,7 +12,17 @@
 
 ## Known Issues / Gotchas
 
-(Agents append anything surprising or that blocked them.)
+### PR-98 Cascading CI Failure Pattern (RCA — 2026-04-08)
+
+**Root cause:** The CI completion verification gate (`verify_pr_ci_debug_completion` in `queue.py`) extracted failed CI job names from markdown prose in issue bodies using `_extract_ci_failed_checks()`. When follow-up tasks were created, issue body reformatting stripped the `- **jobname**: \`...\`` lines, causing `_extract_ci_failed_checks` to return an empty list. The gate then downgraded otherwise-successful tasks to `partial` with `CI_RERUN_REASON=missing_failed_job_context`, which spawned new follow-up debug tasks that repeated the cycle.
+
+**Error signature:** `CI remediation completion gate downgraded task to partial (missing_failed_job_context)` in queue logs, despite agent's local tests passing.
+
+**Reproduction:** Create a CI debug task → agent fixes the issue → follow-up reformats the issue body → `_extract_ci_failed_checks(body)` returns `[]` → task marked partial → new follow-up spawned → repeat.
+
+**Fix applied:** Persist `failed_checks` as a structured list in task frontmatter at dispatch time (`github_dispatcher.py:build_mailbox_task`). The verification gate now reads `meta["failed_checks"]` first, falling back to body parsing only when the structured field is absent. Follow-up task creation (`queue.py:create_followup_task`) propagates the `failed_checks` field from the original task's frontmatter.
+
+**Impact:** 8+ cascading debug tasks from PR-98 (issues #99, #102–106, #109, #111, #117); similar pattern on PR-119 (#120). Fix prevents metadata loss across all future CI debug follow-up chains.
 
 ## Recent Changes
 

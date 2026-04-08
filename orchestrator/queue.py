@@ -381,7 +381,13 @@ def verify_pr_ci_debug_completion(
 
     repo = str(meta.get("github_repo", "")).strip()
     branch = str(meta.get("branch", "")).strip()
-    failed_checks = _extract_ci_failed_checks(body)
+    # Prefer structured metadata over markdown parsing to prevent cascading
+    # failures when follow-up reformatting strips the check names (PR-98 RCA).
+    meta_checks = meta.get("failed_checks")
+    if isinstance(meta_checks, list) and meta_checks:
+        failed_checks = [str(c) for c in meta_checks if str(c).strip()]
+    else:
+        failed_checks = _extract_ci_failed_checks(body)
     if not repo or not branch:
         return _ci_completion_partial_result(
             result,
@@ -1846,6 +1852,9 @@ def create_followup_task(
         "github_issue_url": original_meta.get("github_issue_url"),
         "prompt_snapshot_path": str(Path(original_meta.get("prompt_snapshot_path", inbox.parent.parent / "prompts" / f"{new_task_id}.txt")).parent / f"{new_task_id}.txt"),
     }
+    # Propagate structured failed_checks so CI verification survives follow-up reformatting.
+    if original_meta.get("failed_checks"):
+        frontmatter["failed_checks"] = original_meta["failed_checks"]
 
     frontmatter_text = yaml.safe_dump(frontmatter, sort_keys=False).strip()
 
