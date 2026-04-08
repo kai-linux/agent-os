@@ -352,6 +352,13 @@ def build_mailbox_task(cfg: dict, project_key: str, repo_cfg: dict, issue: dict)
         "outcome_check_ids": parsed.get("outcome_checks", []),
     }
 
+    # Persist failed CI check names as structured metadata so the CI
+    # verification gate survives follow-up body reformatting (PR-98 RCA).
+    if task_type == "debugging":
+        ci_checks = _extract_ci_checks_from_body(body_text)
+        if ci_checks:
+            frontmatter["failed_checks"] = [c.get("name", "") for c in ci_checks if c.get("name")]
+
     frontmatter_text = yaml.safe_dump(frontmatter, sort_keys=False).strip()
 
     body = f"""---

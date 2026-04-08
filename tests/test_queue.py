@@ -707,6 +707,59 @@ def test_verify_pr_ci_debug_completion_accepts_green_rerun_for_prior_failed_job(
     assert result is original
 
 
+def test_verify_pr_ci_debug_completion_uses_meta_failed_checks_over_body(monkeypatch):
+    """Structured failed_checks in meta prevents cascading failures when body
+    markdown is reformatted and check names are lost (PR-98 RCA fix)."""
+    def fake_gh_json(args):
+        if "actions/runs?" in str(args):
+            return {
+                "workflow_runs": [
+                    {
+                        "id": 300,
+                        "head_branch": "agent/task-98",
+                        "head_sha": "def456",
+                        "status": "completed",
+                        "created_at": "2026-03-31T10:15:00Z",
+                    }
+                ]
+            }
+        if "actions/runs/300/jobs" in str(args):
+            return {
+                "jobs": [
+                    {"name": "pytest", "conclusion": "success"},
+                ]
+            }
+        raise AssertionError(args)
+
+    monkeypatch.setattr("orchestrator.queue.gh_json", fake_gh_json)
+    original = {
+        "status": "complete",
+        "summary": "fixed",
+        "blockers": ["- None"],
+        "decisions": ["- Kept diff minimal."],
+    }
+
+    # Body has NO failed check markdown — simulates follow-up reformatting.
+    # Meta carries structured failed_checks from frontmatter.
+    result = verify_pr_ci_debug_completion(
+        {
+            "task_type": "debugging",
+            "github_repo": "owner/repo",
+            "github_issue_title": "Fix CI failure on PR #98",
+            "branch": "agent/task-98",
+            "failed_checks": ["pytest"],
+        },
+        "Follow-up task body with no markdown check lines.",
+        original,
+        commit_hash="def456",
+        task_started_at=datetime(2026, 3, 31, 10, 0, tzinfo=timezone.utc),
+    )
+
+    assert result is original, (
+        "Should use meta.failed_checks and pass verification, not downgrade to partial"
+    )
+
+
 def test_parse_agent_result_manual_steps():
     with tempfile.TemporaryDirectory() as d:
         tmp = Path(d)
