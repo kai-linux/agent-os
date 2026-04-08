@@ -16,6 +16,18 @@
 
 ## Recent Changes
 
+### 2026-04-08 — [task-20260408-150222-publish-first-external-adoption-proof-managed-repo] (#147 kai-linux/agent-os)
+Created a public case study (docs/case-study-agent-os.md) documenting agent-os managing its own repository over 23 days with auditable before/after metrics (79 issues closed, 59 PRs merged, 275 commits, 55.7% first-attempt success rate). Added a "Built with agent-os" section to README with a metrics table and link to the case study. PR #152 opened.
+
+**Files:** `- docs/case-study-agent-os.md`, `- README.md`
+
+**Decisions:**
+  - - Used agent-os itself as the managed repo case study since it is the primary managed repository with 23 days of operational data
+  - - Included an ASCII bar chart rather than an image to keep the case study self-contained and renderable on GitHub without external dependencies
+  - - All metrics sourced from public GitHub data (gh issue list, gh pr list, git log) and runtime/metrics/agent_stats.jsonl for task success rate
+  - - Kept the README addition concise (metrics table + 3 sentences + link) to preserve the scannable 1-page pitch format
+
+
 ### 2026-04-08 — [task-20260408-150119-improve-github-discoverability-with-trending-signa] (#146 kai-linux/agent-os)
 Added CI status, forks, issues, and license badges to README and set missing GitHub topics (multi-agent, automation) via the gh API. All five requested topics are now present on the repo. PR #151 opened.
 
