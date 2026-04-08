@@ -756,6 +756,50 @@ Improve dispatch validation.
         gd.build_mailbox_task(cfg, "proj", repo_cfg, issue)
 
 
+def test_build_mailbox_task_skips_agent_below_adaptive_threshold(tmp_path, monkeypatch):
+    """Agents with <25% success over 7 days are skipped by the adaptive gate."""
+    metrics_dir = tmp_path / "runtime" / "metrics"
+    metrics_dir.mkdir(parents=True)
+    now = gd.datetime.now().isoformat()
+    # deepseek: 0% (all blocked), claude: 100%
+    records = [
+        {"timestamp": now, "agent": "deepseek", "status": "blocked"},
+        {"timestamp": now, "agent": "deepseek", "status": "blocked"},
+        {"timestamp": now, "agent": "claude", "status": "complete"},
+        {"timestamp": now, "agent": "claude", "status": "complete"},
+    ]
+    (metrics_dir / "agent_stats.jsonl").write_text(
+        "".join(json.dumps(record) + "\n" for record in records),
+        encoding="utf-8",
+    )
+
+    cfg = {
+        "root_dir": str(tmp_path),
+        "default_agent": "auto",
+        "default_task_type": "implementation",
+        "default_base_branch": "main",
+        "default_allow_push": True,
+        "default_max_attempts": 4,
+        "max_runtime_minutes": 40,
+        "formatter_model": None,
+        "agent_fallbacks": {"implementation": ["deepseek", "claude"]},
+    }
+    repo_cfg = {"local_repo": "/tmp/repo", "github_repo": "owner/repo"}
+    issue = {
+        "number": 99,
+        "title": "Test adaptive gate",
+        "url": "https://github.com/owner/repo/issues/99",
+        "labels": [],
+        "body": "## Goal\nTest.\n",
+    }
+
+    monkeypatch.setattr(gd, "format_task", lambda title, body, model=None: None)
+
+    task_id, task_md = gd.build_mailbox_task(cfg, "proj", repo_cfg, issue)
+    # deepseek should be skipped, claude assigned
+    assert "agent: claude" in task_md or "agent: auto" in task_md
+
+
 def test_check_push_readiness_reports_missing_origin_remote(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()

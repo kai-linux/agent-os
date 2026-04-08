@@ -202,6 +202,35 @@ def test_get_agent_chain_allows_agents_without_recent_metrics(tmp_path):
     assert chain == ["gemini", "claude"]
 
 
+def test_get_agent_chain_skips_agents_below_adaptive_health_threshold(tmp_path):
+    """Agents with <25% success over 7 days are skipped by the adaptive gate."""
+    metrics_dir = tmp_path / "runtime" / "metrics"
+    metrics_dir.mkdir(parents=True)
+    now = datetime.now(timezone.utc).isoformat()
+    # deepseek: 0% success (all blocked), claude: 100% success
+    records = [
+        {"timestamp": now, "agent": "deepseek", "status": "blocked"},
+        {"timestamp": now, "agent": "deepseek", "status": "blocked"},
+        {"timestamp": now, "agent": "claude", "status": "complete"},
+        {"timestamp": now, "agent": "claude", "status": "complete"},
+    ]
+    (metrics_dir / "agent_stats.jsonl").write_text(
+        "".join(json.dumps(record) + "\n" for record in records),
+        encoding="utf-8",
+    )
+
+    from unittest.mock import patch
+
+    with patch("orchestrator.queue.agent_available", return_value=(True, None)):
+        chain = get_agent_chain(
+            {"task_type": "implementation"},
+            {**_cfg({"implementation": ["deepseek", "claude"]}), "root_dir": str(tmp_path)},
+        )
+
+    assert "deepseek" not in chain
+    assert "claude" in chain
+
+
 def test_get_agent_chain_prefers_repo_specific_fallbacks():
     cfg = {
         **_cfg(

@@ -23,7 +23,7 @@ from orchestrator.codebase_memory import read_codebase_context, update_codebase_
 from orchestrator.gh_project import add_issue_comment, gh, gh_json, query_project, set_item_status
 from orchestrator.repo_context import build_execution_context
 from orchestrator.repo_modes import is_dispatcher_only_repo
-from orchestrator.agent_scorer import filter_healthy_agents
+from orchestrator.agent_scorer import filter_healthy_agents, ADAPTIVE_HEALTH_WINDOW_DAYS, ADAPTIVE_HEALTH_THRESHOLD
 
 
 TELEGRAM_ACTION_TTL_HOURS = 48
@@ -1761,6 +1761,10 @@ def get_agent_chain(meta: dict, cfg: dict) -> list[str]:
         if available:
             filtered.append(agent)
     metrics_file = Path(cfg.get("root_dir", ".")).expanduser() / "runtime" / "metrics" / "agent_stats.jsonl"
+    # Adaptive gate: skip agents with <25% success rate over 7 days
+    filtered, adaptive_skipped = filter_healthy_agents(filtered, metrics_file, threshold=ADAPTIVE_HEALTH_THRESHOLD, window_days=ADAPTIVE_HEALTH_WINDOW_DAYS)
+    for agent, stats in adaptive_skipped.items():
+        print(f"agent={agent} skipped: {round(stats['rate'] * 100)}% success rate (7d adaptive health gate)")
     healthy, _skipped = filter_healthy_agents(filtered, metrics_file)
     return healthy
 
