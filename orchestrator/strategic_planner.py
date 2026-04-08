@@ -1398,6 +1398,183 @@ def _format_count_items(counts: dict[str, int], *, empty: str, limit: int = 3) -
     return [f"{name}: {count}" for name, count in items[:limit]]
 
 
+def _fetch_github_adoption_metrics(github_slug: str) -> dict:
+    """Fetch current star and fork counts via public GitHub API (gh cli)."""
+    try:
+        raw = subprocess.run(
+            ["gh", "api", f"repos/{github_slug}", "--jq", ".stargazers_count,.forks_count"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if raw.returncode == 0:
+            parts = raw.stdout.strip().splitlines()
+            if len(parts) >= 2:
+                return {"stars": int(parts[0]), "forks": int(parts[1])}
+    except Exception:
+        pass
+    return {}
+
+
+def _compute_adoption_growth_delta(cfg: dict, github_slug: str) -> dict:
+    """Compute 14-day growth delta from the evidence history JSONL.
+
+    Returns dict with keys: stars_delta, forks_delta, trend, has_history.
+    """
+    repo_name = github_slug.split("/")[-1] if "/" in github_slug else github_slug
+    evidence_dir = Path(cfg.get("root_dir", "~")).expanduser() / ".local" / "share" / "agent-os" / "evidence" / repo_name
+    history_file = evidence_dir / "github_metrics_history.jsonl"
+    if not history_file.exists():
+        # Also check the explicit evidence dir path
+        alt_dir = Path("~/.local/share/agent-os/evidence").expanduser() / repo_name
+        alt_file = alt_dir / "github_metrics_history.jsonl"
+        if alt_file.exists():
+            history_file = alt_file
+        else:
+            return {"has_history": False}
+
+    now = datetime.now(tz=timezone.utc)
+    cutoff_14d = now - timedelta(days=14)
+    cutoff_7d = now - timedelta(days=7)
+
+    records: list[dict] = []
+    try:
+        with open(history_file, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                    ts = _parse_signal_timestamp(rec.get("timestamp"))
+                    if ts and ts >= cutoff_14d:
+                        rec["_ts"] = ts
+                        records.append(rec)
+                except (json.JSONDecodeError, ValueError):
+                    continue
+    except OSError:
+        return {"has_history": False}
+
+    if not records:
+        return {"has_history": False}
+
+    records.sort(key=lambda r: r["_ts"])
+
+    # Current week: last 7 days; prior week: 7-14 days ago
+    prior_week = [r for r in records if r["_ts"] < cutoff_7d]
+    current_week = [r for r in records if r["_ts"] >= cutoff_7d]
+
+    # Use earliest record in each window as the baseline
+    prior_stars = prior_week[0].get("stars", 0) if prior_week else None
+    current_stars = current_week[-1].get("stars", 0) if current_week else records[-1].get("stars", 0)
+    prior_forks = prior_week[0].get("forks", 0) if prior_week else None
+    current_forks = current_week[-1].get("forks", 0) if current_week else records[-1].get("forks", 0)
+
+    stars_delta = (current_stars - prior_stars) if prior_stars is not None else None
+    forks_delta = (current_forks - prior_forks) if prior_forks is not None else None
+
+    # Determine trend
+    if stars_delta is None:
+        trend = "insufficient data"
+    elif stars_delta > 0:
+        trend = "growing"
+    elif stars_delta < 0:
+        trend = "regressed"
+    else:
+        trend = "stalled"
+
+    return {
+        "has_history": True,
+        "stars_delta": stars_delta,
+        "forks_delta": forks_delta,
+        "trend": trend,
+    }
+
+
+def _build_adoption_signals_section(
+    cfg: dict,
+    github_slug: str,
+) -> dict:
+    """Build an External Adoption Signals section for PRODUCTION_FEEDBACK.md."""
+    now_str = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    metrics = _fetch_github_adoption_metrics(github_slug)
+    growth = _compute_adoption_growth_delta(cfg, github_slug)
+
+    stars = metrics.get("stars")
+    forks = metrics.get("forks")
+
+    key_evidence: list[str] = []
+    if stars is not None:
+        key_evidence.append(f"Stars: {stars}")
+    if forks is not None:
+        key_evidence.append(f"Forks: {forks}")
+
+    if growth.get("has_history"):
+        stars_delta = growth.get("stars_delta")
+        forks_delta = growth.get("forks_delta")
+        trend = growth.get("trend", "insufficient data")
+        if stars_delta is not None:
+            sign = "+" if stars_delta >= 0 else ""
+            key_evidence.append(f"Stars 14-day delta: {sign}{stars_delta}")
+        if forks_delta is not None:
+            sign = "+" if forks_delta >= 0 else ""
+            key_evidence.append(f"Forks 14-day delta: {sign}{forks_delta}")
+        key_evidence.append(f"Growth trend: {trend}")
+    else:
+        key_evidence.append("14-day growth delta: no history data available")
+        key_evidence.append("Growth trend: insufficient data")
+
+    if not key_evidence:
+        key_evidence.append("GitHub API data unavailable.")
+
+    if stars is not None:
+        summary = (
+            f"GitHub adoption signals for {github_slug}: {stars} star(s), "
+            f"{forks or 0} fork(s). "
+        )
+    else:
+        summary = f"GitHub adoption signals for {github_slug} could not be fetched."
+
+    trend = growth.get("trend", "insufficient data")
+    if trend == "stalled":
+        summary += "Growth trend is stalled — star count unchanged over the last 14 days."
+        implications = [
+            "Adoption momentum has stalled; consider prioritizing discoverability or activation work.",
+        ]
+    elif trend == "growing":
+        summary += "Growth trend is positive — star count increased over the last 14 days."
+        implications = [
+            "Adoption is growing; continue current credibility and visibility efforts.",
+        ]
+    elif trend == "regressed":
+        summary += "Growth trend has regressed — star count decreased over the last 14 days."
+        implications = [
+            "Star count has decreased; investigate potential credibility or visibility issues.",
+        ]
+    else:
+        summary += "Insufficient history data to determine growth trend."
+        implications = [
+            "Ensure bin/export_github_evidence.sh runs regularly to build trend history.",
+        ]
+
+    return {
+        "name": "External Adoption Signals",
+        "signal_class": "adoption_metric",
+        "location": f"gh api repos/{github_slug}",
+        "observed_at": now_str,
+        "freshness": "live",
+        "freshness_policy": "refresh each weekly feedback cycle via public GitHub API",
+        "provenance": f"public GitHub API for {github_slug}",
+        "trust_note": "Public GitHub counters; authoritative for star and fork counts",
+        "privacy_note": "Public repository metrics only; no private data",
+        "trust_level": "high",
+        "privacy_level": "public",
+        "planning_use": "included",
+        "summary": summary,
+        "key_evidence": key_evidence,
+        "planning_implications": implications,
+        "guardrail_note": "included in planning context",
+    }
+
+
 def _build_substrate_production_feedback_sections(
     cfg: dict,
     github_slug: str,
@@ -1570,6 +1747,7 @@ def _build_substrate_production_feedback_sections(
             "planning_implications": recovery_implications,
             "guardrail_note": "included in planning context",
         },
+        _build_adoption_signals_section(cfg, github_slug),
     ]
 
 
