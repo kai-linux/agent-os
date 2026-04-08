@@ -16,6 +16,18 @@
 
 ## Recent Changes
 
+### 2026-04-08 — [task-20260408-150519-add-github-adoption-metrics-to-production-feedback] (#150 kai-linux/agent-os)
+Added GitHub adoption metrics (stars, forks, 14-day growth delta, and trend status) to PRODUCTION_FEEDBACK.md by adding three helper functions to strategic_planner.py and inserting an "External Adoption Signals" section into the substrate production feedback generation. Metrics are fetched live via the public GitHub API (gh cli) and growth trends are computed from the existing evidence history JSONL written by bin/export_github_evidence.sh.
+
+**Files:** `- orchestrator/strategic_planner.py`
+
+**Decisions:**
+  - - Reused the existing evidence history JSONL (github_metrics_history.jsonl) written by bin/export_github_evidence.sh rather than adding a new data store, keeping the adoption metrics pipeline consistent
+  - - Used gh api directly for live star/fork counts (same pattern as backlog_groomer._fetch_github_stars_forks) rather than reading only from evidence snapshots, so feedback is fresh even if the evidence exporter hasn't run recently
+  - - Added the adoption section as the last entry in _build_substrate_production_feedback_sections() so it appears after operational metrics, consistent with adoption being a lagging indicator per NORTH_STAR.md
+  - - Growth trend classification uses simple categories (growing/stalled/regressed/insufficient data) to report data without speculating on causation per task constraints
+
+
 ### 2026-04-08 — [task-20260408-150416-implement-adaptive-agent-health-checks-in-task-dis] (#149 kai-linux/agent-os)
 Added an adaptive 7-day health gate with a 25% success rate threshold to both the dispatcher and queue agent chain resolution. Agents with <25% success rate over the last 7 days (e.g., deepseek at 0%) are automatically skipped before dispatch, with the skip reason logged. The gate uses the same agent_stats.jsonl metrics that feed PRODUCTION_FEEDBACK.md, and agents automatically recover when their metrics improve above the threshold.
 
