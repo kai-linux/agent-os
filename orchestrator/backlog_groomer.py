@@ -788,10 +788,10 @@ def _parse_issues(text: str) -> list[dict]:
 
 def _create_issue(repo: str, title: str, body: str, labels: list[str]) -> str:
     """Create a GitHub issue and return its URL."""
-    # Ensure priority labels exist
-    prio_labels = [l for l in labels if l.startswith("prio:")]
+    # Ensure all labels exist — otherwise `gh issue create --label X` fails
+    # hard with "could not add label: 'X' not found" and aborts the create.
     try:
-        ensure_labels(repo, prio_labels)
+        ensure_labels(repo, labels)
     except Exception:
         pass
     cmd = ["gh", "issue", "create", "--repo", repo, "--title", title, "--body", body]
@@ -1131,6 +1131,7 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
     # 8. Dedup and create issues
     created_urls: list[str] = []
     skipped: list[str] = []
+    failed: list[str] = []
 
     for issue in proposed[:MAX_ISSUES_PER_RUN]:
         title = (issue.get("title") or "").strip()
@@ -1170,10 +1171,14 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
             open_titles.append(title)  # Prevent self-duplication within batch
         except Exception as e:
             print(f"  Failed to create {title!r}: {e}")
-            skipped.append(title)
+            failed.append(title)
 
     if created_urls:
         status = "created"
+    elif failed and not skipped:
+        # Every attempted create raised — treat as error so cadence isn't
+        # burned on a no-op run (e.g. missing label, gh auth, rate limit).
+        status = "error"
     elif skipped:
         status = "skipped"
     else:
@@ -1183,11 +1188,15 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
         "status": status,
         "created": len(created_urls),
         "skipped": len(skipped),
+        "failed": len(failed),
         "cleaned": len(cleaned),
         "urls": created_urls,
     }
     if status == "error":
-        result["error"] = "LLM returned no usable issues"
+        if failed:
+            result["error"] = f"all {len(failed)} create attempts failed (see log)"
+        else:
+            result["error"] = "LLM returned no usable issues"
     return result
 
 
