@@ -16,6 +16,17 @@
 
 ## Recent Changes
 
+### 2026-04-08 — [task-20260408-150119-improve-github-discoverability-with-trending-signa] (#146 kai-linux/agent-os)
+Added CI status, forks, issues, and license badges to README and set missing GitHub topics (multi-agent, automation) via the gh API. All five requested topics are now present on the repo. PR #151 opened.
+
+**Files:** `- README.md`
+
+**Decisions:**
+  - - Added badges in a single row above the existing stars badge line rather than a separate section, keeping the minimal-diff constraint
+  - - Used shields.io badges consistent with the existing stars badge style
+  - - Added social-style badges for stars/forks and standard badges for CI/issues/license for visual variety
+
+
 ### 2026-04-07 — [task-20260407-100426-persist-publish-block-reasons-on-git-push-readines] (#88 kai-linux/agent-os)
 Added `push_not_ready` as a first-class blocker code and wired the dispatcher's push-readiness skip path to persist a structured unblock-notes artifact to `runtime/unblock_notes/`, making publish-block reasons queryable by backlog grooming and retry logic.
 
