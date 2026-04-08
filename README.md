@@ -1,6 +1,10 @@
 # Agent OS
 
+[![CI](https://github.com/kai-linux/agent-os/actions/workflows/ci.yml/badge.svg)](https://github.com/kai-linux/agent-os/actions/workflows/ci.yml)
 [![GitHub stars](https://img.shields.io/github/stars/kai-linux/agent-os?style=social)](https://github.com/kai-linux/agent-os)
+[![GitHub forks](https://img.shields.io/github/forks/kai-linux/agent-os?style=social)](https://github.com/kai-linux/agent-os/fork)
+[![GitHub issues](https://img.shields.io/github/issues/kai-linux/agent-os)](https://github.com/kai-linux/agent-os/issues)
+[![License](https://img.shields.io/github/license/kai-linux/agent-os)](LICENSE)
 
 **A fully autonomous software organization — staffed by AI agents, managed by cron, and designed to run indefinitely without human input.**
 
