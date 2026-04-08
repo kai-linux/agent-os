@@ -16,6 +16,17 @@
 
 ## Recent Changes
 
+### 2026-04-08 — [task-20260408-150416-implement-adaptive-agent-health-checks-in-task-dis] (#149 kai-linux/agent-os)
+Added an adaptive 7-day health gate with a 25% success rate threshold to both the dispatcher and queue agent chain resolution. Agents with <25% success rate over the last 7 days (e.g., deepseek at 0%) are automatically skipped before dispatch, with the skip reason logged. The gate uses the same agent_stats.jsonl metrics that feed PRODUCTION_FEEDBACK.md, and agents automatically recover when their metrics improve above the threshold.
+
+**Files:** `- orchestrator/agent_scorer.py`, `- orchestrator/github_dispatcher.py`, `- orchestrator/queue.py`, `- tests/test_queue.py`, `- tests/test_github_dispatcher.py`
+
+**Decisions:**
+  - - Reused existing filter_healthy_agents() with wider window (7d) and lower threshold (25%) rather than parsing PRODUCTION_FEEDBACK.md markdown, because both consume the same agent_stats.jsonl data source and the function approach is more reliable than regex parsing
+  - - Applied the adaptive gate before the existing 24h/80% gate so severely degraded agents are removed first, then the short-window gate applies to the remaining candidates
+  - - Added the gate to both dispatcher (build_mailbox_task path) and queue (get_agent_chain path) for consistent behavior at dispatch time and execution time
+
+
 ### 2026-04-08 — [task-20260408-150317-rca-and-fix-for-pr-98-cascading-ci-failure-pattern] (#148 kai-linux/agent-os)
 Root cause identified and fixed for the PR-98 cascading CI failure pattern. The CI completion verification gate (`verify_pr_ci_debug_completion`) was extracting failed job names from markdown prose in issue bodies, which got lost when follow-up tasks reformatted the body text. This caused `missing_failed_job_context` downgrades on successful fixes, spawning 8+ cascading debug tasks. Fix: persist `failed_checks` as structured frontmatter metadata at dispatch time, read it in the verification gate before falling back to body parsing, and propagate it through follow-up task creation.
 
