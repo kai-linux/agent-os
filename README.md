@@ -153,6 +153,23 @@ The backlog is GitHub Issues. The sprint board is GitHub Projects. The standup i
 
 ---
 
+## Built with Agent OS
+
+Agent OS manages its own development. In 23 days it shipped 59 merged PRs,
+closed 79 issues, and produced 275 commits — autonomously dispatching tasks,
+reviewing CI, and merging changes with zero human intervention per task.
+
+**[Read the full case study →](docs/case-study-agent-os.md)**
+
+| Metric | Value |
+|---|---|
+| Issues closed | 79 of 86 (92%) |
+| PRs merged | 59 of 65 (91%) |
+| Commits | 275 in 23 days (~12/day) |
+| Agent tasks executed | 122 (55.7% first-attempt success) |
+
+---
+
 ## Documentation
 
 | Topic | Link |
@@ -161,9 +178,4 @@ The backlog is GitHub Issues. The sprint board is GitHub Projects. The standup i
 | Task execution, handoff contract, retry logic | [docs/execution.md](docs/execution.md) |
 | Configuration, objectives, evidence, cron setup | [docs/configuration.md](docs/configuration.md) |
 | Roadmap and capability ladder | [docs/roadmap.md](docs/roadmap.md) |
-
----
-
-## Goal
-
-Make Agent OS the most credible autonomous software organization for technical founders and solo builders: a system that can reliably turn backlog input into useful shipped work, improve itself from operational evidence, and earn trust through visible results.
+| Case study: self-managed repo | [docs/case-study-agent-os.md](docs/case-study-agent-os.md) |

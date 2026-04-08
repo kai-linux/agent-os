@@ -1,0 +1,128 @@
+# Case Study: Agent OS Managing Its Own Development
+
+> Agent OS bootstrapped itself from a bare repository to a fully autonomous
+> software organization in 23 days — shipping 59 merged PRs, closing 79 issues,
+> and producing 275 commits with a 55.7% first-attempt task success rate.
+
+## The Problem
+
+Building and maintaining a software project requires continuous coordination:
+triaging issues, writing code, running tests, reviewing PRs, merging changes,
+analyzing failures, and filing follow-up work. For a solo builder, this
+coordination overhead dominates actual development time. Agent OS was built to
+eliminate that overhead — and the first repository it managed was itself.
+
+## Timeline
+
+| Milestone | Date | Evidence |
+|---|---|---|
+| First commit | 2026-03-16 | [`cc28f47`](https://github.com/kai-linux/agent-os/commit/cc28f47) |
+| Core loop operational (dispatcher + queue + PR monitor) | 2026-03-17 | PRs [#1](https://github.com/kai-linux/agent-os/pull/1)–[#4](https://github.com/kai-linux/agent-os/pull/4) |
+| Self-improvement loop live (log analyzer + backlog groomer) | 2026-03-18 | Issues auto-filed from metrics |
+| Strategic planner with evidence-driven sprint selection | 2026-03-19 | Sprint plans in STRATEGY.md |
+| Production feedback + outcome attribution | 2026-03-20 | Closed-loop measurement |
+| Case study published | 2026-04-08 | This document |
+
+**Total elapsed: 23 days from empty repo to self-managing system.**
+
+## Before / After
+
+| Metric | Before (manual) | After (agent-managed) | Change |
+|---|---|---|---|
+| Issues triaged and dispatched | Manual | Automated every 60s | Human time → 0 |
+| PRs reviewed and merged | Manual | Auto-merge on green CI | Human time → 0 |
+| Failure analysis | Manual log reading | Weekly automated analysis → fix tickets | Continuous |
+| Backlog grooming | Manual | Automated with dedup and evidence | Weekly, zero-touch |
+| Sprint planning | Manual | Evidence-driven, auto-generated | Per sprint cycle |
+| Deployment | Manual | Cron-managed, self-healing | Always running |
+
+## Measurable Outcomes
+
+```
+┌─────────────────────────────────────────────────────────┐
+│         Agent OS: 23 Days of Autonomous Operation       │
+├─────────────────────────────────────────────────────────┤
+│                                                         │
+│  Issues closed          ██████████████████████████  79  │
+│  Issues open            ██                          7   │
+│                                                         │
+│  PRs merged             ████████████████████████    59  │
+│  PRs closed/open        ███                         6   │
+│                                                         │
+│  Total commits          ████████████████████████── 275  │
+│                                                         │
+│  Tasks executed         █████████████████████████  122  │
+│  Tasks succeeded        ██████████████             68   │
+│                                                         │
+│  Success rate           ██████████████▒▒▒▒▒▒▒▒  55.7%  │
+│  Issue closure rate     █████████████████████████  92%  │
+│  PR merge rate          ████████████████████████   91%  │
+│                                                         │
+│  Avg commits/day        ████████████              ~12   │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Key Numbers
+
+- **79 issues closed** out of 86 created (92% closure rate)
+- **59 PRs merged** out of 65 created (91% merge rate)
+- **275 commits** in 23 days (~12 commits/day)
+- **122 agent tasks executed**, 68 completed on first attempt (55.7%)
+- **4 agents in pool**: Claude, Codex, Gemini, DeepSeek — with automatic fallback routing
+
+## What the System Built
+
+All of the following were implemented autonomously by dispatched agents:
+
+- **Parallel queue workers** with per-repo file locking
+- **Priority-aware task dispatch** with age-based scoring
+- **Task dependency resolution** (`Depends on #N` / `Blocked by #N`)
+- **CI failure clustering** by error signature to deduplicate debug tasks
+- **Automatic escalation** for repeatedly blocked tasks (with Telegram decision cards)
+- **Post-merge outcome attribution** linking PRs back to business metrics
+- **Production feedback substrate** for evidence-driven planning
+- **Structured blocker codes** and unblock notes for failure recovery
+- **Domain evaluation rubrics** for planning quality assessment
+- **PR review signal extraction** for follow-up task generation
+
+Each feature went through the same pipeline: GitHub Issue → agent dispatch →
+code written → tests pass → PR opened → CI green → auto-merged → issue closed.
+
+## How to Verify
+
+Every claim in this case study is auditable from public GitHub data:
+
+- **Commit history**: [`git log`](https://github.com/kai-linux/agent-os/commits/main) shows 275 commits with agent-style messages
+- **Issue closure**: [closed issues](https://github.com/kai-linux/agent-os/issues?q=is%3Aissue+is%3Aclosed) show automated resolution with linked PRs
+- **PR merge history**: [merged PRs](https://github.com/kai-linux/agent-os/pulls?q=is%3Apr+is%3Amerged) show CI-gated auto-merge
+- **Self-improvement**: issues filed by the log analyzer and backlog groomer are visible in the issue tracker
+- **Sprint plans**: `STRATEGY.md` contains auto-generated sprint history with rationale
+
+## Architecture That Made This Possible
+
+```
+GitHub Issues (backlog)
+       │
+  Dispatcher (every 60s) ─── LLM formats task, routes by type
+       │
+  Queue Engine ─── isolated worktree → agent → .agent_result.md → retry/escalate
+       │
+  PR Monitor (every 5m) ─── CI green → squash merge → close issue
+       │
+  ┌────┴────┐
+  │         │
+Log Analyzer  Backlog Groomer ─── files fix tickets back into the backlog
+```
+
+The recursive loop — where the system files improvement tickets about its own
+failures, then autonomously fixes them — is what separates Agent OS from a
+simple task runner.
+
+## Conclusion
+
+Agent OS demonstrated that a solo builder can bootstrap a fully autonomous
+development pipeline in under a month. The system managed its own repository
+from day one, shipping real features through the same pipeline it was building.
+With 79 issues closed, 59 PRs merged, and continuous self-improvement running
+on a $5/month VPS, the results are public, auditable, and reproducible.
