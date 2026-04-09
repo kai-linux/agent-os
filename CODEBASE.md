@@ -26,6 +26,17 @@
 
 ## Recent Changes
 
+### 2026-04-09 — [task-20260409-070215-fix-readme-rendering-and-complete-truncated-sectio] (#156 kai-linux/agent-os)
+Fixed README rendering truncation by breaking the 209-character line containing "Indefinitely" into shorter lines that won't get clipped in preview contexts. Added a "Get Involved" CTA section with try-it, contribute, and contact calls-to-action. All sections render completely with no truncation.
+
+**Files:** `- README.md`
+
+**Decisions:**
+  - - Broke the 209-char paragraph into 3 lines rather than rewriting it, preserving the existing copy
+  - - Added the CTA section at the very end after Documentation, keeping it as a clean closing section
+  - - Linked "Questions?" to the issues page since the repo doesn't have GitHub Discussions enabled
+
+
 ### 2026-04-09 — [task-20260409-070128-harden-product-inspection-md-per-observation-prove] (#137 kai-linux/agent-os)
 Hardened the product inspection pipeline with per-observation provenance (source URL, fetch timestamp, HTTP status, response size, extraction confidence), cadence-aligned staleness detection, explicit coverage boundary framing, and transient-failure detection with consecutive failure tracking. Non-200 responses are distinctly tagged and targets with 3+ consecutive failures are marked low_confidence. The planner and groomer prompts now include rules to correctly interpret coverage boundaries and down-weight low-confidence signals.
 
