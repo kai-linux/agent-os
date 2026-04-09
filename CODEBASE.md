@@ -26,6 +26,18 @@
 
 ## Recent Changes
 
+### 2026-04-09 — [task-20260409-210416-attach-prompt-snapshot-references-to-blocked-task-] (#70 kai-linux/agent-os)
+Attached prompt snapshot references to all blocked task escalation surfaces (dispatcher escalation notes, GitHub issue comments, Telegram messages, Telegram action payloads, and queue escalation notes) by reading the existing `prompt_snapshot_path` from task frontmatter metadata.
+
+**Files:** `- orchestrator/github_dispatcher.py`, `- orchestrator/queue.py`, `- tests/test_github_dispatcher.py`, `- tests/test_queue.py`, `- CODEBASE.md`
+
+**Decisions:**
+  - - Reused existing `prompt_snapshot_path` from task frontmatter instead of adding new persistence or lookup
+  - - Added `_resolve_prompt_snapshot_path()` helper to normalize missing paths to "none" for clean display
+  - - Embedded the reference in all five escalation surfaces for full traceability from any escalation output
+  - - Kept the diff minimal by only adding fields to existing data structures
+
+
 ### 2026-04-09 — [task-20260409-210321-create-public-reliability-metrics-dashboard-to-sup] (#176 kai-linux/agent-os)
 deepseek failed before producing a valid result file. Runner exited with code 1 while executing `/home/kai/agent-os/bin/agent_runner.sh deepseek /srv/worktrees/agent-os/task-20260409-210321-create-public-reliability-metrics-dashboard-to-sup /home/kai/agent-os/runtime/tmp/task-20260409-210321-create-public-reliability-metrics-dashboard-to-sup.txt`. Classified as: authentication failure. Orchestrator rescued and pushed the worktree changes.
 
