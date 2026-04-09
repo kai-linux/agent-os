@@ -30,14 +30,46 @@ Sprint selection should balance:
 
 
 
+
 <!-- auto-focus-areas -->
-- Adoption credibility and external visibility (GitHub metrics, README, demo, case studies)
-- Operational reliability through control-plane hardening (CI cascades, agent routing, deepseek auth fixes)
-- Evidence-driven feedback loops and closed-loop outcome tracking (production metrics, attribution, blocker codes)
-- Blocked task recovery automation (escalation, auto-rerun, unblock notes)
-- Self-directed optimization through adaptive routing and signal persistence
+- Wire outcome metrics and measurement infrastructure to enable closed-loop optimization
+- Automate blocker handling and failure recovery through structured escalation and bounded follow-ups
+- Build external adoption credibility through visible proof, case studies, and GitHub discoverability
+- Stabilize agent execution with health-gated routing and adaptive dispatch to reduce task failures
 
 ## Sprint History
+
+### Sprint 2026-04-09
+
+**Retrospective:**
+Issues completed:
+- #150: Add GitHub adoption metrics to PRODUCTION_FEEDBACK.md [enhancement, prio:normal, done, bot-generated] — COMPLETED
+- #149: Implement adaptive agent health checks in task dispatcher [enhancement, prio:normal, done, bot-generated] — COMPLETED
+- #148: RCA and fix for PR-98 cascading CI failure pattern [bug, prio:high, done, bot-generated] — COMPLETED
+- #147: Publish first external adoption proof: managed repo case study [enhancement, prio:high, done, bot-generated] — COMPLETED
+- #146: Improve GitHub discoverability with trending signals and SEO [enhancement, prio:high, done, bot-generated] — COMPLETED
+
+PRs merged:
+- PR #155: Agent: task-20260408-150519-add-github-adoption-metrics-to-production-feedback (branch: agent/task-20260408-150519-add-github-adoption-metrics-to-production-feedback)
+- PR #154: Agent: task-20260408-150416-implement-adaptive-agent-health-checks-in-task-dis (branch: agent/task-20260408-150416-implement-adaptive-agent-health-checks-in-task-dis)
+- PR #153: Agent: task-20260408-150317-rca-and-fix-for-pr-98-cascading-ci-failure-pattern (branch: agent/task-20260408-150317-rca-and-fix-for-pr-98-cascading-ci-failure-pattern)
+- PR #152: Publish first external adoption proof: managed repo case study (branch: agent/task-20260408-150222-publish-first-external-adoption-proof-managed-repo)
+- PR #151: Add build status and social badges for GitHub discoverability (branch: agent/task-20260408-150119-improve-github-discoverability-with-trending-signa)
+
+Outcome evidence:
+- #146 / PR #151 / No measurable external metric: inconclusive — Merged work had no configured outcome check, so it is explicitly tracked as inconclusive instead of being treated as impact-free or automatically successful.
+- #147 / PR #152 / No measurable external metric: inconclusive — Merged work had no configured outcome check, so it is explicitly tracked as inconclusive instead of being treated as impact-free or automatically successful.
+- #? / PR #155 / No measurable external metric: inconclusive — Merged work had no configured outcome check, so it is explicitly tracked as inconclusive instead of being treated as impact-free or automatically successful.
+- #? / PR #153 / No measurable external metric: inconclusive — Merged work had no configured outcome check, so it is explicitly tracked as inconclusive instead of being treated as impact-free or automatically successful.
+- #? / PR #154 / No measurable external metric: inconclusive — Merged work had no configured outcome check, so it is explicitly tracked as inconclusive instead of being treated as impact-free or automatically successful.
+
+**Plan:**
+- [prio:high] Fix README rendering and complete truncated sections: Product inspection flagged truncated README as HIGH severity — every potential adopter sees a broken first impression, making this the highest-leverage adoption fix available and directly targeting the 29%-weighted GitHub stars metric.
+- [prio:high] Publish GitHub Discussions case study: autonomous multi-agent PR workflow: With 2 stars and 0 forks, visible public proof remains the biggest adoption gap — a GitHub Discussions case study is indexable, linkable, and compounds with last sprint's case study and README work to build credibility.
+- [prio:high] Validate and monitor adaptive agent health gate impact on success rate: Every outcome in the last 5 sprints scored 'inconclusive' because no outcome checks are configured — validating the health gate closes this measurement gap and advances from Level 3 toward Level 4 closed-loop optimization.
+- [prio:normal] Reduce missing_context task blockers through enhanced context provision: missing_context is the top blocker code at 7 instances — fixing it at the dispatch layer removes the single largest source of task failures and directly improves both the task success rate and escalation rate metrics.
+- [prio:normal] Harden PRODUCT_INSPECTION.md: per-observation provenance, staleness vs planner cadence, and coverage-boundary framing: Human-filed issue addressing structural weaknesses in the evidence pipeline that feeds every sprint decision — hardening inspection quality compounds across all future planning cycles and advances evidence-driven planning maturity.
+
 
 ### Sprint 2026-04-08
 
