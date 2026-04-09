@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from orchestrator.daily_digest import (
     compute_agent_success_rates,
+    dedupe_entries_by_logical_key,
     format_digest_message,
     load_recent_mailbox_entries,
     parse_queue_summary_log,
@@ -103,6 +104,72 @@ def test_compute_agent_success_rates_counts_completed_vs_non_completed():
     assert rates["codex"]["rate"] == 0.5
     assert rates["claude"]["successes"] == 0
     assert rates["claude"]["total"] == 1
+
+
+def test_dedupe_entries_collapses_same_issue_and_surfaces_attempt_count():
+    now = datetime(2026, 4, 9, 6, 0, tzinfo=timezone.utc)
+    # Simulate the PR-163 infra-retry cascade: 8 task files in DONE, all
+    # referencing the same github issue, within an hour of each other.
+    entries = [
+        {
+            "task_id": f"task-20260409-07{minute:02d}00-fix-ci-failure-on-pr-163",
+            "label": "#164 Fix CI failure on PR #163",
+            "status": "complete",
+            "timestamp": now - timedelta(minutes=60 - minute),
+            "issue_number": 164,
+            "task_slug": "fix-ci-failure-on-pr-163",
+        }
+        for minute in (11, 16, 21, 26, 31, 36, 41, 46)
+    ]
+    # Plus one unrelated task that should survive unchanged.
+    entries.append(
+        {
+            "task_id": "task-20260409-080000-something-else",
+            "label": "#999 Unrelated work",
+            "status": "complete",
+            "timestamp": now - timedelta(minutes=5),
+            "issue_number": 999,
+            "task_slug": "something-else",
+        }
+    )
+
+    deduped = dedupe_entries_by_logical_key(entries)
+
+    # Two logical items survive, not nine.
+    assert len(deduped) == 2
+    by_issue = {e["issue_number"]: e for e in deduped}
+    assert by_issue[164]["attempts"] == 8
+    assert by_issue[999]["attempts"] == 1
+    # Most-recent timestamp wins.
+    assert by_issue[164]["task_id"] == "task-20260409-074600-fix-ci-failure-on-pr-163"
+
+
+def test_dedupe_falls_back_to_task_slug_when_no_issue_number():
+    now = datetime(2026, 4, 9, 6, 0, tzinfo=timezone.utc)
+    entries = [
+        {
+            "task_id": "task-20260409-060000-cleanup",
+            "label": "cleanup",
+            "status": "complete",
+            "timestamp": now - timedelta(minutes=30),
+            "issue_number": None,
+            "task_slug": "cleanup",
+        },
+        {
+            "task_id": "task-20260409-061500-cleanup",
+            "label": "cleanup",
+            "status": "complete",
+            "timestamp": now - timedelta(minutes=10),
+            "issue_number": None,
+            "task_slug": "cleanup",
+        },
+    ]
+
+    deduped = dedupe_entries_by_logical_key(entries)
+
+    assert len(deduped) == 1
+    assert deduped[0]["attempts"] == 2
+    assert deduped[0]["task_id"] == "task-20260409-061500-cleanup"
 
 
 def test_format_digest_message_handles_no_activity():
