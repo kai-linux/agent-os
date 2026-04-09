@@ -39,7 +39,11 @@ BLOCKER_CAUSE_MAP = {
     "test_failure": "environment",
 }
 BUSINESS_SCORE_THRESHOLD = -0.15
-_RECENT_RATE_CACHE: dict[tuple[str, int, float], dict[str, dict]] = {}
+_RECENT_RATE_CACHE: dict[tuple[str, int, float, str], dict[str, dict]] = {}
+
+
+def _normalize_task_type(task_type: str | None) -> str:
+    return str(task_type or "").strip().lower()
 
 
 def load_recent_metrics(metrics_file: Path, window_days: int = WINDOW_DAYS) -> list[dict]:
@@ -68,15 +72,18 @@ def load_recent_metrics(metrics_file: Path, window_days: int = WINDOW_DAYS) -> l
     return records
 
 
-def compute_success_rates(records: list[dict]) -> dict[str, dict]:
+def compute_success_rates(records: list[dict], *, task_type: str | None = None) -> dict[str, dict]:
     """Return {agent: {total, successes, rate}} for agents with >= 1 task.
 
     Sentinel agent names (e.g. ``"none"``, ``"unknown"``) that represent
     exhausted fallback chains rather than real agents are excluded from the
     result so they cannot trigger spurious degradation findings.
     """
+    selected_task_type = _normalize_task_type(task_type)
     counts: dict[str, dict] = defaultdict(lambda: {"total": 0, "successes": 0})
     for rec in records:
+        if selected_task_type and _normalize_task_type(rec.get("task_type")) != selected_task_type:
+            continue
         agent = rec.get("agent", "unknown")
         if agent in _SENTINEL_AGENTS:
             continue
@@ -89,18 +96,27 @@ def compute_success_rates(records: list[dict]) -> dict[str, dict]:
     }
 
 
-def recent_success_rates(metrics_file: Path, window_days: float = HEALTH_CHECK_WINDOW_DAYS) -> dict[str, dict]:
+def recent_success_rates(
+    metrics_file: Path,
+    window_days: float = HEALTH_CHECK_WINDOW_DAYS,
+    *,
+    task_type: str | None = None,
+) -> dict[str, dict]:
     """Return cached recent success rates keyed by agent."""
     try:
         mtime_ns = metrics_file.stat().st_mtime_ns
     except FileNotFoundError:
         mtime_ns = -1
-    cache_key = (str(metrics_file), mtime_ns, window_days)
+    normalized_task_type = _normalize_task_type(task_type)
+    cache_key = (str(metrics_file), mtime_ns, window_days, normalized_task_type)
     cached = _RECENT_RATE_CACHE.get(cache_key)
     if cached is not None:
         return cached
 
-    rates = compute_success_rates(load_recent_metrics(metrics_file, window_days=window_days))
+    rates = compute_success_rates(
+        load_recent_metrics(metrics_file, window_days=window_days),
+        task_type=normalized_task_type or None,
+    )
     _RECENT_RATE_CACHE.clear()
     _RECENT_RATE_CACHE[cache_key] = rates
     return rates
@@ -140,15 +156,28 @@ def filter_healthy_agents(
     *,
     threshold: float = HEALTHY_SUCCESS_RATE_THRESHOLD,
     window_days: float = HEALTH_CHECK_WINDOW_DAYS,
+    task_type: str | None = None,
+    min_task_count: int = 3,
 ) -> tuple[list[str], dict[str, dict]]:
     """Return healthy agents and skipped-agent stats for the recent metrics window."""
-    rates = recent_success_rates(metrics_file, window_days=window_days)
+    overall_rates = recent_success_rates(metrics_file, window_days=window_days)
+    scoped_task_type = _normalize_task_type(task_type)
+    scoped_rates = (
+        recent_success_rates(metrics_file, window_days=window_days, task_type=scoped_task_type)
+        if scoped_task_type
+        else {}
+    )
     healthy: list[str] = []
     skipped: dict[str, dict] = {}
     for agent in agents:
-        stats = rates.get(agent)
+        stats = overall_rates.get(agent)
+        scope = "overall"
+        scoped_stats = scoped_rates.get(agent)
+        if scoped_stats and scoped_stats.get("total", 0) >= min_task_count:
+            stats = scoped_stats
+            scope = scoped_task_type
         if stats and stats.get("total", 0) > 0 and stats.get("rate", 0.0) <= threshold:
-            skipped[agent] = stats
+            skipped[agent] = {**stats, "scope": scope}
             continue
         healthy.append(agent)
     return healthy, skipped
@@ -354,6 +383,7 @@ def build_degradation_findings(
     *,
     threshold: float = DEGRADED_THRESHOLD,
     min_total: int = MIN_TASKS_FOR_DEGRADED_FINDING,
+    preferred_task_type: str | None = "debugging",
 ) -> list[dict]:
     # Warn about sentinel-agent records so operators can see fallback-exhaustion volume.
     sentinel_count = sum(1 for r in records if r.get("agent", "unknown") in _SENTINEL_AGENTS)
@@ -365,19 +395,36 @@ def build_degradation_findings(
     rates = compute_success_rates(records)
     findings: list[dict] = []
     for agent, rate, total in degraded_agents(rates, threshold):
-        if total < min_total:
-            continue
-        successes = rates[agent]["successes"]
         agent_records = [rec for rec in records if rec.get("agent") == agent]
-        failures = [rec for rec in agent_records if rec.get("status") != "complete"]
+        selected_task_type = None
+        scoped_records = agent_records
+        if preferred_task_type:
+            preferred_records = [
+                rec for rec in agent_records
+                if _normalize_task_type(rec.get("task_type")) == _normalize_task_type(preferred_task_type)
+            ]
+            if len(preferred_records) >= min_total:
+                scoped_records = preferred_records
+                selected_task_type = _normalize_task_type(preferred_task_type)
+
+        scoped_rates = compute_success_rates(scoped_records)
+        scoped_stats = scoped_rates.get(agent)
+        if not scoped_stats:
+            continue
+        rate = scoped_stats["rate"]
+        total = scoped_stats["total"]
+        if total < min_total or rate >= threshold:
+            continue
+        successes = scoped_stats["successes"]
+        failures = [rec for rec in scoped_records if rec.get("status") != "complete"]
         target_repo = _pick_target_repo(agent_records, failures)
-        repo_records = [rec for rec in agent_records if _repo_slug(rec) == target_repo] if target_repo else agent_records
+        repo_records = [rec for rec in scoped_records if _repo_slug(rec) == target_repo] if target_repo else scoped_records
         repo_name = _repo_display_name(target_repo, repo_records)
         cause, cause_context = _classify_degradation_cause(
             agent=agent,
             agent_rate=rate,
             records=records,
-            agent_records=agent_records,
+            agent_records=scoped_records,
             failures=failures,
             target_repo=target_repo,
         )
@@ -392,18 +439,21 @@ def build_degradation_findings(
             context=cause_context,
         )
         findings.append({
-            "id": f"agent_remediation:{agent}:{target_repo or 'unknown'}:{cause}",
+            "id": f"agent_remediation:{agent}:{target_repo or 'unknown'}:{selected_task_type or 'all'}:{cause}",
             "source": "agent_scorer",
             "kind": "agent_remediation",
             "title_hint": _finding_title(agent, cause, repo_name),
             "summary": (
                 f"{agent} completed {successes} of {total} tasks in the last "
-                f"{WINDOW_DAYS} days in {repo_name}, below the {round(threshold * 100)}% threshold; "
+                f"{WINDOW_DAYS} days in {repo_name}"
+                + (f" for {selected_task_type} tasks" if selected_task_type else "")
+                + f", below the {round(threshold * 100)}% threshold; "
                 f"likely cause: {cause.replace('_', ' ')}."
             ),
             "agent": agent,
             "repo": target_repo,
             "repo_name": repo_name,
+            "task_type": selected_task_type,
             "degradation_cause": cause,
             "window_days": WINDOW_DAYS,
             "threshold": threshold,

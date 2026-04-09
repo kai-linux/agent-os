@@ -73,3 +73,19 @@ def test_sentinel_agents_excluded_from_degradation_analysis():
     findings = build_degradation_findings(records)
     for f in findings:
         assert f["agent"] not in ("none", "unknown")
+
+
+def test_build_degradation_findings_prefers_debugging_slice_for_codex():
+    records = [
+        {"timestamp": _ts(1), "agent": "codex", "github_repo": "acme/api", "status": "blocked", "blocker_code": "environment_failure", "task_type": "implementation"},
+        {"timestamp": _ts(2), "agent": "codex", "github_repo": "acme/api", "status": "blocked", "blocker_code": "environment_failure", "task_type": "implementation"},
+        {"timestamp": _ts(3), "agent": "codex", "github_repo": "acme/api", "status": "blocked", "blocker_code": "environment_failure", "task_type": "implementation"},
+        {"timestamp": _ts(4), "agent": "codex", "github_repo": "acme/api", "status": "complete", "blocker_code": "none", "task_type": "debugging"},
+        {"timestamp": _ts(5), "agent": "codex", "github_repo": "acme/api", "status": "complete", "blocker_code": "none", "task_type": "debugging"},
+        {"timestamp": _ts(6), "agent": "codex", "github_repo": "acme/api", "status": "complete", "blocker_code": "none", "task_type": "debugging"},
+        {"timestamp": _ts(7), "agent": "codex", "github_repo": "acme/api", "status": "complete", "blocker_code": "none", "task_type": "debugging"},
+    ]
+
+    findings = build_degradation_findings(records)
+
+    assert findings == []
