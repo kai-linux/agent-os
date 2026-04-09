@@ -679,6 +679,8 @@ Rules:
 - Assign priority based on objective alignment first, then risk and impact —
   work that moves tracked objective metrics is high priority;
   security/data-loss risks are high; tech-debt cleanup is normal; nice-to-haves are low
+- Product inspection includes a Coverage Boundary: "Inspected surfaces" have confirmed observations; "Uninspected surfaces" have NO health signal — do not generate issues based on assumed health of uninspected surfaces
+- Observations marked LOW CONFIDENCE (repeated fetch failures) should be down-weighted — do not treat them as confirmed regressions
 
 Return ONLY a JSON array (no markdown fences, no commentary) of exactly {num_issues} objects.
 Each object must have:
