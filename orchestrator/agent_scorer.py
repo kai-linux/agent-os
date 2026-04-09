@@ -691,6 +691,21 @@ def write_production_feedback(root: Path, metrics_file: Path):
         lines += ["", "## Top Blocker Codes"]
         for bc in sorted(blocker_counts, key=lambda k: -blocker_counts[k])[:5]:
             lines.append(f"- {bc}: {blocker_counts[bc]}")
+        lines += [
+            "",
+            "## Blocker Regression Monitoring",
+            "",
+            "Alert thresholds (rolling 24h, forward-looking post-fix only):",
+            "- missing_context > 5 → Telegram alert with RCA runbook",
+            "",
+            "Regression test guidance:",
+            "- missing_context: Verify write_prompt() injects structured dispatch context "
+            "(git state, objectives, sprint directives). Test with test_queue.py prompt tests.",
+            "- fallback_exhausted: All configured agents failed health gate. "
+            "Check agent_scorer.py health thresholds and agent_stats.jsonl recent windows.",
+            "- missing_credentials: Runner credential preflight failed. "
+            "Check queue.py agent_available() and secrets.json presence.",
+        ]
     lines.append("")
 
     feedback_path = root / "PRODUCTION_FEEDBACK.md"
