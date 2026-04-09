@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from pathlib import Path
 
 
@@ -177,6 +178,56 @@ def should_include_research(task_type: str, body: str) -> bool:
         return True
     lowered = str(body or "").lower()
     return any(hint in lowered for hint in EXECUTION_RESEARCH_HINTS)
+
+
+def gather_recent_git_state(repo_path: Path, base_branch: str = "main", max_commits: int = 10) -> str:
+    """Return recent commit log on the base branch for worker orientation.
+
+    Gives workers visibility into what has recently landed so they can avoid
+    conflicts and understand current repo state.  Runs in <200ms.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "log", f"origin/{base_branch}", f"--max-count={max_commits}", "--oneline"],
+            capture_output=True, text=True, timeout=5, cwd=str(repo_path),
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return "(recent git state unavailable)"
+
+
+def gather_objective_alignment(repo_path: Path, cfg: dict | None = None, github_slug: str = "") -> str:
+    """Return a brief objective alignment summary for worker prompts.
+
+    Workers that understand what metrics the repo is optimising for can make
+    better trade-off decisions and avoid missing_context blockers when the
+    task rationale isn't self-evident from the issue body alone.
+    """
+    try:
+        from orchestrator.objectives import load_repo_objective, objective_metrics
+    except ImportError:
+        return ""
+    if not cfg:
+        return ""
+    objective = load_repo_objective(cfg, github_slug, repo_path)
+    if not objective:
+        return ""
+    metrics = objective_metrics(objective)
+    if not metrics:
+        return ""
+    primary = str(objective.get("primary_outcome", "")).strip()
+    lines = []
+    if primary:
+        lines.append(f"Primary outcome: {primary}")
+    lines.append("Tracked metrics (id / weight / direction):")
+    for m in metrics:
+        mid = m.get("id", "?")
+        weight = m.get("weight", "?")
+        direction = m.get("direction", "?")
+        lines.append(f"  - {mid}: weight={weight}, direction={direction}")
+    return "\n".join(lines)
 
 
 def build_execution_context(repo_path: Path, task_type: str, body: str) -> str:
