@@ -272,7 +272,13 @@ def _validated_agent_assignment(cfg: dict, project_key: str, task_type: str, req
 
     metrics_file = Path(cfg.get("root_dir", ".")).expanduser() / "runtime" / "metrics" / "agent_stats.jsonl"
     # Adaptive gate: skip agents with <25% success rate over 7 days
-    chain, adaptive_skipped = filter_healthy_agents(chain, metrics_file, threshold=ADAPTIVE_HEALTH_THRESHOLD, window_days=ADAPTIVE_HEALTH_WINDOW_DAYS)
+    chain, adaptive_skipped = filter_healthy_agents(
+        chain,
+        metrics_file,
+        threshold=ADAPTIVE_HEALTH_THRESHOLD,
+        window_days=ADAPTIVE_HEALTH_WINDOW_DAYS,
+        task_type=task_type,
+    )
     for agent, stats in adaptive_skipped.items():
         print(f"agent={agent} skipped: {round(stats['rate'] * 100)}% success rate (7d adaptive health gate)")
     if adaptive_skipped:
@@ -283,7 +289,7 @@ def _validated_agent_assignment(cfg: dict, project_key: str, task_type: str, req
             passed=chain,
             context=f"dispatcher:resolve_agent task_type={task_type}",
         )
-    healthy_chain, skipped_agents = filter_healthy_agents(chain, metrics_file)
+    healthy_chain, skipped_agents = filter_healthy_agents(chain, metrics_file, task_type=task_type)
     if not healthy_chain:
         skipped_summary = ", ".join(
             f"{agent} ({round(stats['rate'] * 100, 1)}% success over {stats['total']} task(s) in the last 24h)"

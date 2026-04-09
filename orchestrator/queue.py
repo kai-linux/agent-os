@@ -1819,7 +1819,13 @@ def get_agent_chain(meta: dict, cfg: dict) -> list[str]:
             filtered.append(agent)
     metrics_file = Path(cfg.get("root_dir", ".")).expanduser() / "runtime" / "metrics" / "agent_stats.jsonl"
     # Adaptive gate: skip agents with <25% success rate over 7 days
-    filtered, adaptive_skipped = filter_healthy_agents(filtered, metrics_file, threshold=ADAPTIVE_HEALTH_THRESHOLD, window_days=ADAPTIVE_HEALTH_WINDOW_DAYS)
+    filtered, adaptive_skipped = filter_healthy_agents(
+        filtered,
+        metrics_file,
+        threshold=ADAPTIVE_HEALTH_THRESHOLD,
+        window_days=ADAPTIVE_HEALTH_WINDOW_DAYS,
+        task_type=task_type,
+    )
     for agent, stats in adaptive_skipped.items():
         print(f"agent={agent} skipped: {round(stats['rate'] * 100)}% success rate (7d adaptive health gate)")
     if adaptive_skipped:
@@ -1830,7 +1836,7 @@ def get_agent_chain(meta: dict, cfg: dict) -> list[str]:
             passed=filtered,
             context=f"queue:get_agent_chain task_type={meta.get('task_type', 'unknown')}",
         )
-    healthy, _skipped = filter_healthy_agents(filtered, metrics_file)
+    healthy, _skipped = filter_healthy_agents(filtered, metrics_file, task_type=task_type)
     return healthy
 
 
