@@ -130,6 +130,7 @@ def test_generate_report_with_metrics(tmp_path):
     assert "Gate Decisions" in report
     assert "Validation Status" in report
     assert "False Positive Analysis" in report
+    assert "Debugging Path" in report
 
 
 def test_generate_report_empty_metrics(tmp_path):

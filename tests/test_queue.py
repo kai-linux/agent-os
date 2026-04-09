@@ -235,6 +235,35 @@ def test_get_agent_chain_skips_agents_below_adaptive_health_threshold(tmp_path):
     assert "claude" in chain
 
 
+def test_get_agent_chain_uses_task_type_specific_health_when_sample_is_sufficient(tmp_path):
+    metrics_dir = tmp_path / "runtime" / "metrics"
+    metrics_dir.mkdir(parents=True)
+    now = datetime.now(timezone.utc).isoformat()
+    records = [
+        {"timestamp": now, "agent": "codex", "status": "blocked", "task_type": "implementation"},
+        {"timestamp": now, "agent": "codex", "status": "blocked", "task_type": "implementation"},
+        {"timestamp": now, "agent": "codex", "status": "blocked", "task_type": "implementation"},
+        {"timestamp": now, "agent": "codex", "status": "complete", "task_type": "debugging"},
+        {"timestamp": now, "agent": "codex", "status": "complete", "task_type": "debugging"},
+        {"timestamp": now, "agent": "codex", "status": "complete", "task_type": "debugging"},
+        {"timestamp": now, "agent": "claude", "status": "complete", "task_type": "implementation"},
+    ]
+    (metrics_dir / "agent_stats.jsonl").write_text(
+        "".join(json.dumps(record) + "\n" for record in records),
+        encoding="utf-8",
+    )
+
+    from unittest.mock import patch
+
+    with patch("orchestrator.queue.agent_available", return_value=(True, None)):
+        chain = get_agent_chain(
+            {"task_type": "debugging"},
+            {**_cfg({"debugging": ["codex", "claude"]}), "root_dir": str(tmp_path)},
+        )
+
+    assert chain == ["codex", "claude"]
+
+
 def test_get_agent_chain_prefers_repo_specific_fallbacks():
     cfg = {
         **_cfg(

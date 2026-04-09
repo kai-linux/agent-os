@@ -77,6 +77,23 @@ def _compute_window_rates(records: list[dict], window_days: int) -> dict[str, di
     return compute_success_rates(windowed)
 
 
+def _compute_task_type_rates(records: list[dict], task_type: str, window_days: int) -> dict[str, dict]:
+    """Compute per-agent success rates for one task type within the report window."""
+    cutoff = datetime.now(tz=timezone.utc) - timedelta(days=window_days)
+    windowed = []
+    for rec in records:
+        ts_raw = rec.get("timestamp", "")
+        try:
+            ts = datetime.fromisoformat(ts_raw)
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+        except (ValueError, TypeError):
+            continue
+        if ts >= cutoff:
+            windowed.append(rec)
+    return compute_success_rates(windowed, task_type=task_type)
+
+
 def _count_blocker_codes(records: list[dict], window_days: int) -> dict[str, int]:
     """Count blocker codes within a time window."""
     cutoff = datetime.now(tz=timezone.utc) - timedelta(days=window_days)
@@ -128,6 +145,7 @@ def generate_report(cfg: dict | None = None) -> str:
 
     baseline_rates = _compute_baseline(all_records)
     window_rates = _compute_window_rates(all_records, REPORT_WINDOW_DAYS)
+    debug_window_rates = _compute_task_type_rates(all_records, "debugging", REPORT_WINDOW_DAYS)
     blocker_codes_all = _count_blocker_codes(all_records, window_days=365)
     blocker_codes_window = _count_blocker_codes(all_records, REPORT_WINDOW_DAYS)
 
@@ -170,6 +188,21 @@ def generate_report(cfg: dict | None = None) -> str:
         s = window_rates[agent]
         lines.append(f"| {agent} | {s['total']} | {s['successes']} | {s['rate']*100:.1f}% |")
     lines.append(f"| **Overall** | **{total_w}** | **{complete_w}** | **{overall_w:.1f}%** |")
+    lines.append("")
+    lines.append(f"## Last {REPORT_WINDOW_DAYS} Days Debugging Path")
+    lines.append(f"")
+    debug_total = sum(v["total"] for v in debug_window_rates.values())
+    debug_complete = sum(v["successes"] for v in debug_window_rates.values())
+    debug_rate = debug_complete / debug_total * 100 if debug_total else 0
+    if debug_total:
+        lines.append(f"| Agent | Debugging Tasks | Successes | Rate |")
+        lines.append(f"|-------|----------------:|----------:|-----:|")
+        for agent in sorted(debug_window_rates):
+            s = debug_window_rates[agent]
+            lines.append(f"| {agent} | {s['total']} | {s['successes']} | {s['rate']*100:.1f}% |")
+        lines.append(f"| **Overall** | **{debug_total}** | **{debug_complete}** | **{debug_rate:.1f}%** |")
+    else:
+        lines.append("No debugging-task metrics in this window.")
     lines.append("")
 
     # Gate decision analysis
