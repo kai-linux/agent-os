@@ -214,6 +214,7 @@ github_issue_number: 98
 github_issue_url: https://github.com/owner/repo/issues/98
 branch: agent/task-20260401-120602-debug-pr98
 attempt: 3
+prompt_snapshot_path: /home/kai/agent-os/runtime/prompts/task-20260401-120602-debug-pr98.txt
 ---
 
 # Goal
@@ -300,13 +301,18 @@ Recover the failing job context.
     assert "test_failure" in note_text
     assert "missing_context" in note_text
     assert "task `task-20260401-120602-debug-pr98`" in note_text
+    # Prompt snapshot reference is embedded in escalation note, comment, telegram, and action
+    assert "runtime/prompts/task-20260401-120602-debug-pr98.txt" in note_text
     assert comments == [("owner/repo", 98, comments[0][2])]
     assert "## Blocked task escalation" in comments[0][2]
     assert "`test_failure`" in comments[0][2]
     assert "Attempt 3 | task `task-20260401-120602-debug-pr98`" in comments[0][2]
+    assert "runtime/prompts/task-20260401-120602-debug-pr98.txt" in comments[0][2]
     assert len(saved_actions) == 2
     assert saved_actions[-1]["message_id"] == 77
+    assert saved_actions[-1].get("prompt_snapshot_path") == "/home/kai/agent-os/runtime/prompts/task-20260401-120602-debug-pr98.txt"
     assert sent and sent[0][1]["inline_keyboard"][0][0]["text"] == "Retry"
+    assert "runtime/prompts/task-20260401-120602-debug-pr98.txt" in sent[0][0]
 
 
 def test_escalate_over_retried_blocked_task_uses_age_threshold_and_dedupes(tmp_path, monkeypatch):

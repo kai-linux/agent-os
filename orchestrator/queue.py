@@ -2028,6 +2028,9 @@ def create_escalation_note(original_meta: dict, original_body: str, result: dict
 ## Task Type
 {original_meta.get("task_type", "unknown")}
 
+## Prompt Snapshot
+{original_meta.get("prompt_snapshot_path") or "none"}
+
 ## Models Tried
 {", ".join(model_attempts) if model_attempts else "None"}
 

@@ -39,6 +39,7 @@ from orchestrator.queue import (
     verify_pr_ci_debug_completion,
     write_unblock_notes_artifact,
     WorkflowValidationError,
+    create_escalation_note,
     write_prompt,
 )
 
@@ -1549,3 +1550,43 @@ def test_write_prompt_omits_enhanced_context_without_worktree(tmp_path):
 
     text = prompt_file.read_text(encoding="utf-8")
     assert "Dispatch Context (structured)" not in text
+
+
+# ---------------------------------------------------------------------------
+# create_escalation_note includes prompt snapshot path
+# ---------------------------------------------------------------------------
+
+def test_create_escalation_note_includes_prompt_snapshot_path(tmp_path):
+    escalated = tmp_path / "escalated"
+    escalated.mkdir()
+    logfile = tmp_path / "task.log"
+    logfile.write_text("", encoding="utf-8")
+    queue_summary_log = tmp_path / "queue-summary.log"
+    queue_summary_log.write_text("", encoding="utf-8")
+
+    meta = {
+        "task_id": "task-snap-test",
+        "branch": "agent/task-snap-test",
+        "repo": "/tmp/repo",
+        "task_type": "implementation",
+        "prompt_snapshot_path": "/home/kai/agent-os/runtime/prompts/task-snap-test.txt",
+    }
+    result = {
+        "status": "blocked",
+        "blocker_code": "missing_context",
+        "summary": "Blocked for testing.",
+        "done": ["- None"],
+        "blockers": ["- Something missing"],
+        "next_step": "Retry",
+        "files_changed": ["- None"],
+        "tests_run": ["- None"],
+        "decisions": ["- None"],
+        "risks": ["- None"],
+        "attempted_approaches": ["- None"],
+        "unblock_notes": None,
+    }
+
+    esc_path = create_escalation_note(meta, "Test body.", result, logfile, ["claude"], escalated, queue_summary_log)
+    content = esc_path.read_text(encoding="utf-8")
+    assert "## Prompt Snapshot" in content
+    assert "runtime/prompts/task-snap-test.txt" in content
