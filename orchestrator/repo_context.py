@@ -1,6 +1,7 @@
 """Shared repo context layers for planner and worker prompts."""
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -10,6 +11,7 @@ RESEARCH_ARTIFACT_DEFAULT = "PLANNING_RESEARCH.md"
 PRODUCTION_FEEDBACK_ARTIFACT_DEFAULT = "PRODUCTION_FEEDBACK.md"
 SIGNALS_ARTIFACT_DEFAULT = "PLANNING_SIGNALS.md"
 PRODUCT_INSPECTION_ARTIFACT_DEFAULT = "PRODUCT_INSPECTION.md"
+SPRINT_DIRECTIVES_ARTIFACT = "runtime/next_sprint_focus.json"
 EXECUTION_RESEARCH_TASK_TYPES = {"architecture", "research", "docs", "design", "content"}
 EXECUTION_RESEARCH_HINTS = {
     "strategy", "roadmap", "research", "competitor", "analytics", "conversion",
@@ -109,6 +111,52 @@ def read_product_inspection_artifact(
         return "(no product inspection artifact)"
     content = artifact.read_text(encoding="utf-8", errors="replace").strip()
     return content[:max_chars] if content else "(empty product inspection artifact)"
+
+
+def read_sprint_directives(
+    repo_path: Path,
+    artifact_name: str = SPRINT_DIRECTIVES_ARTIFACT,
+    max_chars: int = 2000,
+) -> str:
+    """Format the persisted next-sprint directives sidecar for LLM prompts.
+
+    The strategic planner writes operator-validated "next sprint focus" and
+    "risks and gaps" bullets to runtime/next_sprint_focus.json at the end of
+    each sprint. Both the backlog groomer and the next planner run should
+    treat these as priority drivers so sprint insights actually propagate
+    into the next cycle instead of being regenerated from static inputs.
+    """
+    artifact = repo_path / artifact_name
+    if not artifact.exists():
+        return "(no sprint directives — run a sprint cycle to generate next_sprint_focus.json)"
+    try:
+        payload = json.loads(artifact.read_text(encoding="utf-8"))
+    except Exception as e:
+        return f"(sprint directives unreadable: {e})"
+
+    generated_at = str(payload.get("generated_at") or "unknown")
+    headline = str(payload.get("headline") or "").strip()
+    risks = [str(item).strip() for item in payload.get("risks_and_gaps") or [] if str(item).strip()]
+    focus = [str(item).strip() for item in payload.get("next_sprint_focus") or [] if str(item).strip()]
+
+    if not (headline or risks or focus):
+        return "(sprint directives empty)"
+
+    lines = [f"Generated: {generated_at}"]
+    if headline:
+        lines.append(f"Headline: {headline}")
+    if focus:
+        lines.append("")
+        lines.append("Next Sprint Focus (operator-validated priorities — treat as drivers):")
+        for item in focus:
+            lines.append(f"- {item}")
+    if risks:
+        lines.append("")
+        lines.append("Risks and Gaps surfaced last sprint (avoid repeating; address where possible):")
+        for item in risks:
+            lines.append(f"- {item}")
+    text = "\n".join(lines)
+    return text[:max_chars]
 
 
 def read_production_feedback_artifact(
