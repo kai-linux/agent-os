@@ -26,6 +26,16 @@
 
 ## Recent Changes
 
+### 2026-04-09 — [task-20260409-210702-set-dev-api-key-environment-variable-to-enable-aut] (#172 kai-linux/agent-os)
+codex failed before producing a valid result file. Runner exited with code 1 while executing `/home/kai/agent-os/bin/agent_runner.sh codex /srv/worktrees/agent-os/task-20260409-210702-set-dev-api-key-environment-variable-to-enable-aut /home/kai/agent-os/runtime/tmp/task-20260409-210702-set-dev-api-key-environment-variable-to-enable-aut.txt`. Classified as: usage limit / rate limit. Orchestrator rescued and pushed the worktree changes.
+
+**Files:** `- Unknown / inspect worktree`
+
+**Decisions:**
+  - - Treat runner failure as model-level failure and continue fallback chain if possible.
+  - - Queue performed git rescue after the agent left valid changes behind.
+
+
 ### 2026-04-09 — [task-20260409-210522-validate-missing-context-blocker-reduction-and-con] (#175 kai-linux/agent-os)
 Validated that the structured dispatch context fix (task-20260409-070520, issue #159) reduced missing_context blockers from 7 instances (pre-fix 14-day window) to 0 instances post-fix. Implemented forward-looking Telegram regression alerting in log_analyzer.py that fires when missing_context exceeds 5 in a rolling 24h window (excluding historical backlog data). Added blocker code distribution with regression test guidance to PRODUCTION_FEEDBACK.md generation, and documented the alert threshold and RCA runbook in example.config.yaml.
 
