@@ -1499,12 +1499,44 @@ Rules:
 - Always write .agent_result.md even if no code changes were made
 - In ATTEMPTED_APPROACHES, describe what you tried this run so future runs do not repeat the same failed path
 - Read the prior model attempts above and avoid repeating clearly failed approaches unless you have a specific new reason
-- In MANUAL_STEPS, list every action the human operator must take to activate this feature.
-  This includes: crontab entries, config.yaml changes, environment variables, server commands, package installs.
-  Format cron entries as ready-to-paste crontab lines with a comment.
-  Format config.yaml additions as indented YAML snippets.
-  Write exactly "- None" if no manual action is required.
-  This section is CRITICAL — the operator depends on it to know what to do after deployment.
+- Automation-first escalation policy: before emitting ANY item under MANUAL_STEPS
+  or marking the task blocked on a "manual action", attempt to automate it. The
+  operator should only be asked to do things that genuinely cannot be automated.
+  Attempt in this order:
+    * Cron / systemd timers: run `crontab -l` and pipe an updated crontab via
+      `crontab -` to install the entry directly. Do not just print the line for
+      the operator to paste. Only list as MANUAL_STEP if the host is not
+      writable or cron is not the scheduler in use.
+    * GitHub UI actions (labels, assignees, project moves, issue/PR pinning,
+      release creation, milestone assignment): try `gh api` / `gh api graphql`
+      first. `gh` is authenticated in this environment. Example: pinning an
+      issue → `gh api graphql -f query='mutation{{pinIssue(...)}}'`. Only list as
+      MANUAL_STEP if no API exists for the action (e.g. GitHub Discussions
+      pinning is UI-only and has no GraphQL mutation — that is genuinely manual).
+    * External service posts (dev.to, Twitter, Slack, Telegram, etc.): check
+      for a credential in the environment (DEV_API_KEY, SLACK_WEBHOOK_URL,
+      TELEGRAM_BOT_TOKEN, etc.). If present, use the service's REST API to post
+      directly. Only list as MANUAL_STEP if no credential is configured, and in
+      that case name the exact env var the operator must set.
+    * Config files under the repo (config.yaml, .env.example, systemd units in
+      the repo): edit the file directly and include it in the diff. Do not
+      emit a MANUAL_STEP telling the operator to make an edit you could have
+      made yourself.
+  When you DO automate one of these steps, record it in DONE (not MANUAL_STEPS)
+  and mention the command you ran in DECISIONS so the operator can audit it.
+  Escalating a step to MANUAL_STEPS that was actually automatable is a task
+  quality regression — the operator will re-queue the work.
+- In MANUAL_STEPS, list only the residual actions the human operator must take
+  after the above automation attempts. Typical legitimate entries:
+    * GitHub Discussions pinning (UI-only, no API)
+    * Browser-only SaaS configuration with no public API
+    * Secret rotation or new credential provisioning
+    * Physical/out-of-band actions (DNS changes, billing, domain transfers)
+  Format cron entries as ready-to-paste crontab lines with a comment (only if
+  the automated install above actually failed). Format config.yaml additions
+  as indented YAML snippets. Write exactly "- None" if no manual action is
+  required. This section is CRITICAL — the operator depends on it to know
+  what genuinely cannot be automated.
 """
     prompt_file.write_text(prompt, encoding="utf-8")
     snapshot_path.write_text(prompt, encoding="utf-8")
