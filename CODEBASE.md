@@ -26,6 +26,19 @@
 
 ## Recent Changes
 
+### 2026-04-09 — [task-20260409-070128-harden-product-inspection-md-per-observation-prove] (#137 kai-linux/agent-os)
+Hardened the product inspection pipeline with per-observation provenance (source URL, fetch timestamp, HTTP status, response size, extraction confidence), cadence-aligned staleness detection, explicit coverage boundary framing, and transient-failure detection with consecutive failure tracking. Non-200 responses are distinctly tagged and targets with 3+ consecutive failures are marked low_confidence. The planner and groomer prompts now include rules to correctly interpret coverage boundaries and down-weight low-confidence signals.
+
+**Files:** `- orchestrator/product_inspector.py`, `- orchestrator/strategic_planner.py`, `- orchestrator/backlog_groomer.py`, `- tests/test_product_inspector.py`, `- .gitignore`
+
+**Decisions:**
+  - - Used curl -w "\n%{http_code}" to extract HTTP status from fetches rather than adding a separate HEAD request, keeping the single-fetch-per-target model
+  - - Stored failure history in .product_inspection_failures.json in the managed repo root (gitignored) rather than runtime/metrics/ since it's per-repo state tied to inspection targets
+  - - Set CONSECUTIVE_FAILURE_THRESHOLD=3 as a reasonable default for transient vs persistent failure classification
+  - - Coverage boundary always lists "All authenticated flows" and "JavaScript-rendered content" as uninspected since those are fundamental limitations of the text-only fetch approach
+  - - cadence_hours parameter defaults to 0 (use configured max_age_hours) for backward compatibility; only the strategic planner passes it
+
+
 ### 2026-04-08 — [task-20260408-150519-add-github-adoption-metrics-to-production-feedback] (#150 kai-linux/agent-os)
 Added GitHub adoption metrics (stars, forks, 14-day growth delta, and trend status) to PRODUCTION_FEEDBACK.md by adding three helper functions to strategic_planner.py and inserting an "External Adoption Signals" section into the substrate production feedback generation. Metrics are fetched live via the public GitHub API (gh cli) and growth trends are computed from the existing evidence history JSONL written by bin/export_github_evidence.sh.
 
