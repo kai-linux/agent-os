@@ -98,17 +98,68 @@ def load_recent_mailbox_entries(directory: Path, status: str, cutoff: datetime) 
         event_time = _event_timestamp(path, meta)
         if event_time < cutoff:
             continue
+        issue_number = meta.get("github_issue_number")
+        try:
+            issue_number = int(issue_number) if issue_number is not None else None
+        except (TypeError, ValueError):
+            issue_number = None
         entries.append(
             {
                 "task_id": str(meta.get("task_id") or path.stem),
                 "label": _task_label(path, meta, body),
                 "status": status,
                 "timestamp": event_time,
+                "issue_number": issue_number,
+                "task_slug": _task_slug(str(meta.get("task_id") or path.stem)),
             }
         )
 
     entries.sort(key=lambda item: item["timestamp"], reverse=True)
     return entries
+
+
+def dedupe_entries_by_logical_key(entries: list[dict]) -> list[dict]:
+    """Collapse multiple entries that represent the same logical piece of work.
+
+    The dispatcher regenerates task files on each retry (new task_id per
+    cycle), so raw mailbox counts treat infra-retry churn, CI-debug
+    re-dispatch, and follow-up cascades as distinct completions. That's
+    misleading: a single logical item like "fix CI failure on PR #163" may
+    land in DONE under 8 different task_ids within an hour while making no
+    actual progress.
+
+    Dedup key is (github_issue_number, status) when an issue number exists,
+    otherwise (task_slug, status). We keep the most recent entry per key
+    (entries arrive pre-sorted newest-first) and attach an ``attempts``
+    count so churn is still visible in the digest rather than silently
+    hidden. Agent churn is information — the digest should surface it, not
+    launder it.
+    """
+    seen: dict[tuple, dict] = {}
+    for entry in entries:
+        issue_number = entry.get("issue_number")
+        key: tuple
+        if issue_number is not None:
+            key = ("issue", issue_number, entry["status"])
+        else:
+            key = ("slug", entry.get("task_slug") or entry["task_id"], entry["status"])
+        existing = seen.get(key)
+        if existing is None:
+            copy = dict(entry)
+            copy["attempts"] = 1
+            seen[key] = copy
+            continue
+        existing["attempts"] = existing.get("attempts", 1) + 1
+        # Keep whichever entry is newer as the representative, preserving
+        # the running attempts count.
+        if entry["timestamp"] > existing["timestamp"]:
+            attempts = existing["attempts"]
+            copy = dict(entry)
+            copy["attempts"] = attempts
+            seen[key] = copy
+    deduped = list(seen.values())
+    deduped.sort(key=lambda item: item["timestamp"], reverse=True)
+    return deduped
 
 
 def parse_queue_summary_log(log_file: Path) -> dict[str, dict]:
@@ -222,6 +273,14 @@ def collect_pr_activity(cfg: dict, cutoff: datetime) -> dict[str, int]:
     return {"created": created, "merged": merged}
 
 
+def _format_entry_line(entry: dict) -> str:
+    attempts = int(entry.get("attempts") or 1)
+    label = entry["label"]
+    if attempts > 1:
+        return f"{label} (×{attempts} attempts)"
+    return label
+
+
 def format_digest_message(
     completed: list[dict],
     blocked: list[dict],
@@ -241,19 +300,19 @@ def format_digest_message(
     ]
 
     for entry in completed[:MAX_TASKS_PER_SECTION]:
-        lines.append(f"- {entry['label']}")
+        lines.append(f"- {_format_entry_line(entry)}")
     if len(completed) > MAX_TASKS_PER_SECTION:
         lines.append(f"- +{len(completed) - MAX_TASKS_PER_SECTION} more")
 
     lines.append(f"⏸️ Blocked: {len(blocked)}")
     for entry in blocked[:MAX_TASKS_PER_SECTION]:
-        lines.append(f"- {entry['label']}")
+        lines.append(f"- {_format_entry_line(entry)}")
     if len(blocked) > MAX_TASKS_PER_SECTION:
         lines.append(f"- +{len(blocked) - MAX_TASKS_PER_SECTION} more")
 
     lines.append(f"🛑 Escalated: {len(escalated)}")
     for entry in escalated[:MAX_TASKS_PER_SECTION]:
-        lines.append(f"- {entry['label']}")
+        lines.append(f"- {_format_entry_line(entry)}")
     if len(escalated) > MAX_TASKS_PER_SECTION:
         lines.append(f"- +{len(escalated) - MAX_TASKS_PER_SECTION} more")
 
@@ -306,11 +365,20 @@ def run():
     now = datetime.now(tz=timezone.utc)
     cutoff = now - timedelta(hours=WINDOW_HOURS)
 
-    completed = load_recent_mailbox_entries(paths["DONE"], "complete", cutoff)
-    blocked = load_recent_mailbox_entries(paths["BLOCKED"], "blocked", cutoff)
-    escalated = load_recent_mailbox_entries(paths["ESCALATED"], "escalated", cutoff)
+    completed_raw = load_recent_mailbox_entries(paths["DONE"], "complete", cutoff)
+    blocked_raw = load_recent_mailbox_entries(paths["BLOCKED"], "blocked", cutoff)
+    escalated_raw = load_recent_mailbox_entries(paths["ESCALATED"], "escalated", cutoff)
+    # Dedupe by logical key (github_issue_number or task slug) so infra-retry
+    # churn and follow-up cascades don't inflate the counts or the listing.
+    completed = dedupe_entries_by_logical_key(completed_raw)
+    blocked = dedupe_entries_by_logical_key(blocked_raw)
+    escalated = dedupe_entries_by_logical_key(escalated_raw)
     queue_details = parse_queue_summary_log(paths["QUEUE_SUMMARY_LOG"])
-    agent_rates = compute_agent_success_rates(completed + blocked + escalated, queue_details)
+    # Success rates still computed against raw entries so per-agent routing
+    # denominators reflect actual dispatches, not logical unique items.
+    agent_rates = compute_agent_success_rates(
+        completed_raw + blocked_raw + escalated_raw, queue_details
+    )
     pr_activity = collect_pr_activity(cfg, cutoff)
 
     message = format_digest_message(completed, blocked, escalated, agent_rates, pr_activity, now)
