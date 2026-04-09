@@ -7,6 +7,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from orchestrator.log_analyzer import (
     build_blocker_findings,
     build_issue_body,
+    check_blocker_regression_alerts,
     collect_structured_findings,
     dedupe_synthesized_issues,
 )
@@ -120,3 +121,42 @@ def test_build_issue_body_includes_evidence_and_reasoning():
     assert "`agent_degraded:codex` (agent_scorer): Codex fell below the weekly success-rate threshold." in body
     assert "## Reasoning" in body
     assert "The same degradation signal appears across recent operational evidence." in body
+
+
+def test_blocker_regression_alert_fires_above_threshold():
+    """Alert fires when missing_context exceeds 5 in rolling 24h post-fix."""
+    now = datetime.now(tz=timezone.utc)
+    fix_ts = (now - timedelta(hours=12)).isoformat()
+    records = [
+        {"timestamp": (now - timedelta(hours=i)).isoformat(), "status": "blocked", "blocker_code": "missing_context"}
+        for i in range(6)
+    ]
+    alerts = check_blocker_regression_alerts(records, {}, fix_timestamp=fix_ts)
+    assert len(alerts) == 1
+    assert "missing_context" in alerts[0]
+    assert "threshold: 5" in alerts[0]
+
+
+def test_blocker_regression_alert_silent_below_threshold():
+    """No alert when missing_context is at or below threshold."""
+    now = datetime.now(tz=timezone.utc)
+    fix_ts = (now - timedelta(hours=12)).isoformat()
+    records = [
+        {"timestamp": (now - timedelta(hours=i)).isoformat(), "status": "blocked", "blocker_code": "missing_context"}
+        for i in range(5)
+    ]
+    alerts = check_blocker_regression_alerts(records, {}, fix_timestamp=fix_ts)
+    assert len(alerts) == 0
+
+
+def test_blocker_regression_alert_ignores_pre_fix_data():
+    """Records before fix_timestamp are excluded from the count."""
+    now = datetime.now(tz=timezone.utc)
+    fix_ts = (now - timedelta(hours=2)).isoformat()
+    records = [
+        {"timestamp": (now - timedelta(hours=i)).isoformat(), "status": "blocked", "blocker_code": "missing_context"}
+        for i in range(10)
+    ]
+    # Only 2 records are post-fix (hours 0 and 1), so no alert
+    alerts = check_blocker_regression_alerts(records, {}, fix_timestamp=fix_ts)
+    assert len(alerts) == 0
