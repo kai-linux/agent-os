@@ -69,7 +69,9 @@ Agent OS solves coordination. The agents do the rest.
   Files fix tickets ──► back into the backlog
 ```
 
-**That last arrow is the point.** The system files tickets about its own failures. Those tickets enter the backlog. The agents fix them. The fixes get merged. Next week, the system is better. **Indefinitely.**
+**That last arrow is the point.** The system files tickets about its own failures.
+Those tickets enter the backlog. The agents fix them. The fixes get merged.
+Next week, the system is better. **Indefinitely.**
 
 ---
 
@@ -179,3 +181,13 @@ reviewing CI, and merging changes with zero human intervention per task.
 | Configuration, objectives, evidence, cron setup | [docs/configuration.md](docs/configuration.md) |
 | Roadmap and capability ladder | [docs/roadmap.md](docs/roadmap.md) |
 | Case study: self-managed repo | [docs/case-study-agent-os.md](docs/case-study-agent-os.md) |
+
+---
+
+## Get Involved
+
+**Try it** — clone the repo and run `./demo.sh` to see an agent ship code in minutes.
+
+**Contribute** — check [open issues](https://github.com/kai-linux/agent-os/issues) or file one. PRs welcome.
+
+**Questions?** — open a [discussion](https://github.com/kai-linux/agent-os/issues) or reach out via the repo.
