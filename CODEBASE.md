@@ -26,6 +26,17 @@
 
 ## Recent Changes
 
+### 2026-04-09 — [task-20260409-210219-investigate-and-fix-codex-agent-runtime-degradatio] (#173 kai-linux/agent-os)
+Root cause was metric and routing instability, not a new codex CLI regression: codex was being scored as one blended bucket across mixed task types, so debugging-path decisions were polluted by unrelated implementation outcomes. I fixed the scorer and health gates to use task-type-aware success rates with an overall fallback for small samples, and added reporting/tests for the debugging slice.
+
+**Files:** `- .agent_result.md`, `- orchestrator/agent_scorer.py`, `- orchestrator/github_dispatcher.py`, `- orchestrator/health_gate_report.py`, `- orchestrator/queue.py`, `- tests/test_agent_scorer.py`, `- tests/test_github_dispatcher.py`, `- tests/test_health_gate_report.py`
+
+**Decisions:**
+  - - Treated the degradation as a task-slice scoring problem because the issue explicitly targets codex on debugging tasks and the existing scorer blended heterogeneous workloads.
+  - - Kept the diff bounded by reusing existing `agent_stats.jsonl` telemetry instead of adding new persistence or a separate codex-only metric store.
+  - - Used task-type-specific rates only when there are at least 3 records in the current window, falling back to overall agent rates to avoid unstable routing on tiny samples.
+
+
 ### 2026-04-09 — [task-20260409-070520-reduce-missing-context-task-blockers-through-enhan] (#159 kai-linux/agent-os)
 Enhanced the task-dispatch context template with three new structured context sections — recent git state (10 commits on base branch), objective alignment (tracked metrics with weights/directions), and sprint directives — injected into write_prompt() as a "Dispatch Context (structured)" block. These address the root causes of 7 missing_context blockers in the last 14 days (all debugging tasks where agents lacked visibility into recent repo changes, objective metrics, and sprint priorities).
 
