@@ -26,6 +26,19 @@
 
 ## Recent Changes
 
+### 2026-04-09 — [task-20260409-070520-reduce-missing-context-task-blockers-through-enhan] (#159 kai-linux/agent-os)
+Enhanced the task-dispatch context template with three new structured context sections — recent git state (10 commits on base branch), objective alignment (tracked metrics with weights/directions), and sprint directives — injected into write_prompt() as a "Dispatch Context (structured)" block. These address the root causes of 7 missing_context blockers in the last 14 days (all debugging tasks where agents lacked visibility into recent repo changes, objective metrics, and sprint priorities).
+
+**Files:** `- orchestrator/repo_context.py`, `- orchestrator/queue.py`, `- tests/test_queue.py`
+
+**Decisions:**
+  - - Added context in write_prompt() rather than build_execution_context() to access task metadata (base_branch, github_repo) without changing the shared function signature
+  - - Used subprocess with 5s timeout for git log to keep overhead well under 1s constraint
+  - - Lazy-loaded objectives via try/except import to avoid circular imports
+  - - Sprint directives use existing read_sprint_directives() which was already available but not wired into worker prompts
+  - - Enhanced context only injected when worktree exists (not for prompt-less invocations)
+
+
 ### 2026-04-09 — [task-20260409-070419-validate-and-monitor-adaptive-agent-health-gate-im] (#162 kai-linux/agent-os)
 Added health gate monitoring infrastructure: JSONL audit trail for gate decisions (health_gate_decisions.jsonl), a weekly report generator (orchestrator/health_gate_report.py) that produces a markdown validation report with baseline metrics, window metrics, gate decision analysis, blocker code trends, validation status, and false positive detection. Baseline captured: claude 100%, codex 60.3%, deepseek 46.7%, overall 68.8%. Last 7 days shows 100% success rate with only claude dispatched and zero fallback_exhausted events, confirming the gate is effective.
 
