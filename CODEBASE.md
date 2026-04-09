@@ -26,6 +26,16 @@
 
 ## Recent Changes
 
+### 2026-04-09 — [task-20260409-210321-create-public-reliability-metrics-dashboard-to-sup] (#176 kai-linux/agent-os)
+deepseek failed before producing a valid result file. Runner exited with code 1 while executing `/home/kai/agent-os/bin/agent_runner.sh deepseek /srv/worktrees/agent-os/task-20260409-210321-create-public-reliability-metrics-dashboard-to-sup /home/kai/agent-os/runtime/tmp/task-20260409-210321-create-public-reliability-metrics-dashboard-to-sup.txt`. Classified as: authentication failure. Orchestrator rescued and pushed the worktree changes.
+
+**Files:** `- Unknown / inspect worktree`
+
+**Decisions:**
+  - - Treat runner failure as model-level failure and continue fallback chain if possible.
+  - - Queue performed git rescue after the agent left valid changes behind.
+
+
 ### 2026-04-09 — [task-20260409-210219-investigate-and-fix-codex-agent-runtime-degradatio] (#173 kai-linux/agent-os)
 Root cause was metric and routing instability, not a new codex CLI regression: codex was being scored as one blended bucket across mixed task types, so debugging-path decisions were polluted by unrelated implementation outcomes. I fixed the scorer and health gates to use task-type-aware success rates with an overall fallback for small samples, and added reporting/tests for the debugging slice.
 
