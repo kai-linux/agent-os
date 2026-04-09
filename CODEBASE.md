@@ -26,6 +26,19 @@
 
 ## Recent Changes
 
+### 2026-04-09 — [task-20260409-210522-validate-missing-context-blocker-reduction-and-con] (#175 kai-linux/agent-os)
+Validated that the structured dispatch context fix (task-20260409-070520, issue #159) reduced missing_context blockers from 7 instances (pre-fix 14-day window) to 0 instances post-fix. Implemented forward-looking Telegram regression alerting in log_analyzer.py that fires when missing_context exceeds 5 in a rolling 24h window (excluding historical backlog data). Added blocker code distribution with regression test guidance to PRODUCTION_FEEDBACK.md generation, and documented the alert threshold and RCA runbook in example.config.yaml.
+
+**Files:** `- orchestrator/log_analyzer.py`, `- orchestrator/agent_scorer.py`, `- example.config.yaml`, `- tests/test_log_analyzer.py`, `- .agent_result.md`
+
+**Decisions:**
+  - - Used log_analyzer.py as the alert host since it already runs on a weekly cron and processes agent_stats.jsonl with Telegram sending capability
+  - - fix_timestamp parameter defaults to the actual fix deployment time (2026-04-09T07:53) to prevent alerting on historical data
+  - - Threshold of 5 (> 5 fires alert) chosen as the regression threshold since baseline was 7 and target is < 3
+  - - RCA runbook embedded directly in the Telegram alert message for immediate actionability
+  - - Enhanced PRODUCTION_FEEDBACK.md generation rather than manually editing the file, so blocker distribution stays current across future regenerations
+
+
 ### 2026-04-09 — [task-20260409-210416-attach-prompt-snapshot-references-to-blocked-task-] (#70 kai-linux/agent-os)
 Attached prompt snapshot references to all blocked task escalation surfaces (dispatcher escalation notes, GitHub issue comments, Telegram messages, Telegram action payloads, and queue escalation notes) by reading the existing `prompt_snapshot_path` from task frontmatter metadata.
 
