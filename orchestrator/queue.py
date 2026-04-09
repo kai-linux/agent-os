@@ -2166,7 +2166,7 @@ def record_metrics(
     metrics_dir.mkdir(parents=True, exist_ok=True)
     metrics_file = metrics_dir / "agent_stats.jsonl"
 
-    duration = (datetime.now() - start_time).total_seconds()
+    duration = (datetime.now(tz=timezone.utc) - start_time).total_seconds()
     record = {
         "timestamp": datetime.now().isoformat(),
         "task_id": meta.get("task_id", "unknown"),
@@ -2257,7 +2257,11 @@ def main():
     repo_lock_fh = None
 
     try:
-        start_time = datetime.now()
+        # UTC-aware so it can be compared to GitHub API timestamps (which are
+        # tz-aware ISO-8601) in verify_pr_ci_debug_completion. Using a naive
+        # datetime here caused an infinite infra-retry loop on CI-debug tasks
+        # when PRs #163/#165 failed CI on 2026-04-09.
+        start_time = datetime.now(tz=timezone.utc)
         meta, body = parse_task(processing)
 
         task_id = meta["task_id"]
