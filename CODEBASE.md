@@ -26,6 +26,19 @@
 
 ## Recent Changes
 
+### 2026-04-09 — [task-20260409-070319-publish-github-discussions-case-study-autonomous-m] (#161 kai-linux/agent-os)
+Published a detailed case study as GitHub Discussion #167 (https://github.com/kai-linux/agent-os/discussions/167) in the "Show and tell" category. The discussion showcases the PR-98 cascading failure recovery workflow with concrete metrics (288 commits, 59+ PRs merged, 79+ issues closed, ~8 min median PR cycle time), before/after comparison (manual vs Agent OS approach), honest failure reporting, sample PR cycle times with file/line counts, and links to all verifiable public GitHub data. Enabled GitHub Discussions on the repo as a prerequisite.
+
+**Files:** `- .agent_result.md`
+
+**Decisions:**
+  - - Used "Show and tell" category instead of "Announcements" since the case study is a showcase, not a release announcement
+  - - Focused the deep dive on PR-98 cascading failure recovery as the most compelling multi-agent workflow story (shows both failure and recovery)
+  - - Included honest failure metrics (55.7% success rate, cascade waste) to build trust per task constraints
+  - - Kept under 2000 words (~1500 words in the discussion body) for scannability
+  - - Enabled GitHub Discussions as a prerequisite since it was disabled
+
+
 ### 2026-04-09 — [task-20260409-070215-fix-readme-rendering-and-complete-truncated-sectio] (#156 kai-linux/agent-os)
 Fixed README rendering truncation by breaking the 209-character line containing "Indefinitely" into shorter lines that won't get clipped in preview contexts. Added a "Get Involved" CTA section with try-it, contribute, and contact calls-to-action. All sections render completely with no truncation.
 
