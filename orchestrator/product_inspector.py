@@ -28,12 +28,14 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 ARTIFACT_DEFAULT = "PRODUCT_INSPECTION.md"
+FAILURE_HISTORY_FILE = ".product_inspection_failures.json"
 MAX_TARGETS = 4
 MAX_TARGET_CHARS = 6000
 DEFAULT_MAX_AGE_HOURS = 24
 FETCH_TIMEOUT_SECONDS = 20
 CONTEXT_MAX_CHARS = 4000
 FOCUS_AREA_MODEL = "haiku"
+CONSECUTIVE_FAILURE_THRESHOLD = 3  # N consecutive failures → low_confidence
 
 # Only these observation categories are emitted
 OBSERVATION_CATEGORIES = frozenset({
@@ -65,26 +67,42 @@ def _clean_html(raw: str) -> str:
     return text
 
 
-def _fetch_target(url: str, allowed_domains: list[str], max_chars: int) -> tuple[str | None, str | None]:
-    """Fetch a single target URL. Returns (content, error)."""
+def _fetch_target(url: str, allowed_domains: list[str], max_chars: int) -> dict:
+    """Fetch a single target URL. Returns provenance dict with content/error."""
+    ts = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     parsed = urlparse(url)
     if parsed.scheme != "https" or not parsed.netloc:
-        return None, "only HTTPS URLs are allowed"
+        return {"content": None, "error": "only HTTPS URLs are allowed",
+                "fetch_timestamp": ts, "http_status": None, "response_bytes": 0}
     if not _domain_allowed(parsed.hostname or "", allowed_domains):
-        return None, f"domain not in allowed list: {parsed.hostname or '?'}"
+        return {"content": None, "error": f"domain not in allowed list: {parsed.hostname or '?'}",
+                "fetch_timestamp": ts, "http_status": None, "response_bytes": 0}
     try:
         result = subprocess.run(
-            ["curl", "-LfsS", "--max-time", str(FETCH_TIMEOUT_SECONDS), url],
+            ["curl", "-LfsS", "-w", "\n%{http_code}", "--max-time", str(FETCH_TIMEOUT_SECONDS), url],
             capture_output=True,
             text=True,
             timeout=FETCH_TIMEOUT_SECONDS + 5,
         )
     except (subprocess.TimeoutExpired, OSError) as e:
-        return None, f"fetch error: {e}"
+        return {"content": None, "error": f"fetch error: {e}",
+                "fetch_timestamp": ts, "http_status": None, "response_bytes": 0}
+    # Extract HTTP status from curl -w output
+    raw_out = result.stdout
+    http_status = None
+    if raw_out:
+        lines = raw_out.rsplit("\n", 1)
+        if len(lines) == 2 and lines[1].strip().isdigit():
+            http_status = int(lines[1].strip())
+            raw_out = lines[0]
+    response_bytes = len(raw_out.encode("utf-8", errors="replace"))
     if result.returncode != 0:
-        return None, f"fetch failed (exit {result.returncode}): {result.stderr.strip()[:200]}"
-    cleaned = _clean_html(result.stdout)
-    return cleaned[:max_chars], None
+        return {"content": None,
+                "error": f"fetch failed (exit {result.returncode}): {result.stderr.strip()[:200]}",
+                "fetch_timestamp": ts, "http_status": http_status, "response_bytes": response_bytes}
+    cleaned = _clean_html(raw_out)
+    return {"content": cleaned[:max_chars], "error": None,
+            "fetch_timestamp": ts, "http_status": http_status, "response_bytes": response_bytes}
 
 
 _INSPECTION_PROMPT = """\
@@ -161,14 +179,54 @@ def _inspect_target(target: dict, content: str) -> dict:
         return {"status": "error", "summary": f"Inspection failed: {e}", "observations": []}
 
 
+def _load_failure_history(repo_path: Path) -> dict:
+    """Load consecutive failure counts per target URL."""
+    path = repo_path / FAILURE_HISTORY_FILE
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_failure_history(repo_path: Path, history: dict) -> None:
+    """Persist consecutive failure counts per target URL."""
+    path = repo_path / FAILURE_HISTORY_FILE
+    try:
+        path.write_text(json.dumps(history, indent=2) + "\n", encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _update_failure_history(repo_path: Path, results: list[dict]) -> dict:
+    """Update failure history and return confidence map {url: "ok"|"low_confidence"}."""
+    history = _load_failure_history(repo_path)
+    confidence: dict[str, str] = {}
+    for entry in results:
+        url = entry.get("url", "")
+        if entry.get("status") == "error":
+            history[url] = history.get(url, 0) + 1
+        else:
+            history[url] = 0
+        if history.get(url, 0) >= CONSECUTIVE_FAILURE_THRESHOLD:
+            confidence[url] = "low_confidence"
+        else:
+            confidence[url] = "ok"
+    _save_failure_history(repo_path, history)
+    return confidence
+
+
 def _write_inspection_artifact(
     repo_path: Path,
     artifact_path: Path,
     results: list[dict],
     refresh_hours: float,
     inspection_cfg: dict,
+    confidence_map: dict | None = None,
 ):
     """Write structured inspection results to the artifact file."""
+    confidence_map = confidence_map or {}
     generated = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     allowed_domains = ", ".join(
         str(d).strip() for d in inspection_cfg.get("allowed_domains", []) if str(d).strip()
@@ -183,6 +241,29 @@ def _write_inspection_artifact(
         "- Method: deterministic text-only fetch + structured LLM observation extraction",
         "",
     ]
+
+    # --- Coverage boundary ---
+    inspected = [e["name"] for e in results if e.get("status") != "error"]
+    uninspected_fetch = [e["name"] for e in results if e.get("status") == "error"]
+    lines.extend([
+        "## Coverage Boundary",
+        "",
+        "### Inspected surfaces (unauthenticated)",
+    ])
+    if inspected:
+        for name in inspected:
+            lines.append(f"- {name}")
+    else:
+        lines.append("- (none)")
+    lines.append("")
+    lines.append("### Uninspected surfaces")
+    if uninspected_fetch:
+        for name in uninspected_fetch:
+            lines.append(f"- {name} (fetch failed)")
+    lines.append("- All authenticated flows (out of scope — no credentials)")
+    lines.append("- JavaScript-rendered content (text-only fetch)")
+    lines.append("")
+
     if not results:
         lines.extend([
             "## Findings",
@@ -191,10 +272,23 @@ def _write_inspection_artifact(
             "",
         ])
     for entry in results:
+        url = entry.get("url", "")
+        confidence = confidence_map.get(url, "ok")
+        # Provenance header
         lines.extend([
             f"## {entry['name']}",
             "",
-            f"- URL: {entry['url']}",
+            f"- Source URL: {url}",
+            f"- Fetch timestamp: {entry.get('fetch_timestamp', 'unknown')}",
+            f"- HTTP status: {entry.get('http_status') or 'N/A'}",
+            f"- Response size: {entry.get('response_bytes', 0)} bytes",
+            f"- Extraction confidence: {entry.get('extraction_confidence', 'normal')}",
+        ])
+        if entry.get("http_status") and entry["http_status"] != 200:
+            lines.append(f"- ⚠ Non-200 response ({entry['http_status']})")
+        if confidence == "low_confidence":
+            lines.append(f"- ⚠ LOW CONFIDENCE — {CONSECUTIVE_FAILURE_THRESHOLD}+ consecutive fetch failures; target may be un-observable")
+        lines.extend([
             f"- Status: {entry['status']}",
             "",
             "### Summary",
@@ -237,8 +331,13 @@ def repo_inspection_config(cfg: dict, github_slug: str) -> dict:
     return inspection_cfg
 
 
-def inspect_product(cfg: dict, github_slug: str, repo_path: Path) -> str:
+def inspect_product(cfg: dict, github_slug: str, repo_path: Path, cadence_hours: float = 0) -> str:
     """Run live-product inspection and return artifact content for planning.
+
+    Args:
+        cadence_hours: If >0, use this as the staleness window instead of the
+            configured max_age_hours.  Allows the planner to align freshness
+            with its sprint cadence rather than a fixed N-hour window.
 
     Returns the inspection artifact text (capped at CONTEXT_MAX_CHARS),
     or a short placeholder if inspection is disabled or has no targets.
@@ -254,7 +353,9 @@ def inspect_product(cfg: dict, github_slug: str, repo_path: Path) -> str:
     artifact_name = str(
         inspection_cfg.get("artifact_file", ARTIFACT_DEFAULT)
     ).strip() or ARTIFACT_DEFAULT
-    refresh_hours = float(inspection_cfg.get("max_age_hours", DEFAULT_MAX_AGE_HOURS))
+    configured_hours = float(inspection_cfg.get("max_age_hours", DEFAULT_MAX_AGE_HOURS))
+    # Prefer planner cadence when provided; fall back to configured window
+    refresh_hours = cadence_hours if cadence_hours > 0 else configured_hours
     max_targets = max(1, min(int(inspection_cfg.get("max_targets", MAX_TARGETS)), MAX_TARGETS))
     max_chars = int(inspection_cfg.get("max_target_chars", MAX_TARGET_CHARS))
     allowed_domains = [
@@ -284,25 +385,37 @@ def inspect_product(cfg: dict, github_slug: str, repo_path: Path) -> str:
             print(f"  Skipping inspection target with no URL: {name}")
             continue
 
-        content, error = _fetch_target(url, allowed_domains, max_chars)
-        if error:
-            print(f"  Skipping inspection target {name}: {error}")
+        fetch = _fetch_target(url, allowed_domains, max_chars)
+        if fetch["error"]:
+            print(f"  Skipping inspection target {name}: {fetch['error']}")
             results.append({
                 "name": name,
                 "url": url,
                 "status": "error",
-                "summary": f"Could not fetch: {error}",
+                "summary": f"Could not fetch: {fetch['error']}",
                 "observations": [],
+                "fetch_timestamp": fetch["fetch_timestamp"],
+                "http_status": fetch["http_status"],
+                "response_bytes": fetch["response_bytes"],
+                "extraction_confidence": "none",
             })
             continue
 
-        inspection = _inspect_target(target, content or "")
+        inspection = _inspect_target(target, fetch["content"] or "")
         results.append({
             "name": name,
             "url": url,
             **inspection,
+            "fetch_timestamp": fetch["fetch_timestamp"],
+            "http_status": fetch["http_status"],
+            "response_bytes": fetch["response_bytes"],
+            "extraction_confidence": "normal" if fetch["http_status"] == 200 else "degraded",
         })
 
-    _write_inspection_artifact(repo_path, artifact_path, results, refresh_hours, inspection_cfg)
+    # Track consecutive failures and derive confidence
+    confidence_map = _update_failure_history(repo_path, results)
+
+    _write_inspection_artifact(repo_path, artifact_path, results, refresh_hours,
+                               inspection_cfg, confidence_map)
     content = artifact_path.read_text(encoding="utf-8", errors="replace").strip()
     return content[:CONTEXT_MAX_CHARS] if content else "(empty product inspection artifact)"

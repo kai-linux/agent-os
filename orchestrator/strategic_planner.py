@@ -2988,6 +2988,8 @@ Rules:
 - Treat entries marked `Planning Use: guarded` as audit context only, not as drivers for roadmap or prioritization decisions
 - Use recent outcome evidence to reinforce work that improved results, repair regressions, and close measurement gaps
 - When live product inspection is present, treat HIGH-severity observations as strong candidates for sprint inclusion — broken flows and regressions visible to users should be prioritized
+- Product inspection includes a Coverage Boundary section: "Inspected surfaces" are confirmed observations; "Uninspected surfaces" (authenticated flows, JS-rendered content, failed fetches) have NO health signal — do not assume they are healthy or unhealthy
+- Observations marked LOW CONFIDENCE (consecutive fetch failures) indicate un-observable targets — down-weight these signals and do not treat them as confirmed regressions
 - When fresh research is present, use it to inform prioritization and rationale. Prefer work that is supported by repo-local strategy plus bounded external evidence.
 - Prefer unblockers, autonomy gains, planning-quality gains, and evidence-driven improvements over local churn
 - When the backlog contains both human-filed and bot-generated issues of similar impact, prefer human-filed issues — they represent stakeholder intent and should not be crowded out by automated self-improvement churn
@@ -3534,8 +3536,11 @@ def plan_repo(
     production_feedback_context = _production_feedback_context(cfg, github_slug, repo_path)
     print(f"  Production feedback: {len(production_feedback_context)} chars")
 
-    # 6b. Live product inspection
-    product_inspection_context = inspect_product(cfg, github_slug, repo_path)
+    # 6b. Live product inspection (staleness aligned with sprint cadence)
+    product_inspection_context = inspect_product(
+        cfg, github_slug, repo_path,
+        cadence_hours=sprint_cadence_days * 24.0,
+    )
     print(f"  Product inspection: {len(product_inspection_context)} chars")
 
     # 7. Recent outcome evidence
