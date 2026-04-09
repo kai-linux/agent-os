@@ -26,6 +26,19 @@
 
 ## Recent Changes
 
+### 2026-04-09 — [task-20260409-070419-validate-and-monitor-adaptive-agent-health-gate-im] (#162 kai-linux/agent-os)
+Added health gate monitoring infrastructure: JSONL audit trail for gate decisions (health_gate_decisions.jsonl), a weekly report generator (orchestrator/health_gate_report.py) that produces a markdown validation report with baseline metrics, window metrics, gate decision analysis, blocker code trends, validation status, and false positive detection. Baseline captured: claude 100%, codex 60.3%, deepseek 46.7%, overall 68.8%. Last 7 days shows 100% success rate with only claude dispatched and zero fallback_exhausted events, confirming the gate is effective.
+
+**Files:** `- orchestrator/agent_scorer.py`, `- orchestrator/github_dispatcher.py`, `- orchestrator/queue.py`, `- orchestrator/health_gate_report.py`, `- bin/run_health_gate_report.sh`, `- tests/test_health_gate_report.py`, `- .gitignore`
+
+**Decisions:**
+  - - Used JSONL format for gate decision audit log consistent with existing agent_stats.jsonl pattern
+  - - Gate decisions only logged when agents are actually skipped (no-op invocations are silent)
+  - - Report generator reads both agent_stats.jsonl and gate decisions for cross-referencing
+  - - Weekly cron schedule aligns with existing log analyzer cadence
+  - - No threshold changes made per constraint (need 3+ days of decision data first)
+
+
 ### 2026-04-09 — [task-20260409-070319-publish-github-discussions-case-study-autonomous-m] (#161 kai-linux/agent-os)
 Published a detailed case study as GitHub Discussion #167 (https://github.com/kai-linux/agent-os/discussions/167) in the "Show and tell" category. The discussion showcases the PR-98 cascading failure recovery workflow with concrete metrics (288 commits, 59+ PRs merged, 79+ issues closed, ~8 min median PR cycle time), before/after comparison (manual vs Agent OS approach), honest failure reporting, sample PR cycle times with file/line counts, and links to all verifiable public GitHub data. Enabled GitHub Discussions on the repo as a prerequisite.
 
