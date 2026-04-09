@@ -13,7 +13,11 @@ import pytest
 # Ensure orchestrator package is importable
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from orchestrator.repo_context import read_evaluation_rubric
+from orchestrator.repo_context import (
+    gather_objective_alignment,
+    gather_recent_git_state,
+    read_evaluation_rubric,
+)
 from orchestrator.queue import (
     CommandExecutionError,
     _format_runner_failure,
@@ -1419,3 +1423,100 @@ def test_create_followup_task_rejects_invalid_resolved_agent(tmp_path):
     assert path is not None
     content = path.read_text(encoding="utf-8")
     assert "agent: auto" in content
+
+
+# --- Enhanced dispatch context tests ---
+
+
+def test_gather_recent_git_state_returns_fallback_for_non_repo(tmp_path):
+    result = gather_recent_git_state(tmp_path, "main")
+    assert result == "(recent git state unavailable)"
+
+
+def test_gather_recent_git_state_returns_string(tmp_path):
+    import subprocess as _sp
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _sp.run(["git", "init"], cwd=str(repo), capture_output=True)
+    _sp.run(["git", "checkout", "-b", "main"], cwd=str(repo), capture_output=True)
+    (repo / "f.txt").write_text("hello")
+    _sp.run(["git", "add", "."], cwd=str(repo), capture_output=True)
+    env = {**__import__("os").environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+    _sp.run(["git", "commit", "-m", "init"], cwd=str(repo), capture_output=True, env=env)
+    # No origin remote, so falls back gracefully
+    result = gather_recent_git_state(repo, "main")
+    assert isinstance(result, str)
+
+
+def test_gather_objective_alignment_returns_empty_without_cfg():
+    result = gather_objective_alignment(Path("/nonexistent"), cfg=None, github_slug="")
+    assert result == ""
+
+
+def test_gather_objective_alignment_returns_metrics(tmp_path, monkeypatch):
+    obj_file = tmp_path / "objective.yaml"
+    obj_file.write_text(
+        'version: 1\nrepo: "owner/test-repo"\nprimary_outcome: "Adoption"\n'
+        'metrics:\n  - id: stars\n    weight: 0.5\n    direction: increase\n',
+        encoding="utf-8",
+    )
+    cfg = {"root_dir": str(tmp_path), "repo_objectives": {"owner/test-repo": str(obj_file)}}
+    result = gather_objective_alignment(tmp_path, cfg=cfg, github_slug="owner/test-repo")
+    assert "Primary outcome: Adoption" in result
+    assert "stars" in result
+    assert "weight=0.5" in result
+
+
+def test_write_prompt_includes_enhanced_context_sections(tmp_path, monkeypatch):
+    """write_prompt injects Dispatch Context when git state or objectives are available."""
+    root = tmp_path / "root"
+    worktree = tmp_path / "repo"
+    root.mkdir()
+    worktree.mkdir()
+    (worktree / "README.md").write_text("## Goal\n\nShip things.\n", encoding="utf-8")
+    (worktree / "CODEBASE.md").write_text("# Codebase Memory\n\nCtx.\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "orchestrator.queue.gather_recent_git_state",
+        lambda *a, **kw: "abc1234 feat: add widget\ndef5678 fix: repair thing",
+    )
+    monkeypatch.setattr(
+        "orchestrator.queue.gather_objective_alignment",
+        lambda *a, **kw: "Primary outcome: Adoption\nTracked metrics (id / weight / direction):\n  - stars: weight=0.5, direction=increase",
+    )
+
+    prompt_file = write_prompt(
+        "task-ctx-1",
+        {"task_type": "implementation", "base_branch": "main", "github_repo": "owner/repo"},
+        "Implement the feature.",
+        "claude",
+        [],
+        root,
+        worktree=worktree,
+    )
+
+    text = prompt_file.read_text(encoding="utf-8")
+    assert "Dispatch Context (structured)" in text
+    assert "Recent Git State" in text
+    assert "abc1234 feat: add widget" in text
+    assert "Objective Alignment" in text
+    assert "Primary outcome: Adoption" in text
+
+
+def test_write_prompt_omits_enhanced_context_without_worktree(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+
+    prompt_file = write_prompt(
+        "task-ctx-2",
+        {"task_type": "implementation"},
+        "Do something.",
+        "claude",
+        [],
+        root,
+        worktree=None,
+    )
+
+    text = prompt_file.read_text(encoding="utf-8")
+    assert "Dispatch Context (structured)" not in text

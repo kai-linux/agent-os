@@ -21,7 +21,7 @@ from orchestrator.github_sync import sync_result
 from orchestrator.gh_project import gh_json as _gh_json
 from orchestrator.codebase_memory import read_codebase_context, update_codebase_memory
 from orchestrator.gh_project import add_issue_comment, gh, gh_json, query_project, set_item_status
-from orchestrator.repo_context import build_execution_context
+from orchestrator.repo_context import build_execution_context, gather_recent_git_state, gather_objective_alignment, read_sprint_directives
 from orchestrator.repo_modes import is_dispatcher_only_repo
 from orchestrator.agent_scorer import filter_healthy_agents, log_gate_decision, ADAPTIVE_HEALTH_WINDOW_DAYS, ADAPTIVE_HEALTH_THRESHOLD
 
@@ -1393,11 +1393,35 @@ def write_prompt(task_id: str, meta: dict, body: str, current_agent: str, prior_
     snapshot_path.parent.mkdir(parents=True, exist_ok=True)
 
     codebase_context = read_codebase_context(worktree) if worktree else ""
+    repo_path = worktree or root
     layered_context = build_execution_context(
-        worktree or root,
+        repo_path,
         meta.get("task_type", "implementation"),
         body,
     ) if worktree else ""
+
+    # --- Enhanced context to reduce missing_context blockers ---
+    base_branch = meta.get("base_branch", "main")
+    git_state = gather_recent_git_state(repo_path, base_branch) if worktree else ""
+    github_slug = meta.get("github_repo", "")
+    try:
+        cfg_for_obj = load_config()
+    except Exception:
+        cfg_for_obj = {}
+    objective_context = gather_objective_alignment(repo_path, cfg_for_obj, github_slug)
+    sprint_directives = read_sprint_directives(repo_path) if worktree else ""
+
+    enhanced_sections = []
+    if git_state and git_state != "(recent git state unavailable)":
+        enhanced_sections.append(f"## Recent Git State (base: {base_branch})\n\n{git_state}")
+    if objective_context:
+        enhanced_sections.append(f"## Objective Alignment\n\n{objective_context}")
+    if sprint_directives and not sprint_directives.startswith("(no sprint directives"):
+        enhanced_sections.append(f"## Sprint Directives\n\n{sprint_directives}")
+    enhanced_context = "\n\n".join(enhanced_sections)
+    if enhanced_context:
+        enhanced_context = f"\n\n---\n# Dispatch Context (structured)\n\n{enhanced_context}\n\n---\n"
+    # --- End enhanced context ---
 
     prompt = f"""You are a coding worker running in a controlled automation environment.
 
@@ -1413,6 +1437,7 @@ Task instructions:
 {body}
 {layered_context}
 {codebase_context}
+{enhanced_context}
 Prior model attempts in this task lineage:
 {render_prior_attempt_history(prior_results)}
 
