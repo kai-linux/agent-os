@@ -49,6 +49,9 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # Export GitHub stars/forks evidence every 6 hours (one invocation per managed repo)
 0 */6 * * * /path/to/agent-os/bin/export_github_evidence.sh owner/repo >> /path/to/agent-os/runtime/logs/evidence_export.log 2>&1
 
+# Export the public reliability dashboard snapshot daily from runtime metrics
+15 6 * * * /path/to/agent-os/bin/run_public_dashboard.sh >> /path/to/agent-os/runtime/logs/public_dashboard.log 2>&1
+
 # Live product inspection: fetch configured public surfaces and refresh PRODUCT_INSPECTION.md (daily 06:00)
 0 6 * * * /path/to/agent-os/bin/run_product_inspector.sh >> /path/to/agent-os/runtime/logs/product_inspector.log 2>&1
 ```
@@ -69,4 +72,5 @@ Each wrapper emits a timestamp banner like `[2026-03-30T12:34:56+0200] queue sta
 | `0 * * * *` | `run_backlog_groomer.sh` | Per-repo cadence gate in config decides when each repo is groomed |
 | `0 * * * *` | `run_strategic_planner.sh` | Per-repo cadence gate in config decides when each repo is planned |
 | `0 */6 * * *` | `export_github_evidence.sh` | Snapshots GitHub stars/forks for the tracked objective metrics (one invocation per managed repo) |
+| `15 6 * * *` | `run_public_dashboard.sh` | Writes the public reliability dashboard snapshot from `PRODUCTION_FEEDBACK.md` and `runtime/metrics/agent_stats.jsonl` |
 | `0 6 * * *` | `run_product_inspector.sh` | Fetches configured public product surfaces and refreshes `PRODUCT_INSPECTION.md` for the planner/groomer |
