@@ -17,6 +17,7 @@ from orchestrator.paths import load_config
 from orchestrator.repo_modes import is_dispatcher_only_repo
 
 
+GATE_DECISIONS_FILENAME = "health_gate_decisions.jsonl"
 DEGRADED_THRESHOLD = 0.60
 WINDOW_DAYS = 7
 # Sentinel agent names that represent exhausted fallback chains, not real agents.
@@ -103,6 +104,34 @@ def recent_success_rates(metrics_file: Path, window_days: float = HEALTH_CHECK_W
     _RECENT_RATE_CACHE.clear()
     _RECENT_RATE_CACHE[cache_key] = rates
     return rates
+
+
+def log_gate_decision(
+    metrics_dir: Path,
+    *,
+    gate: str,
+    skipped: dict[str, dict],
+    passed: list[str],
+    context: str = "",
+) -> None:
+    """Append a gate decision record to the audit log."""
+    log_path = metrics_dir / GATE_DECISIONS_FILENAME
+    record = {
+        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+        "gate": gate,
+        "skipped": {
+            agent: {"total": s["total"], "successes": s["successes"], "rate": round(s["rate"], 4)}
+            for agent, s in skipped.items()
+        },
+        "passed": passed,
+        "context": context,
+    }
+    try:
+        metrics_dir.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, default=str) + "\n")
+    except OSError:
+        pass
 
 
 def filter_healthy_agents(

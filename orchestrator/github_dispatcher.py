@@ -26,7 +26,7 @@ from orchestrator.repo_modes import is_dispatcher_only_repo
 from orchestrator.task_formatter import format_task
 from orchestrator.task_decomposer import decompose_issue, create_sub_issues
 from orchestrator.outcome_attribution import parse_outcome_check_ids
-from orchestrator.agent_scorer import filter_healthy_agents, ADAPTIVE_HEALTH_WINDOW_DAYS, ADAPTIVE_HEALTH_THRESHOLD
+from orchestrator.agent_scorer import filter_healthy_agents, log_gate_decision, ADAPTIVE_HEALTH_WINDOW_DAYS, ADAPTIVE_HEALTH_THRESHOLD
 from orchestrator.trust import is_trusted
 from orchestrator.queue import (
     send_telegram,
@@ -275,6 +275,14 @@ def _validated_agent_assignment(cfg: dict, project_key: str, task_type: str, req
     chain, adaptive_skipped = filter_healthy_agents(chain, metrics_file, threshold=ADAPTIVE_HEALTH_THRESHOLD, window_days=ADAPTIVE_HEALTH_WINDOW_DAYS)
     for agent, stats in adaptive_skipped.items():
         print(f"agent={agent} skipped: {round(stats['rate'] * 100)}% success rate (7d adaptive health gate)")
+    if adaptive_skipped:
+        log_gate_decision(
+            metrics_file.parent,
+            gate="adaptive_7d_25pct",
+            skipped=adaptive_skipped,
+            passed=chain,
+            context=f"dispatcher:resolve_agent task_type={task_type}",
+        )
     healthy_chain, skipped_agents = filter_healthy_agents(chain, metrics_file)
     if not healthy_chain:
         skipped_summary = ", ".join(
