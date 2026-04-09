@@ -181,6 +181,7 @@ reviewing CI, and merging changes with zero human intervention per task.
 | Configuration, objectives, evidence, cron setup | [docs/configuration.md](docs/configuration.md) |
 | Roadmap and capability ladder | [docs/roadmap.md](docs/roadmap.md) |
 | Case study: self-managed repo | [docs/case-study-agent-os.md](docs/case-study-agent-os.md) |
+| Case study discussion | [GitHub Discussions #167](https://github.com/kai-linux/agent-os/discussions/167) |
 
 ---
 
@@ -190,4 +191,4 @@ reviewing CI, and merging changes with zero human intervention per task.
 
 **Contribute** — check [open issues](https://github.com/kai-linux/agent-os/issues) or file one. PRs welcome.
 
-**Questions?** — open a [discussion](https://github.com/kai-linux/agent-os/issues) or reach out via the repo.
+**Questions?** — open a [discussion](https://github.com/kai-linux/agent-os/discussions) or reach out via the repo.
