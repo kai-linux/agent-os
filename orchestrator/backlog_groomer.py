@@ -41,6 +41,7 @@ from orchestrator.repo_context import (
     read_planning_principles,
     read_planning_research_artifact,
     read_readme_goal,
+    read_sprint_directives,
     read_strategy_context,
 )
 from orchestrator.scheduler_state import is_due, record_run, job_lock
@@ -717,6 +718,18 @@ Each object must have:
 --- Strategy context (STRATEGY.md) ---
 {strategy_context}
 
+--- Operator-validated sprint directives (from last sprint's retrospective; TREAT AS PRIORITY DRIVERS) ---
+These were extracted from the previous sprint's review by the strategic
+planner and represent what the operator decided must happen next. They
+outrank generic strategy inference: if a directive names a specific gap
+(e.g. "close outcome-measurement loop", "monitor GitHub adoption with 3-day
+cadence"), prefer generating backlog work that directly closes that gap
+over regenerating infrastructure-flavored duplicates of issues already
+shipped. Do NOT propose issues that re-solve problems already addressed
+by last sprint; instead look for the NEXT-step follow-ups these directives
+call for.
+{sprint_directives}
+
 --- Planning principles (PLANNING_PRINCIPLES.md) ---
 {planning_principles}
 
@@ -955,6 +968,7 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
     objectives_context = format_objective_for_prompt(objective, max_chars=1600)
     adoption_signals = _gather_adoption_signals(github_slug, repo_path)
     evaluation_rubric = read_evaluation_rubric(repo_path, max_chars=1600)
+    sprint_directives = read_sprint_directives(repo_path, max_chars=1800)
     print(f"  Blocked/partial task outcomes: {len(blocked_tasks)}")
     print(f"  Repo gaps: {len(repo_gaps)}, blocked issues: {len(blocked_issues)}")
     print(f"  Bootstrap doc issues: {len(bootstrap_issues)}")
@@ -1082,6 +1096,7 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
         readme_goal=readme_goal,
         north_star=north_star,
         strategy_context=strategy_context,
+        sprint_directives=sprint_directives,
         planning_principles=planning_principles,
         production_feedback=production_feedback,
         product_inspection=product_inspection,

@@ -55,7 +55,11 @@ from orchestrator.outcome_attribution import (
     load_outcome_records,
 )
 from orchestrator.repo_modes import is_dispatcher_only_repo
-from orchestrator.repo_context import read_evaluation_rubric, read_north_star
+from orchestrator.repo_context import (
+    read_evaluation_rubric,
+    read_north_star,
+    read_sprint_directives,
+)
 from orchestrator.product_inspector import inspect_product
 from orchestrator.skip_signals import (
     load_skip_signals,
@@ -84,6 +88,7 @@ RESEARCH_ARTIFACT_DEFAULT = "PLANNING_RESEARCH.md"
 PRODUCTION_FEEDBACK_ARTIFACT_DEFAULT = "PRODUCTION_FEEDBACK.md"
 SIGNALS_ARTIFACT_DEFAULT = "PLANNING_SIGNALS.md"
 SPRINT_REPORT_ARTIFACT_DEFAULT = "SPRINT_REPORT.md"
+SPRINT_DIRECTIVES_ARTIFACT = "runtime/next_sprint_focus.json"
 RESEARCH_ALLOWED_KINDS = {
     "official_docs",
     "competitor",
@@ -2823,6 +2828,45 @@ def _write_sprint_report_artifact(
         f"chore: refresh {artifact_path.name}",
         f"  {artifact_path.name} updated and pushed for {repo_path.name}",
     )
+    _persist_sprint_directives(repo_path, report=report, generated_at=now)
+
+
+def _persist_sprint_directives(
+    repo_path: Path,
+    *,
+    report: dict,
+    generated_at: datetime,
+) -> None:
+    """Persist a machine-readable copy of the sprint retro's forward-looking
+    signals so the backlog groomer and next planner run can consume them.
+
+    The sprint report markdown is written for humans; this sidecar JSON is
+    consumed by downstream automation (groomer prompt, planner prompt) so
+    operator-validated "next sprint focus" and "risks and gaps" actually
+    flow into the next cycle instead of being regenerated from static inputs.
+    """
+    try:
+        directives_path = repo_path / SPRINT_DIRECTIVES_ARTIFACT
+        directives_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "generated_at": generated_at.isoformat(),
+            "headline": str(report.get("headline") or "").strip(),
+            "risks_and_gaps": [
+                str(item).strip()
+                for item in (report.get("risks_and_gaps") or [])
+                if str(item).strip()
+            ],
+            "next_sprint_focus": [
+                str(item).strip()
+                for item in (report.get("next_sprint_focus") or [])
+                if str(item).strip()
+            ],
+        }
+        directives_path.write_text(
+            json.dumps(payload, indent=2) + "\n", encoding="utf-8"
+        )
+    except Exception as e:
+        print(f"  Failed to persist sprint directives: {e}")
 
 
 def _recent_metrics_summary(cfg: dict) -> str:
@@ -2896,6 +2940,16 @@ Context about this repository:
 
 --- Pre-Planning Research (PLANNING_RESEARCH.md) ---
 {research_context}
+
+--- Operator-Validated Sprint Directives (from last sprint's review — TREAT AS PRIORITY DRIVERS) ---
+These were extracted from the previous sprint report's "Next Sprint Focus"
+and "Risks and Gaps" sections. They represent what the operator decided
+must happen next and outrank generic strategy inference. If a directive
+names a concrete gap (e.g. "close outcome-measurement loop", "monitor
+GitHub adoption"), prefer promoting backlog work that directly addresses
+that gap. Do not re-solve problems already shipped last sprint; promote
+the NEXT-step follow-ups these directives call for.
+{sprint_directives}
 
 --- Last Sprint Retrospective ---
 {retrospective}
@@ -3043,6 +3097,7 @@ def _build_plan_prompt(
     outcome_context: str,
     research_context: str,
     retrospective: str,
+    sprint_directives: str,
     git_log: str,
     counts: dict[str, int],
     metrics_summary: str,
@@ -3065,6 +3120,7 @@ def _build_plan_prompt(
         codebase_context=codebase_context,
         research_context=research_context,
         retrospective=retrospective,
+        sprint_directives=sprint_directives,
         git_log=git_log,
         open_count=counts["open"],
         closed_count=counts["closed"],
@@ -3494,6 +3550,10 @@ def plan_repo(
     retrospective = _build_retrospective(cfg, github_slug, repo_path, days=sprint_cadence_days)
     print(f"  Retrospective: {len(retrospective)} chars")
 
+    # 9b. Operator-validated sprint directives from previous sprint report
+    sprint_directives = read_sprint_directives(repo_path, max_chars=1800)
+    print(f"  Sprint directives: {len(sprint_directives)} chars")
+
     # 9. Last 30 git commits
     git_log = _git_log(repo_path, n=30)
     print(f"  Git log: {git_log.count(chr(10)) + 1} commits")
@@ -3543,6 +3603,7 @@ def plan_repo(
         outcome_context=outcome_context,
         research_context=research_context,
         retrospective=retrospective,
+        sprint_directives=sprint_directives,
         git_log=git_log,
         counts=counts,
         metrics_summary=metrics_summary,
