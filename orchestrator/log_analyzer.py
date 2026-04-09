@@ -32,6 +32,11 @@ BLOCKER_THRESHOLD = 3
 QUEUE_LOG_EVIDENCE_ID = "queue_log_tail"
 METRICS_EVIDENCE_ID = "metrics_window"
 
+# Blocker regression alert thresholds (rolling 24h window)
+BLOCKER_REGRESSION_ALERTS: dict[str, int] = {
+    "missing_context": 5,
+}
+
 ANALYSIS_PROMPT = """You are an AI agent system analyst reviewing operational evidence.
 Produce exactly {top_n} distinct remediation tasks that cover the highest-impact problems.
 Use the structured findings first, then use the raw queue log only to refine or combine them.
@@ -264,6 +269,58 @@ def build_blocker_findings(records: list[dict], default_repo: str) -> list[dict]
     return findings
 
 
+def check_blocker_regression_alerts(
+    records: list[dict],
+    cfg: dict,
+    *,
+    fix_timestamp: str = "2026-04-09T07:53:00+00:00",
+) -> list[str]:
+    """Check rolling 24h blocker counts against regression thresholds.
+
+    Only considers records after fix_timestamp to avoid alerting on
+    historical backlog data.
+    """
+    cutoff_24h = datetime.now(tz=timezone.utc) - timedelta(hours=24)
+    try:
+        fix_dt = datetime.fromisoformat(fix_timestamp)
+        if fix_dt.tzinfo is None:
+            fix_dt = fix_dt.replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        fix_dt = cutoff_24h
+
+    alerts: list[str] = []
+    for blocker_code, threshold in BLOCKER_REGRESSION_ALERTS.items():
+        count = 0
+        for rec in records:
+            if str(rec.get("blocker_code", "")).strip().lower() != blocker_code:
+                continue
+            ts_raw = rec.get("timestamp", "")
+            try:
+                ts = datetime.fromisoformat(ts_raw)
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+            except (ValueError, TypeError):
+                continue
+            if ts < fix_dt or ts < cutoff_24h:
+                continue
+            count += 1
+        if count > threshold:
+            msg = (
+                f"\u26a0\ufe0f Blocker regression alert: {blocker_code}\n"
+                f"Count: {count} in rolling 24h (threshold: {threshold})\n\n"
+                f"RCA runbook:\n"
+                f"1. Identify which tasks hit {blocker_code}: "
+                f"grep '{blocker_code}' runtime/metrics/agent_stats.jsonl | tail -20\n"
+                f"2. Check the task prompt snapshots in runtime/prompts/ for the affected task IDs\n"
+                f"3. Determine what dispatch context was missing (git state, objectives, sprint directives)\n"
+                f"4. Verify write_prompt() in queue.py is injecting structured dispatch context\n"
+                f"5. Check if repo_context.py helpers are raising exceptions silently"
+            )
+            alerts.append(msg)
+            _send_telegram(cfg, msg)
+    return alerts
+
+
 def load_scorer_findings(root: Path, records: list[dict]) -> list[dict]:
     artifact = scorer_findings_path(root)
     if artifact.exists():
@@ -394,6 +451,12 @@ def run():
     default_repo = _resolve_default_repo(cfg)
 
     records = load_recent_metrics(metrics_file)
+
+    # Check blocker regression alerts (forward-looking, post-fix only)
+    regression_alerts = check_blocker_regression_alerts(records, cfg)
+    if regression_alerts:
+        print(f"Blocker regression alerts fired: {len(regression_alerts)}")
+
     log_text = _read_log_tail(log_file)
     findings = collect_structured_findings(root, records, default_repo)
     findings = [
