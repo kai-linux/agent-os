@@ -59,6 +59,14 @@ Attached prompt snapshot references to all blocked task escalation surfaces (dis
   - - Added `_resolve_prompt_snapshot_path()` helper to normalize missing paths to "none" for clean display
   - - Embedded the reference in all five escalation surfaces for full traceability from any escalation output
   - - Kept the diff minimal by only adding fields to existing data structures
+Attached prompt snapshot references to blocked task escalation payloads so operators can trace a blocked task back to the exact prompt context without searching logs. The `prompt_snapshot_path` from task metadata is now embedded in dispatcher escalation notes, GitHub issue comments, Telegram messages, Telegram action payloads, and queue-side escalation notes.
+
+**Files:** `- orchestrator/github_dispatcher.py`, `- orchestrator/queue.py`, `- tests/test_github_dispatcher.py`, `- tests/test_queue.py`
+
+**Decisions:**
+  - Reused existing `prompt_snapshot_path` from task frontmatter metadata instead of adding new persistence or lookup logic
+  - Added a `_resolve_prompt_snapshot_path()` helper in github_dispatcher.py to normalize absent paths to "none"
+  - Embedded the reference in all five escalation surfaces for full traceability
 
 
 ### 2026-04-09 — [task-20260409-210321-create-public-reliability-metrics-dashboard-to-sup] (#176 kai-linux/agent-os)

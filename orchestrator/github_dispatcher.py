@@ -668,6 +668,11 @@ def _format_blocked_elapsed(task_path: Path) -> str:
     return f"{age.days} day(s)"
 
 
+def _resolve_prompt_snapshot_path(meta: dict) -> str:
+    """Return the prompt snapshot path from task metadata, or 'none'."""
+    return meta.get("prompt_snapshot_path") or "none"
+
+
 def _build_blocked_task_escalation_note(meta: dict, body: str, entries: list[dict], task_path: Path, reason: str) -> str:
     blocker_codes, error_patterns = _blocked_task_error_patterns(entries)
     return f"""# Escalation Note
@@ -683,6 +688,9 @@ def _build_blocked_task_escalation_note(meta: dict, body: str, entries: list[dic
 
 ## Task Type
 {meta.get("task_type", "unknown")}
+
+## Prompt Snapshot
+{_resolve_prompt_snapshot_path(meta)}
 
 ## Escalation Trigger
 {reason}
@@ -713,6 +721,7 @@ def _build_blocked_task_comment(meta: dict, task_path: Path, entries: list[dict]
 **Task ID:** `{meta.get("task_id", task_path.stem)}`
 **Parent Task ID:** `{meta.get("parent_task_id", meta.get("task_id", task_path.stem))}`
 **Branch:** `{meta.get("branch", "unknown")}`
+**Prompt snapshot:** `{_resolve_prompt_snapshot_path(meta)}`
 **Trigger:** {reason}
 **Blocked age:** {_format_blocked_elapsed(task_path)}
 
@@ -739,10 +748,12 @@ def _blocked_escalation_reply_markup(action_id: str) -> dict:
 
 def _build_blocked_task_telegram_message(meta: dict, task_path: Path, entries: list[dict], reason: str, note_path: Path) -> str:
     blocker_codes, error_patterns = _blocked_task_error_patterns(entries)
+    prompt_snap = _resolve_prompt_snapshot_path(meta)
     lines = [
         "🛑 Blocked task escalation",
         f"Issue: {meta.get('github_issue_url', 'n/a')}",
         f"Task ID: {meta.get('task_id', task_path.stem)}",
+        f"Prompt snapshot: {prompt_snap}",
         f"Attempts: {max((entry['attempt'] for entry in entries), default=int(meta.get('attempt', 1) or 1))}",
         f"Blocked age: {_format_blocked_elapsed(task_path)}",
         f"Trigger: {reason}",
@@ -776,6 +787,7 @@ def _create_blocked_task_action(meta: dict, note_path: Path, chat_id: str) -> di
         "github_repo": meta.get("github_repo"),
         "github_issue_number": meta.get("github_issue_number"),
         "github_issue_url": meta.get("github_issue_url"),
+        "prompt_snapshot_path": meta.get("prompt_snapshot_path"),
         "escalation_note": note_path.name,
     }
 
