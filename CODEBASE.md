@@ -26,6 +26,16 @@
 
 ## Recent Changes
 
+### 2026-04-10 — [task-20260410-190122-validate-codex-agent-fix-and-add-regression-monito] (#182 kai-linux/agent-os)
+deepseek failed before producing a valid result file. Runner exited with code 1 while executing `/home/kai/agent-os/bin/agent_runner.sh deepseek /srv/worktrees/agent-os/task-20260410-190122-validate-codex-agent-fix-and-add-regression-monito /home/kai/agent-os/runtime/tmp/task-20260410-190122-validate-codex-agent-fix-and-add-regression-monito.txt`. Classified as: authentication failure. Orchestrator rescued and pushed the worktree changes.
+
+**Files:** `- Unknown / inspect worktree`
+
+**Decisions:**
+  - - Treat runner failure as model-level failure and continue fallback chain if possible.
+  - - Queue performed git rescue after the agent left valid changes behind.
+
+
 ### 2026-04-09 — [task-20260409-210702-set-dev-api-key-environment-variable-to-enable-aut] (#172 kai-linux/agent-os)
 codex failed before producing a valid result file. Runner exited with code 1 while executing `/home/kai/agent-os/bin/agent_runner.sh codex /srv/worktrees/agent-os/task-20260409-210702-set-dev-api-key-environment-variable-to-enable-aut /home/kai/agent-os/runtime/tmp/task-20260409-210702-set-dev-api-key-environment-variable-to-enable-aut.txt`. Classified as: usage limit / rate limit. Orchestrator rescued and pushed the worktree changes.
 
