@@ -725,7 +725,13 @@ def test_build_mailbox_task_rejects_when_no_healthy_agent_available(tmp_path, mo
     records = [
         {"timestamp": now, "agent": "codex", "status": "complete"},
         {"timestamp": now, "agent": "codex", "status": "blocked"},
+        {"timestamp": now, "agent": "codex", "status": "blocked"},
+        {"timestamp": now, "agent": "codex", "status": "blocked"},
+        {"timestamp": now, "agent": "codex", "status": "blocked"},
         {"timestamp": now, "agent": "claude", "status": "complete"},
+        {"timestamp": now, "agent": "claude", "status": "blocked"},
+        {"timestamp": now, "agent": "claude", "status": "blocked"},
+        {"timestamp": now, "agent": "claude", "status": "blocked"},
         {"timestamp": now, "agent": "claude", "status": "blocked"},
     ]
     (metrics_dir / "agent_stats.jsonl").write_text(
@@ -1113,7 +1119,13 @@ def test_dispatch_item_escalates_to_human_review_when_all_agents_unhealthy(tmp_p
     records = [
         {"timestamp": now, "agent": "codex", "status": "complete"},
         {"timestamp": now, "agent": "codex", "status": "blocked"},
+        {"timestamp": now, "agent": "codex", "status": "blocked"},
+        {"timestamp": now, "agent": "codex", "status": "blocked"},
+        {"timestamp": now, "agent": "codex", "status": "blocked"},
         {"timestamp": now, "agent": "claude", "status": "complete"},
+        {"timestamp": now, "agent": "claude", "status": "blocked"},
+        {"timestamp": now, "agent": "claude", "status": "blocked"},
+        {"timestamp": now, "agent": "claude", "status": "blocked"},
         {"timestamp": now, "agent": "claude", "status": "blocked"},
     ]
     (metrics_dir / "agent_stats.jsonl").write_text(

@@ -289,7 +289,7 @@ def _validated_agent_assignment(cfg: dict, project_key: str, task_type: str, req
             passed=chain,
             context=f"dispatcher:resolve_agent task_type={task_type}",
         )
-    healthy_chain, skipped_agents = filter_healthy_agents(chain, metrics_file, task_type=task_type)
+    healthy_chain, skipped_agents = filter_healthy_agents(chain, metrics_file, task_type=task_type, min_task_count=5)
     if not healthy_chain:
         skipped_summary = ", ".join(
             f"{agent} ({round(stats['rate'] * 100, 1)}% success over {stats['total']} task(s) in the last 24h)"

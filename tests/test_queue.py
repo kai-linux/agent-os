@@ -170,6 +170,9 @@ def test_get_agent_chain_skips_agents_below_recent_health_threshold(tmp_path):
         {"timestamp": now, "agent": "codex", "status": "complete"},
         {"timestamp": now, "agent": "claude", "status": "complete"},
         {"timestamp": now, "agent": "claude", "status": "blocked"},
+        {"timestamp": now, "agent": "claude", "status": "blocked"},
+        {"timestamp": now, "agent": "claude", "status": "blocked"},
+        {"timestamp": now, "agent": "claude", "status": "blocked"},
     ]
     (metrics_dir / "agent_stats.jsonl").write_text(
         "".join(json.dumps(record) + "\n" for record in records),
@@ -216,6 +219,8 @@ def test_get_agent_chain_skips_agents_below_adaptive_health_threshold(tmp_path):
     records = [
         {"timestamp": now, "agent": "deepseek", "status": "blocked"},
         {"timestamp": now, "agent": "deepseek", "status": "blocked"},
+        {"timestamp": now, "agent": "deepseek", "status": "blocked"},
+        {"timestamp": now, "agent": "claude", "status": "complete"},
         {"timestamp": now, "agent": "claude", "status": "complete"},
         {"timestamp": now, "agent": "claude", "status": "complete"},
     ]
@@ -244,6 +249,8 @@ def test_get_agent_chain_uses_task_type_specific_health_when_sample_is_sufficien
         {"timestamp": now, "agent": "codex", "status": "blocked", "task_type": "implementation"},
         {"timestamp": now, "agent": "codex", "status": "blocked", "task_type": "implementation"},
         {"timestamp": now, "agent": "codex", "status": "blocked", "task_type": "implementation"},
+        {"timestamp": now, "agent": "codex", "status": "complete", "task_type": "debugging"},
+        {"timestamp": now, "agent": "codex", "status": "complete", "task_type": "debugging"},
         {"timestamp": now, "agent": "codex", "status": "complete", "task_type": "debugging"},
         {"timestamp": now, "agent": "codex", "status": "complete", "task_type": "debugging"},
         {"timestamp": now, "agent": "codex", "status": "complete", "task_type": "debugging"},

@@ -1836,7 +1836,7 @@ def get_agent_chain(meta: dict, cfg: dict) -> list[str]:
             passed=filtered,
             context=f"queue:get_agent_chain task_type={meta.get('task_type', 'unknown')}",
         )
-    healthy, _skipped = filter_healthy_agents(filtered, metrics_file, task_type=task_type)
+    healthy, _skipped = filter_healthy_agents(filtered, metrics_file, task_type=task_type, min_task_count=5)
     return healthy
 
 
