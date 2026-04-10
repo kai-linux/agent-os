@@ -32,14 +32,55 @@ Sprint selection should balance:
 
 
 
+
 <!-- auto-focus-areas -->
-- Contain and recover from CI failures faster to prevent cascading debug work
-- Reduce blocked task churn through structured blocker codes and escalation automation
-- Improve execution reliability through agent health monitoring and adaptive routing
-- Close measurement gaps to enable evidence-driven sprint planning and decision making
-- Build public adoption credibility through visible proof-of-capability and GitHub presence
+- GitHub adoption and user activation
+- Runtime reliability and agent health
+- Evidence-driven closed-loop optimization
+- Blocker reduction and escalation recovery
 
 ## Sprint History
+
+### Sprint 2026-04-10
+
+**Retrospective:**
+Issues completed:
+- #176: Create public reliability metrics dashboard to support adoption [enhancement, prio:high, done, bot-generated] — COMPLETED
+- #175: Validate missing_context blocker reduction and configure regression monitoring [enhancement, prio:normal, done, bot-generated] — COMPLETED
+- #173: Investigate and fix codex agent runtime degradation (56% success rate) [bug, prio:high, done, bot-generated] — COMPLETED
+- #170: Follow up partial debug for root issue #166 [prio:high, done, claude] — COMPLETED
+- #166: Fix CI failure on PR #165 [bug, prio:high, done] — COMPLETED
+- #164: Fix CI failure on PR #163 [bug, prio:high, done] — COMPLETED
+- #162: Validate and monitor adaptive agent health gate impact on success rate [enhancement, prio:high, done, bot-generated] — COMPLETED
+- #161: Publish GitHub Discussions case study: autonomous multi-agent PR workflow [enhancement, prio:high, done, bot-generated] — COMPLETED
+- #159: Reduce missing_context task blockers through enhanced context provision [enhancement, prio:normal, done, tech-debt, bot-generated] — COMPLETED
+- #156: Fix README rendering and complete truncated sections [enhancement, prio:high, done, bot-generated] — COMPLETED
+- #137: Harden PRODUCT_INSPECTION.md: per-observation provenance, staleness vs planner cadence, and coverage-boundary framing [enhancement, prio:high, prio:normal, done] — COMPLETED
+
+PRs merged:
+- PR #181: Agent: task-20260409-210522-validate-missing-context-blocker-reduction-and-con (branch: agent/task-20260409-210522-validate-missing-context-blocker-reduction-and-con)
+- PR #180: Agent: task-20260409-210416-attach-prompt-snapshot-references-to-blocked-task- (branch: agent/task-20260409-210416-attach-prompt-snapshot-references-to-blocked-task-)
+- PR #179: Agent: task-20260409-210321-create-public-reliability-metrics-dashboard-to-sup (branch: agent/task-20260409-210321-create-public-reliability-metrics-dashboard-to-sup)
+- PR #178: Agent: task-20260409-210219-investigate-and-fix-codex-agent-runtime-degradatio (branch: agent/task-20260409-210219-investigate-and-fix-codex-agent-runtime-degradatio)
+- PR #177: Agent: task-20260409-210120-promote-multi-agent-case-study-through-dev-to-hn-a (branch: agent/task-20260409-210120-promote-multi-agent-case-study-through-dev-to-hn-a)
+- PR #171: Agent: task-20260409-070520-reduce-missing-context-task-blockers-through-enhan (branch: agent/task-20260409-070520-reduce-missing-context-task-blockers-through-enhan)
+- PR #169: Agent: task-20260409-070419-validate-and-monitor-adaptive-agent-health-gate-im (branch: agent/task-20260409-070419-validate-and-monitor-adaptive-agent-health-gate-im)
+- PR #168: Agent: task-20260409-070319-publish-github-discussions-case-study-autonomous-m (branch: agent/task-20260409-070319-publish-github-discussions-case-study-autonomous-m)
+- PR #165: Agent: task-20260409-070215-fix-readme-rendering-and-complete-truncated-sectio (branch: agent/task-20260409-070215-fix-readme-rendering-and-complete-truncated-sectio)
+- PR #163: Agent: task-20260409-070128-harden-product-inspection-md-per-observation-prove (branch: agent/task-20260409-070128-harden-product-inspection-md-per-observation-prove)
+
+Outcome evidence:
+- #? / PR #177 / No measurable external metric: inconclusive — Merged work had no configured outcome check, so it is explicitly tracked as inconclusive instead of being treated as impact-free or automatically successful.
+- #? / PR #180 / No measurable external metric: inconclusive — Merged work had no configured outcome check, so it is explicitly tracked as inconclusive instead of being treated as impact-free or automatically successful.
+- #? / PR #181 / No measurable external metric: inconclusive — Merged work had no configured outcome check, so it is explicitly tracked as inconclusive instead of being treated as impact-free or automatically successful.
+
+**Plan:**
+- [prio:high] Configure external outcome metrics for adoption PRs: Every sprint outcome is 'inconclusive' because external metrics are not wired — closing this measurement gap is the operator-validated critical blocker and prerequisite for validating all adoption work.
+- [prio:high] Add comprehensive quickstart section to README: With 2 stars and 313 commits, the README must convert visitors faster — a quickstart directly targets the 29%-weighted GitHub stars metric and the Adoption & Credibility rubric dimension.
+- [prio:high] Create deployment guide for solo builder adoption: The strategy explicitly targets solo builders and technical founders — a deployment guide is the missing activation artifact that converts interest into real usage and compounds with the quickstart.
+- [prio:high] Validate codex agent fix and add regression monitoring: Last sprint fixed codex (56% success on 16/29 tasks) per operator directive — validating the fix with regression monitoring advances closed-loop optimization and protects the 29%-weighted task success rate.
+- [prio:normal] Add error handling and rate limiting to Telegram integration: Human-filed issue addressing production hardening of a critical operator communication channel — improves the Operator Trust rubric dimension and prevents notification failures from eroding confidence.
+
 
 ### Sprint 2026-04-09
 
