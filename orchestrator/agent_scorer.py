@@ -176,7 +176,7 @@ def filter_healthy_agents(
         if scoped_stats and scoped_stats.get("total", 0) >= min_task_count:
             stats = scoped_stats
             scope = scoped_task_type
-        if stats and stats.get("total", 0) > 0 and stats.get("rate", 0.0) <= threshold:
+        if stats and stats.get("total", 0) >= min_task_count and stats.get("rate", 0.0) <= threshold:
             skipped[agent] = {**stats, "scope": scope}
             continue
         healthy.append(agent)
