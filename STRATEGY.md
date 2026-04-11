@@ -33,13 +33,28 @@ Sprint selection should balance:
 
 
 
+
 <!-- auto-focus-areas -->
-- GitHub adoption and user activation
-- Runtime reliability and agent health
-- Evidence-driven closed-loop optimization
-- Blocker reduction and escalation recovery
+- Establish GitHub adoption credibility through documentation and proof (quickstart, guides, dashboards, case studies)
+- Configure external outcome metrics to close measurement gaps and enable evidence-driven decisions
+- Improve agent health checks and task routing reliability (deepseek failures, codex degradation, invalid assignments)
+- Build blocked task escalation and recovery infrastructure (escalation loops, unblock notes, context provision)
 
 ## Sprint History
+
+### Sprint 2026-04-11
+
+**Retrospective:**
+Issues completed:
+- #182: Validate codex agent fix and add regression monitoring [enhancement, prio:high, done, bot-generated] — COMPLETED
+
+**Plan:**
+- [prio:high] Configure external outcome metrics for adoption PRs: Operator-validated top priority: every adoption outcome is 'inconclusive' because external metrics are unwired — closing this measurement gap is prerequisite for validating the entire adoption strategy and advancing toward Level 4 closed-loop optimization.
+- [prio:high] Add comprehensive quickstart section to README: Operator directive explicitly calls for shipping activation artifacts that convert GitHub visitors into users — quickstart is the highest-leverage README improvement for the Adoption & Credibility rubric dimension.
+- [prio:high] Create deployment guide for solo builder adoption: Strategy explicitly targets solo builders and technical founders — a deployment guide is the operator-validated missing activation artifact that compounds with the quickstart to convert case study readers into actual users.
+- [prio:high] Fix README credibility signals - make proof links functional: Product inspection flagged broken proof links as HIGH severity — every visitor sees non-functional credibility signals, directly undermining the Adoption & Credibility rubric dimension and compounding negatively with quickstart and deployment guide work.
+- [prio:normal] Complete case study distribution and measure adoption signals: Last sprint's promotion task was partial — completing distribution and measuring signals provides the first real adoption data point, compounding with the new outcome metrics infrastructure to close the evidence-driven loop.
+
 
 ### Sprint 2026-04-10
 
