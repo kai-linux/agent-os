@@ -183,6 +183,7 @@ time, and escalation rate from `PRODUCTION_FEEDBACK.md` and `agent_stats.jsonl`.
 
 | Topic | Link |
 |---|---|
+| **Deployment guide for solo builders** | [docs/deployment-guide.md](docs/deployment-guide.md) |
 | Architecture, team roles, observability, safety | [docs/architecture.md](docs/architecture.md) |
 | Task execution, handoff contract, retry logic | [docs/execution.md](docs/execution.md) |
 | Configuration, objectives, evidence, cron setup | [docs/configuration.md](docs/configuration.md) |
