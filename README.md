@@ -90,7 +90,11 @@ These generated issues are indistinguishable from human-written ones. They enter
 
 ---
 
-## Try It in 5 Minutes
+## Get Started in 5 Minutes
+
+### Option A: Sandbox demo (2 minutes)
+
+Zero config — creates a test issue, dispatches it to Claude, and shows the full loop:
 
 ```bash
 git clone https://github.com/kai-linux/agent-os && cd agent-os
@@ -98,22 +102,98 @@ gh auth login          # only prerequisite besides claude CLI
 ./demo.sh              # or: make demo
 ```
 
-That's it. The demo creates a test issue, dispatches it to Claude, and shows the agent writing code — no config editing, no GitHub Projects, no cron setup.
+**Requirements:** `gh` (authenticated), `python3`, `claude` CLI. Works on macOS and Linux.
 
-**Requirements:** `gh` (authenticated), `python3`, `claude` CLI.
+### Option B: Production setup (5 minutes)
 
-<details>
-<summary>Full production setup</summary>
+Run Agent OS against your own repo with full dispatch, CI gating, and auto-merge.
+
+**Step 1 — Clone and install**
 
 ```bash
+git clone https://github.com/kai-linux/agent-os && cd agent-os
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp example.config.yaml config.yaml   # edit: github_owner, repos, Telegram token
-gh auth refresh -s project
-crontab -e   # see docs/configuration.md for full cron reference
 ```
 
-Create your first issue. Set it to **Ready**. Watch the system work.
+**Step 2 — Authenticate GitHub**
+
+```bash
+gh auth login
+gh auth refresh -s project            # needed for GitHub Projects board access
+```
+
+**Step 3 — Configure**
+
+```bash
+cp example.config.yaml config.yaml
+```
+
+Edit `config.yaml` — the minimum you need to set:
+
+```yaml
+root_dir: "~/agent-os"
+worktrees_dir: "/srv/worktrees"       # any writable path for agent worktrees
+allowed_repos:
+  - /path/to/your/repo                # local clone of the repo agents will work on
+default_allow_push: true
+```
+
+**Step 4 — Create your first task**
+
+Open an issue on your repo with a clear title and body containing:
+
+```markdown
+## Goal
+<what you want done>
+
+## Success Criteria
+- <measurable outcome>
+
+## Constraints
+- <any boundaries>
+```
+
+Then move the issue to **Ready** on your GitHub Projects board (or add a `Status: Ready` label).
+
+**Step 5 — Dispatch and watch**
+
+```bash
+# Run the dispatcher once to pick up your Ready issue
+python3 -m orchestrator.github_dispatcher
+
+# Run the queue to execute the task
+python3 -m orchestrator.queue
+
+# Check the result
+cat runtime/mailbox/*/result/.agent_result.md
+```
+
+The agent clones a worktree, writes code, runs tests, pushes a branch, and opens a PR.
+
+**Step 6 — View results**
+
+```bash
+# See the PR the agent created
+gh pr list --repo your-user/your-repo
+
+# Auto-merge when CI passes (run on a loop or cron)
+python3 -m orchestrator.pr_monitor
+```
+
+<details>
+<summary>Optional: set up cron for full autonomy</summary>
+
+```bash
+# Add to crontab — see docs/configuration.md for full reference
+crontab -l 2>/dev/null; echo "
+* * * * * cd $HOME/agent-os && .venv/bin/python3 -m orchestrator.github_dispatcher >> runtime/logs/dispatcher.log 2>&1
+* * * * * cd $HOME/agent-os && .venv/bin/python3 -m orchestrator.queue >> runtime/logs/queue.log 2>&1
+*/5 * * * * cd $HOME/agent-os && .venv/bin/python3 -m orchestrator.pr_monitor >> runtime/logs/pr_monitor.log 2>&1
+"
+```
+
+Once cron is running, the system dispatches, executes, reviews, and merges autonomously.
 </details>
 
 ---
