@@ -1,7 +1,7 @@
 # Hacker News Submission
 
 ## Title
-Show HN: Agent OS – Autonomous software org that shipped 59 PRs and 275 commits in 23 days
+Show HN: Agent OS – Autonomous software org that shipped 75 PRs and 327 commits in 27 days
 
 ## URL
 https://github.com/kai-linux/agent-os
@@ -10,11 +10,11 @@ https://github.com/kai-linux/agent-os
 
 Agent OS is a coordination layer for AI agents that manages an entire software project autonomously — from issue triage to code, CI, merge, failure analysis, and self-improvement.
 
-Key results from managing its own repo for 23 days:
-- 79 issues closed (92% closure rate)
-- 59 PRs merged (91% merge rate)
-- 275 commits (~12/day)
-- 55.7% first-attempt success rate, but 92% eventual closure via retries/fallback
+Key results from managing its own repo for 27 days:
+- 100 issues closed (93% closure rate)
+- 75 PRs merged (90% merge rate)
+- 327 commits (~12/day)
+- 60.8% first-attempt success rate, but 93% eventual closure via retries/fallback
 - 4 agents: Claude, Codex, Gemini, DeepSeek with automatic routing
 - Runs on a $5/month VPS with cron
 

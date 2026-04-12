@@ -35,8 +35,23 @@ curl -X POST https://dev.to/api/articles \
 1. Post to r/programming using the title and body from `reddit-posts.md`
 2. Post to r/SideProject using the second section
 
+## Automated Distribution
+
+Run `bin/publish_case_study.sh` to publish and capture metrics in one step.
+Requires `DEV_API_KEY` for dev.to. Use `--dry-run` to test without posting.
+
 ## Tracking
 
 After publishing, check adoption signals:
 - GitHub stars/forks trend via `bin/export_github_evidence.sh`
+- Distribution events logged to `runtime/metrics/distribution_log.jsonl`
 - Referral traffic in GitHub Insights → Traffic
+
+### Adoption Baseline (2026-04-12)
+
+| Signal | Value |
+|---|---|
+| GitHub stars | 2 |
+| GitHub forks | 0 |
+| Discussion #167 upvotes | 1 |
+| Discussion #167 comments | 0 |

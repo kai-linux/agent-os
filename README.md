@@ -240,8 +240,8 @@ The backlog is GitHub Issues. The sprint board is GitHub Projects. The standup i
 
 ## Built with Agent OS
 
-Agent OS manages its own development. In 23 days it shipped 59 merged PRs,
-closed 79 issues, and produced 275 commits — autonomously dispatching tasks,
+Agent OS manages its own development. In 27 days it shipped 75 merged PRs,
+closed 100 issues, and produced 327 commits — autonomously dispatching tasks,
 reviewing CI, and merging changes with zero human intervention per task.
 
 **[Reliability dashboard →](docs/reliability/README.md)**
@@ -249,14 +249,17 @@ Rolling 14-day success rate, per-agent breakdown, blocker categories, completion
 time, and escalation rate from `PRODUCTION_FEEDBACK.md` and `agent_stats.jsonl`.
 **[Community case study →](https://github.com/kai-linux/agent-os/discussions/167)**
 
-**[Read the full case study →](docs/case-study-agent-os.md)**
+**[Read the full case study →](docs/case-study-agent-os.md)** ·
+[GitHub Discussion](https://github.com/kai-linux/agent-os/discussions/167)
 
 | Metric | Value |
 |---|---|
-| Issues closed | 79 of 86 (92%) |
-| PRs merged | 59 of 65 (91%) |
-| Commits | 275 in 23 days (~12/day) |
-| Agent tasks executed | 122 (55.7% first-attempt success) |
+| Issues closed | 100 of 108 (93%) |
+| PRs merged | 75 of 83 (90%) |
+| Commits | 327 in 27 days (~12/day) |
+| Agent tasks executed | 143 (60.8% first-attempt success) |
+| GitHub stars | 2 |
+| GitHub forks | 0 |
 
 ---
 

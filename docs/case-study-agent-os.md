@@ -1,8 +1,8 @@
 # Case Study: Agent OS Managing Its Own Development
 
 > Agent OS bootstrapped itself from a bare repository to a fully autonomous
-> software organization in 23 days — shipping 59 merged PRs, closing 79 issues,
-> and producing 275 commits with a 55.7% first-attempt task success rate.
+> software organization in 27 days — shipping 75 merged PRs, closing 100 issues,
+> and producing 327 commits with a 60.8% first-attempt task success rate.
 
 ## The Problem
 
@@ -22,8 +22,9 @@ eliminate that overhead — and the first repository it managed was itself.
 | Strategic planner with evidence-driven sprint selection | 2026-03-19 | Sprint plans in STRATEGY.md |
 | Production feedback + outcome attribution | 2026-03-20 | Closed-loop measurement |
 | Case study published | 2026-04-08 | This document |
+| Metrics refreshed | 2026-04-12 | Updated with 27-day data |
 
-**Total elapsed: 23 days from empty repo to self-managing system.**
+**Total elapsed: 27 days from empty repo to self-managing system.**
 
 ## Before / After
 
@@ -40,23 +41,23 @@ eliminate that overhead — and the first repository it managed was itself.
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│         Agent OS: 23 Days of Autonomous Operation       │
+│         Agent OS: 27 Days of Autonomous Operation       │
 ├─────────────────────────────────────────────────────────┤
 │                                                         │
-│  Issues closed          ██████████████████████████  79  │
-│  Issues open            ██                          7   │
+│  Issues closed          ██████████████████████████ 100  │
+│  Issues open            ██                          8   │
 │                                                         │
-│  PRs merged             ████████████████████████    59  │
-│  PRs closed/open        ███                         6   │
+│  PRs merged             █████████████████████████   75  │
+│  PRs closed/open        ███                         8   │
 │                                                         │
-│  Total commits          ████████████████████████── 275  │
+│  Total commits          █████████████████████████  327  │
 │                                                         │
-│  Tasks executed         █████████████████████████  122  │
-│  Tasks succeeded        ██████████████             68   │
+│  Tasks executed         █████████████████████████  143  │
+│  Tasks succeeded        ███████████████            87   │
 │                                                         │
-│  Success rate           ██████████████▒▒▒▒▒▒▒▒  55.7%  │
-│  Issue closure rate     █████████████████████████  92%  │
-│  PR merge rate          ████████████████████████   91%  │
+│  Success rate           ███████████████▒▒▒▒▒▒▒▒  60.8% │
+│  Issue closure rate     █████████████████████████  93%  │
+│  PR merge rate          █████████████████████████  90%  │
 │                                                         │
 │  Avg commits/day        ████████████              ~12   │
 │                                                         │
@@ -65,10 +66,10 @@ eliminate that overhead — and the first repository it managed was itself.
 
 ### Key Numbers
 
-- **79 issues closed** out of 86 created (92% closure rate)
-- **59 PRs merged** out of 65 created (91% merge rate)
-- **275 commits** in 23 days (~12 commits/day)
-- **122 agent tasks executed**, 68 completed on first attempt (55.7%)
+- **100 issues closed** out of 108 created (93% closure rate)
+- **75 PRs merged** out of 83 created (90% merge rate)
+- **327 commits** in 27 days (~12 commits/day)
+- **143 agent tasks executed**, 87 completed on first attempt (60.8%)
 - **4 agents in pool**: Claude, Codex, Gemini, DeepSeek — with automatic fallback routing
 
 ## What the System Built
@@ -124,5 +125,17 @@ simple task runner.
 Agent OS demonstrated that a solo builder can bootstrap a fully autonomous
 development pipeline in under a month. The system managed its own repository
 from day one, shipping real features through the same pipeline it was building.
-With 79 issues closed, 59 PRs merged, and continuous self-improvement running
+With 100 issues closed, 75 PRs merged, and continuous self-improvement running
 on a $5/month VPS, the results are public, auditable, and reproducible.
+
+## Adoption Metrics
+
+| Signal | Value | As of |
+|---|---|---|
+| GitHub stars | 2 | 2026-04-12 |
+| GitHub forks | 0 | 2026-04-12 |
+| Discussion upvotes | 1 | 2026-04-12 |
+| Distribution channels | GitHub Discussions | 2026-04-12 |
+
+Metrics are captured by `bin/export_github_evidence.sh` and logged to
+`runtime/metrics/distribution_log.jsonl` for trend analysis.
