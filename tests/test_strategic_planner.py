@@ -1177,7 +1177,7 @@ def test_recent_outcome_summary_refreshes_snapshot(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         "orchestrator.strategic_planner._summarize_outcome_snapshot",
-        lambda check, content: ("Activation improved from 20% to 28%.", "improved"),
+        lambda check, content, **kwargs: ("Activation improved from 20% to 28%.", "improved"),
     )
 
     summary = _recent_outcome_summary(cfg, "owner/repo", repo, days=30)
