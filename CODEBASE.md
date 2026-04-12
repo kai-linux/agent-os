@@ -26,6 +26,17 @@
 
 ## Recent Changes
 
+### 2026-04-12 — [task-20260412-123919-fix-readme-credibility-signals-make-proof-links-fu] (#188 kai-linux/agent-os)
+Fixed README credibility signals by making the "Public proof" line prominent with bold formatting and consolidating all three proof links (reliability dashboard, case study, GitHub discussion) into a single scannable line near the top. Fixed arrow inconsistency in "Built with Agent OS" section and added the community discussion link there for redundancy.
+
+**Files:** `- README.md`
+
+**Decisions:**
+  - - Used · -separated inline links instead of a table or bullet list for the top proof line, keeping it scannable and compact above the fold
+  - - Kept the existing "Built with Agent OS" section structure and added links there for redundancy rather than removing the section's own proof links
+  - - Did not change the reliability dashboard content (all n/a) since the task scope is about making links functional and prominent, not populating metrics data
+
+
 ### 2026-04-12 — [task-20260412-123819-complete-case-study-distribution-and-measure-adopt] (#187 kai-linux/agent-os)
 Completed the case study distribution cycle by refreshing all promotion content with current metrics (327 commits, 75 PRs merged, 100 issues closed, 60.8% success rate over 27 days), capturing an adoption metrics baseline (2 stars, 0 forks), creating an automated distribution script (bin/publish_case_study.sh) that posts to dev.to when DEV_API_KEY is set and logs distribution events, updating the README with measured adoption data including star/fork counts, and adding an adoption metrics section to the case study for sprint retrospective evidence.
 
