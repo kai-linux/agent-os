@@ -21,7 +21,7 @@ def gh_json(cmd: list[str]):
 # ---------------------------------------------------------------------------
 
 _PROJECT_QUERY = """
-query($owner: String!, $number: Int!) {{
+query($owner: String!, $number: Int!, $cursor: String) {{
   {owner_type}(login: $owner) {{
     projectV2(number: $number) {{
       id
@@ -34,7 +34,11 @@ query($owner: String!, $number: Int!) {{
           }}
         }}
       }}
-      items(first: 100) {{
+      items(first: 100, after: $cursor) {{
+        pageInfo {{
+          hasNextPage
+          endCursor
+        }}
         nodes {{
           id
           fieldValueByName(name: "Status") {{
@@ -66,49 +70,10 @@ query($owner: String!, $number: Int!) {{
 """
 
 
-def query_project(project_number: int, owner: str) -> dict:
-    """Fetch project metadata + all items in one GraphQL call.
-
-    Returns dict with keys:
-        project_id, status_field_id, status_options (name->id),
-        items (list of dicts with item_id, status, number, title, body, url, state, labels, repo)
-    """
-    last_error = None
-    for owner_type in ["user", "organization"]:
-        query = _PROJECT_QUERY.format(owner_type=owner_type)
-        try:
-            raw = gh([
-                "api", "graphql",
-                "-f", f"query={query}",
-                "-F", f"owner={owner}",
-                "-F", f"number={project_number}",
-            ])
-            data = json.loads(raw)
-            # Check for GraphQL errors
-            if "errors" in data:
-                last_error = data["errors"]
-                continue
-            project_data = data["data"][owner_type]["projectV2"]
-            if project_data is None:
-                last_error = f"{owner_type} '{owner}' has no projectV2 #{project_number}"
-                continue
-            break
-        except Exception as e:
-            last_error = e
-            continue
-    else:
-        raise RuntimeError(f"Could not query project {project_number} for owner {owner}: {last_error}")
-
-    # Find the "Status" field among all fields
-    field_info = {}
-    for f in (project_data.get("fields") or {}).get("nodes", []):
-        if f.get("name") == "Status":
-            field_info = f
-            break
-    status_options = {opt["name"]: opt["id"] for opt in field_info.get("options", [])}
-
+def _parse_item_nodes(nodes: list) -> list[dict]:
+    """Parse GraphQL item nodes into structured dicts."""
     items = []
-    for node in project_data["items"]["nodes"]:
+    for node in nodes:
         content = node.get("content")
         if not content or not content.get("number"):
             continue  # skip drafts / PRs without number
@@ -131,6 +96,77 @@ def query_project(project_number: int, owner: str) -> dict:
             "labels": labels,
             "repo": content.get("repository", {}).get("nameWithOwner", ""),
         })
+    return items
+
+
+def query_project(project_number: int, owner: str) -> dict:
+    """Fetch project metadata + all items via paginated GraphQL calls.
+
+    Returns dict with keys:
+        project_id, status_field_id, status_options (name->id),
+        items (list of dicts with item_id, status, number, title, body, url, state, labels, repo)
+    """
+    last_error = None
+    owner_type_found = None
+    for owner_type in ["user", "organization"]:
+        query = _PROJECT_QUERY.format(owner_type=owner_type)
+        try:
+            raw = gh([
+                "api", "graphql",
+                "-f", f"query={query}",
+                "-F", f"owner={owner}",
+                "-F", f"number={project_number}",
+                "-F", "cursor=",
+            ])
+            data = json.loads(raw)
+            if "errors" in data:
+                last_error = data["errors"]
+                continue
+            project_data = data["data"][owner_type]["projectV2"]
+            if project_data is None:
+                last_error = f"{owner_type} '{owner}' has no projectV2 #{project_number}"
+                continue
+            owner_type_found = owner_type
+            break
+        except Exception as e:
+            last_error = e
+            continue
+    else:
+        raise RuntimeError(f"Could not query project {project_number} for owner {owner}: {last_error}")
+
+    # Find the "Status" field among all fields
+    field_info = {}
+    for f in (project_data.get("fields") or {}).get("nodes", []):
+        if f.get("name") == "Status":
+            field_info = f
+            break
+    status_options = {opt["name"]: opt["id"] for opt in field_info.get("options", [])}
+
+    # Parse first page of items
+    items_data = project_data["items"]
+    items = _parse_item_nodes(items_data["nodes"])
+
+    # Paginate through remaining items
+    page_info = items_data.get("pageInfo", {})
+    while page_info.get("hasNextPage"):
+        cursor = page_info["endCursor"]
+        query = _PROJECT_QUERY.format(owner_type=owner_type_found)
+        raw = gh([
+            "api", "graphql",
+            "-f", f"query={query}",
+            "-F", f"owner={owner}",
+            "-F", f"number={project_number}",
+            "-f", f"cursor={cursor}",
+        ])
+        data = json.loads(raw)
+        if "errors" in data:
+            break
+        next_project = data["data"][owner_type_found]["projectV2"]
+        if not next_project:
+            break
+        items_data = next_project["items"]
+        items.extend(_parse_item_nodes(items_data["nodes"]))
+        page_info = items_data.get("pageInfo", {})
 
     return {
         "project_id": project_data["id"],
