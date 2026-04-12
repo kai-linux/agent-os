@@ -10,8 +10,8 @@
 
 You give it a backlog. It ships product.
 
-Public proof:
-[Reliability Dashboard](docs/reliability/README.md)
+**Public proof — everything is auditable:**
+[Reliability dashboard](docs/reliability/README.md) · [Case study](docs/case-study-agent-os.md) · [Live discussion](https://github.com/kai-linux/agent-os/discussions/167)
 
 ### See it work — real task, zero human intervention
 
@@ -244,9 +244,10 @@ Agent OS manages its own development. In 23 days it shipped 59 merged PRs,
 closed 79 issues, and produced 275 commits — autonomously dispatching tasks,
 reviewing CI, and merging changes with zero human intervention per task.
 
-**[Reliability dashboard ->](docs/reliability/README.md)**
+**[Reliability dashboard →](docs/reliability/README.md)**
 Rolling 14-day success rate, per-agent breakdown, blocker categories, completion
 time, and escalation rate from `PRODUCTION_FEEDBACK.md` and `agent_stats.jsonl`.
+**[Community case study →](https://github.com/kai-linux/agent-os/discussions/167)**
 
 **[Read the full case study →](docs/case-study-agent-os.md)**
 
