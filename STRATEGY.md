@@ -35,14 +35,28 @@ Sprint selection should balance:
 
 
 
+
 <!-- auto-focus-areas -->
-- Outcome metrics infrastructure for closed-loop optimization
-- GitHub adoption through README and credibility artifacts
-- Agent reliability and health-gated dispatch
-- CI stability and failure cascade prevention
-- Blocked task escalation and recovery
+- Build GitHub adoption signals (credibility proof, case studies, discoverability)
+- Configure external outcome metrics to validate adoption impact
+- Ship activation artifacts (quickstart and deployment guides) for user conversion
+- Improve agent reliability and reduce escalated tasks
+- Establish closed-loop measurement infrastructure for evidence-driven planning
 
 ## Sprint History
+
+### Sprint 2026-04-12
+
+**Retrospective:**
+(no activity in the last 0.5 days)
+
+**Plan:**
+- [prio:high] Configure external outcome metrics for adoption PRs: Operator-validated top priority across two consecutive sprints: every adoption outcome remains inconclusive because external metrics are unwired — this is the prerequisite for closing the evidence-driven planning loop and advancing toward Level 4 closed-loop optimization.
+- [prio:high] Fix README credibility signals - make proof links functional: Operator risk note explicitly requires this to ship before quickstart and deployment guide to maximize their impact — product inspection flagged non-functional proof links as MEDIUM severity affecting every visitor, directly undermining the Adoption & Credibility rubric dimension.
+- [prio:high] Add comprehensive quickstart section to README: Product inspection flagged missing Getting Started/Installation sections as MEDIUM severity — quickstart is the highest-leverage README improvement for the 29%-weighted GitHub stars metric and the operator-validated activation artifact that compounds with the proof link fix.
+- [prio:high] Create deployment guide for solo builder adoption: Strategy explicitly targets solo builders and technical founders — deployment guide is the operator-validated missing activation artifact that converts case study readers into actual users, compounding with quickstart to close the full adoption funnel.
+- [prio:normal] Complete case study distribution and measure adoption signals: Last sprint's promotion task was partial — completing distribution and measuring signals provides the first real adoption data point, compounding with the new outcome metrics infrastructure to close the evidence-driven loop the operator directive demands.
+
 
 ### Sprint 2026-04-11
 
