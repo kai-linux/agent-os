@@ -26,6 +26,19 @@
 
 ## Recent Changes
 
+### 2026-04-12 — [task-20260412-123618-add-comprehensive-quickstart-section-to-readme] (#184 kai-linux/agent-os)
+Replaced the existing "Try It in 5 Minutes" section in README.md with a comprehensive "Get Started in 5 Minutes" quickstart offering two paths: a 2-minute sandbox demo (referencing demo.sh) and a 5-minute production setup with 6 copy-paste steps covering installation, GitHub auth, configuration, task creation, dispatch, and viewing results. The section is ~105 lines, positioned in the top third of the README, and works on macOS and Linux.
+
+**Files:** `- README.md`, `- .agent_result.md`
+
+**Decisions:**
+  - - Replaced the old "Try It in 5 Minutes" section in-place rather than adding a new section, keeping the same prominent position and avoiding duplicate content
+  - - Split into Option A (sandbox, 2 min) and Option B (production, 5 min) to serve both tire-kickers and serious adopters
+  - - Showed minimal config.yaml with only the 4 essential fields (root_dir, worktrees_dir, allowed_repos, default_allow_push) to minimize friction
+  - - Included the issue body template (Goal/Success Criteria/Constraints) since that's the dispatcher's expected format
+  - - Put cron setup behind a details/summary collapse since it's optional and the manual dispatch commands already demonstrate the full loop
+
+
 ### 2026-04-12 — [task-20260412-123519-configure-external-outcome-metrics-for-adoption-pr] (#183 kai-linux/agent-os)
 Implemented automated baseline capture at PR merge time (GitHub stars/forks via gh API + operational metrics from agent_stats.jsonl), wired all 5 objective metrics with outcome_check blocks including 7-day and 14-day measurement windows, enhanced the outcome snapshot prompt with baseline data and prior-trend analysis to avoid false causality, enabled outcome_attribution by default, and ensured objective-derived checks flow through dispatch so adoption PRs are instrumented automatically.
 
