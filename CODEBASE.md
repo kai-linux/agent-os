@@ -26,6 +26,19 @@
 
 ## Recent Changes
 
+### 2026-04-12 — [task-20260412-123718-create-deployment-guide-for-solo-builder-adoption] (#185 kai-linux/agent-os)
+Created a comprehensive deployment guide (docs/deployment-guide.md, 476 lines) covering prerequisites, installation, configuration examples for Python/Node.js/monorepo setups, GitHub Project board setup, manual first-task walkthrough, cron configuration for production, upgrade path to full automation, Telegram notifications, and a troubleshooting section for common errors. Linked the guide from README.md documentation table.
+
+**Files:** `- docs/deployment-guide.md`, `- README.md`
+
+**Decisions:**
+  - - Used dispatcher_only as the recommended starting mode so new users can verify the flow before enabling full automation
+  - - Kept config examples minimal (only essential fields) and referenced example.config.yaml for advanced options
+  - - Structured the guide as a progressive walkthrough: manual first → cron → full automation
+  - - Put troubleshooting at the end with the 7 most common failure modes based on codebase history (auth failures, blocked tasks, worktree errors, cron issues)
+  - - Added the guide as the first row in the README documentation table (bolded) for maximum discoverability
+
+
 ### 2026-04-12 — [task-20260412-123618-add-comprehensive-quickstart-section-to-readme] (#184 kai-linux/agent-os)
 Replaced the existing "Try It in 5 Minutes" section in README.md with a comprehensive "Get Started in 5 Minutes" quickstart offering two paths: a 2-minute sandbox demo (referencing demo.sh) and a 5-minute production setup with 6 copy-paste steps covering installation, GitHub auth, configuration, task creation, dispatch, and viewing results. The section is ~105 lines, positioned in the top third of the README, and works on macOS and Linux.
 
