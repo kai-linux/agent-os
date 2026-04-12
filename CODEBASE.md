@@ -26,6 +26,19 @@
 
 ## Recent Changes
 
+### 2026-04-12 — [task-20260412-123819-complete-case-study-distribution-and-measure-adopt] (#187 kai-linux/agent-os)
+Completed the case study distribution cycle by refreshing all promotion content with current metrics (327 commits, 75 PRs merged, 100 issues closed, 60.8% success rate over 27 days), capturing an adoption metrics baseline (2 stars, 0 forks), creating an automated distribution script (bin/publish_case_study.sh) that posts to dev.to when DEV_API_KEY is set and logs distribution events, updating the README with measured adoption data including star/fork counts, and adding an adoption metrics section to the case study for sprint retrospective evidence.
+
+**Files:** `- bin/publish_case_study.sh`, `- docs/case-study-agent-os.md`, `- docs/promotion/devto-article.md`, `- docs/promotion/hn-submission.md`, `- docs/promotion/README.md`, `- README.md`, `- .agent_result.md`
+
+**Decisions:**
+  - - Created bin/publish_case_study.sh as the single entry point for distribution + metrics capture, following the existing bin/ script pattern
+  - - dev.to publishing requires DEV_API_KEY env var — script skips gracefully when not set and logs the skip to distribution_log.jsonl
+  - - HN submission remains manual (no write API exists) — documented in script output and promotion/README.md
+  - - Refreshed all promotion content with live metrics from GitHub API and agent_stats.jsonl rather than using stale 23-day numbers
+  - - Added measured adoption signals (stars, forks) directly to README metrics table so they are visible as public credibility signals per NORTH_STAR.md guidance
+
+
 ### 2026-04-12 — [task-20260412-123718-create-deployment-guide-for-solo-builder-adoption] (#185 kai-linux/agent-os)
 Created a comprehensive deployment guide (docs/deployment-guide.md, 476 lines) covering prerequisites, installation, configuration examples for Python/Node.js/monorepo setups, GitHub Project board setup, manual first-task walkthrough, cron configuration for production, upgrade path to full automation, Telegram notifications, and a troubleshooting section for common errors. Linked the guide from README.md documentation table.
 
