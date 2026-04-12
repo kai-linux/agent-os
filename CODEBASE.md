@@ -26,6 +26,19 @@
 
 ## Recent Changes
 
+### 2026-04-12 — [task-20260412-123519-configure-external-outcome-metrics-for-adoption-pr] (#183 kai-linux/agent-os)
+Implemented automated baseline capture at PR merge time (GitHub stars/forks via gh API + operational metrics from agent_stats.jsonl), wired all 5 objective metrics with outcome_check blocks including 7-day and 14-day measurement windows, enhanced the outcome snapshot prompt with baseline data and prior-trend analysis to avoid false causality, enabled outcome_attribution by default, and ensured objective-derived checks flow through dispatch so adoption PRs are instrumented automatically.
+
+**Files:** `- orchestrator/outcome_attribution.py`, `- orchestrator/pr_monitor.py`, `- orchestrator/strategic_planner.py`, `- objectives/agent-os.yaml`, `- example.config.yaml`, `- tests/test_strategic_planner.py`
+
+**Decisions:**
+  - - Pointed outcome checks to github_metrics_history.jsonl (JSONL trend log) instead of *_latest.yaml (single-point snapshot) so the LLM evaluator can see before/after data points across the measurement window
+  - - Captured baseline metrics in the attribution record at merge time rather than adding a separate baseline store, keeping the data co-located with the event it describes
+  - - Added 14-day variants as zero-weight metrics (github_stars_14d, github_forks_14d) so they generate snapshots without affecting the objective score — they serve as validation checks
+  - - Used lazy import for objectives in get_repo_outcome_check_ids to avoid circular imports
+  - - Added prior-trend analysis instructions to the snapshot prompt to mitigate false causality attribution
+
+
 ### 2026-04-10 — [task-20260410-190217-add-error-handling-and-rate-limiting-to-telegram-i] (#38 kai-linux/agent-os)
 deepseek failed before producing a valid result file. Runner exited with code 1 while executing `/home/kai/agent-os/bin/agent_runner.sh deepseek /srv/worktrees/agent-os/task-20260410-190217-add-error-handling-and-rate-limiting-to-telegram-i /home/kai/agent-os/runtime/tmp/task-20260410-190217-add-error-handling-and-rate-limiting-to-telegram-i.txt`. Classified as: authentication failure. Orchestrator rescued and pushed the worktree changes.
 
