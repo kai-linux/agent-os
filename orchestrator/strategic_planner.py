@@ -2086,30 +2086,68 @@ You are evaluating bounded post-merge outcome evidence for shipped software work
 Use only the provided check definition and source text. Do not invent missing numbers.
 Choose exactly one interpretation: improved, unchanged, regressed, or inconclusive.
 
+IMPORTANT: To avoid false causality, consider the prior trend before merge.
+If the metric was already trending in the same direction before merge, attribute
+cautiously — the change may be a continuation of an existing trend, not caused
+by the merged work. Note this in the summary when relevant.
+
 Check ID: {check_id}
 Check name: {check_name}
 Comparison window: {comparison_window}
 Measurement window days after merge: {measurement_window_days}
+Merged at: {merged_at}
 Source location: {location}
 
-Source text:
+Baseline at merge time:
+{baseline_text}
+
+Source text (post-merge evidence):
 {source_text}
 
 Return ONLY JSON with this schema:
 {{
-  "summary": "2-3 sentence factual summary",
+  "summary": "2-3 sentence factual summary including before/after values and trend context",
   "interpretation": "improved|unchanged|regressed|inconclusive"
 }}
 """
 
 
-def _summarize_outcome_snapshot(check: dict, content: str) -> tuple[str, str]:
+def _summarize_outcome_snapshot(
+    check: dict,
+    content: str,
+    *,
+    baseline_metrics: dict | None = None,
+    merged_at: str = "unknown",
+) -> tuple[str, str]:
+    # Build baseline text from the merge-time attribution record
+    baseline_parts: list[str] = []
+    bm = baseline_metrics or {}
+    gh_baseline = bm.get("github") or {}
+    ops_baseline = bm.get("operational") or {}
+    if gh_baseline:
+        baseline_parts.append(
+            f"GitHub: stars={gh_baseline.get('stars', '?')}, "
+            f"forks={gh_baseline.get('forks', '?')} "
+            f"(captured {gh_baseline.get('captured_at', 'at merge')})"
+        )
+    if ops_baseline:
+        baseline_parts.append(
+            f"Operational: success_rate={ops_baseline.get('success_rate', '?')}, "
+            f"avg_completion_seconds={ops_baseline.get('avg_completion_seconds', '?')}, "
+            f"escalation_rate={ops_baseline.get('escalation_rate', '?')}, "
+            f"sample_size={ops_baseline.get('sample_size', '?')} "
+            f"(7-day window ending at merge)"
+        )
+    baseline_text = "\n".join(baseline_parts) if baseline_parts else "(no baseline captured at merge time)"
+
     prompt = _OUTCOME_SNAPSHOT_PROMPT.format(
         check_id=check.get("id", "unknown"),
         check_name=check.get("name", "Unnamed check"),
         comparison_window=check.get("comparison_window", "unspecified"),
         measurement_window_days=int(check.get("measurement_window_days", 7)),
+        merged_at=merged_at,
         location=check.get("url") or check.get("path") or "(unknown)",
+        baseline_text=baseline_text,
         source_text=(content or "")[:SIGNALS_MAX_SOURCE_CHARS],
     )
     try:
@@ -2238,7 +2276,12 @@ def _refresh_outcome_snapshots(cfg: dict, github_slug: str, repo_path: Path) -> 
                 summary = f"Outcome check source could not be read: {error}"
                 interpretation = "inconclusive"
             else:
-                summary, interpretation = _summarize_outcome_snapshot(check, content or "")
+                summary, interpretation = _summarize_outcome_snapshot(
+                    check,
+                    content or "",
+                    baseline_metrics=merged.get("baseline_metrics"),
+                    merged_at=merged_at.isoformat(),
+                )
 
             append_outcome_record(
                 cfg,

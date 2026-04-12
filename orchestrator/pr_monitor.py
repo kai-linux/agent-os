@@ -9,7 +9,9 @@ from pathlib import Path
 from orchestrator.paths import load_config, runtime_paths
 from orchestrator.outcome_attribution import (
     append_outcome_record,
+    capture_github_baseline,
     extract_task_id_from_pr_title,
+    load_metrics_baseline_from_stats,
     load_outcome_records,
 )
 from orchestrator.gh_project import (
@@ -690,6 +692,16 @@ def _cleanup_merged_pr_issues(cfg: dict, repo: str, pr: dict):
             break
 
     if not merge_already_logged:
+        # Capture baseline metrics at merge time for before/after comparison
+        baseline_github = capture_github_baseline(repo)
+        root_dir = cfg.get("root_dir", ".")
+        baseline_ops = load_metrics_baseline_from_stats(root_dir, window_days=7)
+        baseline_metrics = {}
+        if baseline_github:
+            baseline_metrics["github"] = baseline_github
+        if baseline_ops:
+            baseline_metrics["operational"] = baseline_ops
+
         append_outcome_record(
             cfg,
             {
@@ -703,6 +715,7 @@ def _cleanup_merged_pr_issues(cfg: dict, repo: str, pr: dict):
                 "branch": pr.get("headRefName"),
                 "merged_at": pr.get("mergedAt"),
                 "outcome_check_ids": outcome_check_ids,
+                "baseline_metrics": baseline_metrics,
             },
         )
 

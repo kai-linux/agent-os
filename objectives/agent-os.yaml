@@ -18,15 +18,45 @@ metrics:
     source:
       type: "file"
       signal_class: "analytics"
-      path: "~/.local/share/agent-os/evidence/agent-os/github_stars_latest.yaml"
+      path: "~/.local/share/agent-os/evidence/agent-os/github_metrics_history.jsonl"
       provenance: "gh api snapshot written by bin/export_github_evidence.sh"
       trust_level: "high"
       privacy: "public"
     outcome_check:
       type: "file"
-      path: "~/.local/share/agent-os/evidence/agent-os/github_stars_latest.yaml"
-      measurement_window_days: 3
-      comparison_window: "Compare current star count against the count recorded at the time of merge."
+      path: "~/.local/share/agent-os/evidence/agent-os/github_metrics_history.jsonl"
+      measurement_window_days: 7
+      comparison_window: >-
+        Compare the star count trend in the 7 days after merge against the
+        7-day trend before merge using the JSONL history entries. Each line
+        has {timestamp, stars, forks}. The baseline_metrics.github.stars
+        field in the attribution record gives the exact count at merge time.
+        A net increase above prior trend indicates improvement; flat or
+        below prior trend is unchanged; a decrease is regression. If fewer
+        than 3 data points exist in either window, report inconclusive.
+
+  - id: "github_stars_14d"
+    name: "GitHub stars (14-day)"
+    weight: 0.0
+    direction: "increase"
+    source:
+      type: "file"
+      signal_class: "analytics"
+      path: "~/.local/share/agent-os/evidence/agent-os/github_metrics_history.jsonl"
+      provenance: "gh api snapshot written by bin/export_github_evidence.sh"
+      trust_level: "high"
+      privacy: "public"
+    outcome_check:
+      type: "file"
+      path: "~/.local/share/agent-os/evidence/agent-os/github_metrics_history.jsonl"
+      measurement_window_days: 14
+      comparison_window: >-
+        Compare the star count trend in the 14 days after merge against the
+        14-day trend before merge using the JSONL history entries. Each line
+        has {timestamp, stars, forks}. The baseline_metrics.github.stars
+        field gives the exact count at merge time. A sustained increase
+        above prior trend indicates improvement. If fewer than 3 data
+        points exist in either window, report inconclusive.
 
   - id: "github_forks"
     name: "GitHub forks"
@@ -35,15 +65,44 @@ metrics:
     source:
       type: "file"
       signal_class: "analytics"
-      path: "~/.local/share/agent-os/evidence/agent-os/github_forks_latest.yaml"
+      path: "~/.local/share/agent-os/evidence/agent-os/github_metrics_history.jsonl"
       provenance: "gh api snapshot written by bin/export_github_evidence.sh"
       trust_level: "high"
       privacy: "public"
     outcome_check:
       type: "file"
-      path: "~/.local/share/agent-os/evidence/agent-os/github_forks_latest.yaml"
-      measurement_window_days: 3
-      comparison_window: "Compare current fork count against the count recorded at the time of merge."
+      path: "~/.local/share/agent-os/evidence/agent-os/github_metrics_history.jsonl"
+      measurement_window_days: 7
+      comparison_window: >-
+        Compare the fork count trend in the 7 days after merge against the
+        7-day trend before merge using the JSONL history entries. Each line
+        has {timestamp, stars, forks}. The baseline_metrics.github.forks
+        field gives the exact count at merge time. A net increase above
+        prior trend indicates improvement. If fewer than 3 data points
+        exist in either window, report inconclusive.
+
+  - id: "github_forks_14d"
+    name: "GitHub forks (14-day)"
+    weight: 0.0
+    direction: "increase"
+    source:
+      type: "file"
+      signal_class: "analytics"
+      path: "~/.local/share/agent-os/evidence/agent-os/github_metrics_history.jsonl"
+      provenance: "gh api snapshot written by bin/export_github_evidence.sh"
+      trust_level: "high"
+      privacy: "public"
+    outcome_check:
+      type: "file"
+      path: "~/.local/share/agent-os/evidence/agent-os/github_metrics_history.jsonl"
+      measurement_window_days: 14
+      comparison_window: >-
+        Compare the fork count trend in the 14 days after merge against the
+        14-day trend before merge using the JSONL history entries. Each line
+        has {timestamp, stars, forks}. The baseline_metrics.github.forks
+        field gives the exact count at merge time. A sustained increase
+        above prior trend indicates improvement. If fewer than 3 data
+        points exist in either window, report inconclusive.
 
   - id: "task_success_rate"
     name: "Task success rate"
@@ -56,6 +115,16 @@ metrics:
       provenance: "Orchestrator runtime metrics"
       trust_level: "high"
       privacy: "internal"
+    outcome_check:
+      type: "file"
+      path: "runtime/metrics/agent_stats.jsonl"
+      measurement_window_days: 7
+      comparison_window: >-
+        Compare the 7-day task success rate (status=complete / total tasks)
+        after merge against the baseline_metrics.operational.success_rate
+        captured at merge time. An increase of 5+ percentage points is
+        improved; a decrease of 5+ points is regressed; otherwise unchanged.
+        If sample size is below 5 in either window, report inconclusive.
 
   - id: "completion_time"
     name: "Average completion time"
@@ -68,6 +137,16 @@ metrics:
       provenance: "Orchestrator runtime metrics"
       trust_level: "high"
       privacy: "internal"
+    outcome_check:
+      type: "file"
+      path: "runtime/metrics/agent_stats.jsonl"
+      measurement_window_days: 7
+      comparison_window: >-
+        Compare the average duration_seconds of completed tasks in the 7
+        days after merge against baseline_metrics.operational.avg_completion_seconds
+        captured at merge time. A decrease of 10%+ is improved; an increase
+        of 10%+ is regressed; otherwise unchanged. If fewer than 5
+        completed tasks exist in the post-merge window, report inconclusive.
 
   - id: "escalation_rate"
     name: "Escalation rate"
@@ -80,3 +159,13 @@ metrics:
       provenance: "Orchestrator runtime metrics"
       trust_level: "high"
       privacy: "internal"
+    outcome_check:
+      type: "file"
+      path: "runtime/metrics/agent_stats.jsonl"
+      measurement_window_days: 7
+      comparison_window: >-
+        Compare the escalation rate (blocked+escalated / total tasks) in
+        the 7 days after merge against baseline_metrics.operational.escalation_rate
+        captured at merge time. A decrease of 3+ percentage points is
+        improved; an increase of 3+ points is regressed; otherwise unchanged.
+        If sample size is below 5 in the post-merge window, report inconclusive.

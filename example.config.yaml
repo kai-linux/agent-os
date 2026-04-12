@@ -174,13 +174,17 @@ production_feedback:
       privacy_note: "Service-level summary only; no customer-identifying logs"
 
 outcome_attribution:
-  enabled: false
+  enabled: true                        # Set true to enable post-merge outcome measurement
   max_source_chars: 4000
   allowed_domains:
     - analytics.example.com
   checks:
-    # Outcome checks can also be injected automatically from the external objective file.
-    # Keep explicit entries here for non-objective checks or legacy setups.
+    # Outcome checks are also injected automatically from objectives/*.yaml.
+    # The objective file's outcome_check blocks (github_stars, github_forks,
+    # task_success_rate, completion_time, escalation_rate) are merged in at
+    # runtime. Keep explicit entries here for non-objective checks only.
+    # Baseline metrics (stars, forks, operational stats) are automatically
+    # captured at merge time and passed to the evaluation prompt.
     - id: "activation_rate"
       name: "Activation rate"
       type: "web"
