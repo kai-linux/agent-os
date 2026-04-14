@@ -26,6 +26,19 @@
 
 ## Recent Changes
 
+### 2026-04-14 — [task-20260414-220519-validate-codex-agent-stabilization-fix-and-prevent] (#198 kai-linux/agent-os)
+Validated the codex agent runtime stabilization fix (task-20260409-210219). Post-fix codex success rate is 100% (2/2), though sample size is small. The 14-day rate of 75% (6/8) includes 2 pre-fix debugging failures — the fix correctly scopes scoring by task type so these no longer affect routing. Added 3 regression tests validating task-type-scoped gating, small-sample protection, and degradation finding scoping. Added continuous "Codex Runtime Stability" monitoring section to health_gate_report.py with 85% warning threshold. Documented full RCA and validation findings in CODEBASE.md. The >85% target is met post-fix but needs continued monitoring due to small sample size.
+
+**Files:** `- tests/test_agent_scorer.py`, `- tests/test_health_gate_report.py`, `- orchestrator/health_gate_report.py`, `- CODEBASE.md`
+
+**Decisions:**
+  - - Post-fix codex is 2/2 (100%) but sample is n=2, so statistical confidence is limited — documented this and added continuous monitoring rather than claiming definitive >85%
+  - - The 14d rate of 75% includes 2 pre-fix failures (Apr 1 debugging tasks with missing_context); excluding pre-fix data yields 100%
+  - - Root cause confirmed: blended scoring across task types artificially depressed codex rate; fix correctly scopes by task type
+  - - Added monitoring section to existing health_gate_report.py rather than creating new infrastructure
+  - - Regression tests focus on the three key fix mechanisms: task-type scoping, small-sample protection, degradation finding scoping
+
+
 ### 2026-04-14 — [task-20260414-220418-reduce-missing-context-blockers-through-task-intak] (#197 kai-linux/agent-os)
 Added a non-blocking task validation gate to the dispatcher that checks for required context fields (issue link, repo, task description, acceptance criteria) at dispatch time. Missing fields emit warnings to stdout and are recorded in task frontmatter (context_complete, context_missing). A separate telemetry log (runtime/metrics/context_completeness.jsonl) tracks completeness per task, segmented by agent and task type, enabling monitoring of missing_context trends. Validation is entirely non-blocking — tasks dispatch regardless of warnings.
 
