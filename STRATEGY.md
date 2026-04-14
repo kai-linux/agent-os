@@ -36,14 +36,27 @@ Sprint selection should balance:
 
 
 
+
 <!-- auto-focus-areas -->
-- Build GitHub adoption signals (credibility proof, case studies, discoverability)
-- Configure external outcome metrics to validate adoption impact
-- Ship activation artifacts (quickstart and deployment guides) for user conversion
-- Improve agent reliability and reduce escalated tasks
-- Establish closed-loop measurement infrastructure for evidence-driven planning
+- Drive adoption through content quality and GitHub discoverability
+- Improve agent reliability and task success rates
+- Enable evidence-driven planning with outcome metrics
+- Reduce task blockers through intake validation and enhanced context
 
 ## Sprint History
+
+### Sprint 2026-04-14
+
+**Retrospective:**
+(no activity in the last 0.5 days)
+
+**Plan:**
+- [prio:high] Publish operational reliability dashboard to drive adoption: Last sprint fixed proof links and added quickstart/deployment guides, but the reliability dashboard they link to is empty — populating it is the highest-leverage follow-through to convert README visitors into trusting adopters.
+- [prio:high] Embed agent performance data and success stories in README: Product inspection confirms solid credibility foundation but low conversion — embedding hard numbers in README compounds last sprint's quickstart and proof link work to close the visitor-to-star gap.
+- [prio:high] Boost GitHub discoverability through search and trending signals: With quickstart, deployment guide, and proof links now shipped, the bottleneck shifts from content quality to discoverability — visitors can't star what they can't find, and GitHub search optimization is a zero-maintenance adoption lever.
+- [prio:normal] Validate codex agent stabilization fix and prevent regression: Codex is the second-most-used agent and its 61% success rate directly drags the 29%-weighted task success metric — validating the fix with regression monitoring advances closed-loop optimization and protects overall reliability.
+- [prio:normal] Reduce missing_context blockers through task intake validation: missing_context remains the top blocker after two sprints of related work — intake validation prevents the failure mode at source rather than recovering after the fact, reducing both escalation rate and wasted execution cycles.
+
 
 ### Sprint 2026-04-12
 
