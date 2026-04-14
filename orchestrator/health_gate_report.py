@@ -288,6 +288,31 @@ def generate_report(cfg: dict | None = None) -> str:
         lines.append("No false positive gate triggers detected.")
     lines.append("")
 
+    # Codex runtime stability monitoring
+    lines.append("## Codex Runtime Stability")
+    lines.append("")
+    codex_window = window_rates.get("codex")
+    codex_baseline = baseline_rates.get("codex")
+    codex_debug = debug_window_rates.get("codex")
+    if codex_window and codex_window.get("total", 0) > 0:
+        cw_rate = codex_window["rate"] * 100
+        cw_total = codex_window["total"]
+        lines.append(f"- Window rate: {cw_rate:.0f}% ({codex_window['successes']}/{cw_total})")
+        if codex_debug and codex_debug.get("total", 0) > 0:
+            lines.append(f"- Debugging rate: {codex_debug['rate']*100:.0f}% ({codex_debug['successes']}/{codex_debug['total']})")
+        if codex_baseline:
+            lines.append(f"- Baseline rate: {codex_baseline['rate']*100:.0f}% ({codex_baseline['successes']}/{codex_baseline['total']})")
+        if cw_rate < 85:
+            lines.append(f"- **WARNING**: Codex window rate {cw_rate:.0f}% is below 85% target")
+        else:
+            lines.append(f"- Status: HEALTHY (>= 85% target)")
+    elif codex_baseline and codex_baseline.get("total", 0) > 0:
+        lines.append(f"- No codex tasks in window (baseline: {codex_baseline['rate']*100:.0f}%)")
+        lines.append("- Status: NO DATA (codex may be gated or unrouted)")
+    else:
+        lines.append("- No codex task data available")
+    lines.append("")
+
     # Threshold recommendation
     lines.append("## Threshold Status")
     lines.append("")
