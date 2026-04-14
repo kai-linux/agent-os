@@ -26,6 +26,19 @@
 
 ## Recent Changes
 
+### 2026-04-14 — [task-20260414-220123-boost-github-discoverability-through-search-and-tr] (#157 kai-linux/agent-os)
+Optimized GitHub repository metadata for discoverability: updated description with key search terms (autonomous agent, multi-agent system, task routing), expanded topics from 16 to 20 (adding agent-os, agent-framework, multi-agent-system, llm-agents, self-healing, ci-cd), set homepage to the case study discussion, and added traffic metrics capture to the existing evidence export script for weekly tracking. Baseline captured: 2 stars, 0 forks, 63 views (4 unique), 2109 clones (587 unique) over the 14-day window.
+
+**Files:** `- bin/export_github_evidence.sh`
+
+**Decisions:**
+  - - Used gh api repos/:owner/:repo/topics PUT to set topics directly via API rather than requiring manual GitHub UI changes
+  - - Used gh api repos/:owner/:repo PATCH to update description and homepage via API
+  - - Extended existing evidence export script rather than creating a new script, keeping the cron infrastructure unchanged
+  - - Chose 20 topics (GitHub max) prioritizing search terms from the issue: autonomous-agents, agent-framework, multi-agent-system, agent-os, llm-agents
+  - - Dropped kanban and orchestrations topics (low search value) to make room for higher-value terms
+
+
 ### 2026-04-12 — [task-20260412-123919-fix-readme-credibility-signals-make-proof-links-fu] (#188 kai-linux/agent-os)
 Fixed README credibility signals by making the "Public proof" line prominent with bold formatting and consolidating all three proof links (reliability dashboard, case study, GitHub discussion) into a single scannable line near the top. Fixed arrow inconsistency in "Built with Agent OS" section and added the community discussion link there for redundancy.
 
