@@ -26,6 +26,19 @@
 
 ## Recent Changes
 
+### 2026-04-14 — [task-20260414-220418-reduce-missing-context-blockers-through-task-intak] (#197 kai-linux/agent-os)
+Added a non-blocking task validation gate to the dispatcher that checks for required context fields (issue link, repo, task description, acceptance criteria) at dispatch time. Missing fields emit warnings to stdout and are recorded in task frontmatter (context_complete, context_missing). A separate telemetry log (runtime/metrics/context_completeness.jsonl) tracks completeness per task, segmented by agent and task type, enabling monitoring of missing_context trends. Validation is entirely non-blocking — tasks dispatch regardless of warnings.
+
+**Files:** `- orchestrator/github_dispatcher.py`, `- tests/test_github_dispatcher.py`
+
+**Decisions:**
+  - - Placed validation in build_mailbox_task() rather than _dispatch_item() so it runs for both direct dispatches and decomposed child dispatches
+  - - Used a separate JSONL telemetry file (context_completeness.jsonl) rather than extending agent_stats.jsonl, since context validation happens at dispatch time (not task completion) and has different schema
+  - - Stored validation results in task frontmatter (context_complete, context_missing) so downstream queue/review tooling can consume the data
+  - - Kept validation purely field-presence based (no heuristics) per constraints
+  - - Used fire-and-forget try/except for telemetry writes so logging failures never block dispatch
+
+
 ### 2026-04-14 — [task-20260414-220319-publish-operational-reliability-dashboard-to-drive] (#196 kai-linux/agent-os)
 Populated the reliability dashboard with live operational metrics (91% success rate, 0.1h mean completion, 0% escalation rate over 14-day window) and added GitHub stars/forks display. Added GitHub metrics fetching to public_dashboard.py via gh API, updated the run script to auto-commit dashboard refreshes, and installed a daily cron at 05:00 UTC for auto-update. The dashboard now renders with real data on GitHub at docs/reliability/README.md.
 
