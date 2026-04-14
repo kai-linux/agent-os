@@ -21,6 +21,15 @@ You give it a backlog. It ships product.
 
 <p align="center"><em>Real execution: Issue <a href="https://github.com/kai-linux/agent-os/issues/115">#115</a> → agent dispatched → code written → tests pass → <a href="https://github.com/kai-linux/agent-os/pull/122">PR #122</a> merged → issue closed. No human touched it.</em></p>
 
+### Agent Performance — rolling 14 days
+
+| Success rate | Median completion | Escalation rate | Tasks shipped |
+|:---:|:---:|:---:|:---:|
+| **91%** | **3.2 min** | **18%** | **146 total** |
+
+4 agents (Claude · Codex · Gemini · DeepSeek) — 103 issues closed · 79 PRs merged · 338 commits in 29 days.
+[Full reliability dashboard →](docs/reliability/README.md) · [Multi-agent case study →](docs/case-study-agent-os.md)
+
 ---
 
 ## Goal
@@ -240,26 +249,22 @@ The backlog is GitHub Issues. The sprint board is GitHub Projects. The standup i
 
 ## Built with Agent OS
 
-Agent OS manages its own development. In 27 days it shipped 75 merged PRs,
-closed 100 issues, and produced 327 commits — autonomously dispatching tasks,
+Agent OS manages its own development. In 29 days it shipped 79 merged PRs,
+closed 103 issues, and produced 338 commits — autonomously dispatching tasks,
 reviewing CI, and merging changes with zero human intervention per task.
-
-**[Reliability dashboard →](docs/reliability/README.md)**
-Rolling 14-day success rate, per-agent breakdown, blocker categories, completion
-time, and escalation rate from `PRODUCTION_FEEDBACK.md` and `agent_stats.jsonl`.
-**[Community case study →](https://github.com/kai-linux/agent-os/discussions/167)**
-
-**[Read the full case study →](docs/case-study-agent-os.md)** ·
-[GitHub Discussion](https://github.com/kai-linux/agent-os/discussions/167)
 
 | Metric | Value |
 |---|---|
-| Issues closed | 100 of 108 (93%) |
-| PRs merged | 75 of 83 (90%) |
-| Commits | 327 in 27 days (~12/day) |
-| Agent tasks executed | 143 (60.8% first-attempt success) |
-| GitHub stars | 2 |
-| GitHub forks | 0 |
+| 14-day success rate | **91%** (42/46 tasks) |
+| Overall success rate | 62% (90/146 tasks) |
+| Median completion time | 3.2 min |
+| Issues closed | 103 |
+| PRs merged | 79 |
+| Commits | 338 in 29 days (~12/day) |
+
+**[Reliability dashboard →](docs/reliability/README.md)** ·
+**[Case study →](docs/case-study-agent-os.md)** ·
+[GitHub Discussion](https://github.com/kai-linux/agent-os/discussions/167)
 
 ---
 
