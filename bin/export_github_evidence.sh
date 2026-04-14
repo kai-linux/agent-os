@@ -54,4 +54,17 @@ EOF
 HISTORY_FILE="${EVIDENCE_DIR}/github_metrics_history.jsonl"
 echo "{\"timestamp\":\"${NOW}\",\"repo\":\"${REPO}\",\"stars\":${STARS},\"forks\":${FORKS},\"watchers\":${WATCHERS}}" >> "$HISTORY_FILE"
 
-echo "Evidence exported for ${REPO}: stars=${STARS} forks=${FORKS} watchers=${WATCHERS}"
+# Capture traffic metrics (views, clones, referrers — GitHub retains 14 days)
+TRAFFIC_FILE="${EVIDENCE_DIR}/github_traffic_history.jsonl"
+VIEWS_JSON=$(gh api "repos/${REPO}/traffic/views" --jq '{total_views: .count, unique_visitors: .uniques}' 2>/dev/null) || VIEWS_JSON='{"total_views":0,"unique_visitors":0}'
+CLONES_JSON=$(gh api "repos/${REPO}/traffic/clones" --jq '{total_clones: .count, unique_cloners: .uniques}' 2>/dev/null) || CLONES_JSON='{"total_clones":0,"unique_cloners":0}'
+REFERRERS=$(gh api "repos/${REPO}/traffic/popular/referrers" --jq '[.[] | .referrer] | join(",")' 2>/dev/null) || REFERRERS=""
+
+TOTAL_VIEWS=$(echo "$VIEWS_JSON" | grep -o '"total_views":[0-9]*' | grep -o '[0-9]*')
+UNIQUE_VISITORS=$(echo "$VIEWS_JSON" | grep -o '"unique_visitors":[0-9]*' | grep -o '[0-9]*')
+TOTAL_CLONES=$(echo "$CLONES_JSON" | grep -o '"total_clones":[0-9]*' | grep -o '[0-9]*')
+UNIQUE_CLONERS=$(echo "$CLONES_JSON" | grep -o '"unique_cloners":[0-9]*' | grep -o '[0-9]*')
+
+echo "{\"timestamp\":\"${NOW}\",\"repo\":\"${REPO}\",\"views\":${TOTAL_VIEWS:-0},\"unique_visitors\":${UNIQUE_VISITORS:-0},\"clones\":${TOTAL_CLONES:-0},\"unique_cloners\":${UNIQUE_CLONERS:-0},\"referrers\":\"${REFERRERS}\"}" >> "$TRAFFIC_FILE"
+
+echo "Evidence exported for ${REPO}: stars=${STARS} forks=${FORKS} watchers=${WATCHERS} views=${TOTAL_VIEWS:-0} clones=${TOTAL_CLONES:-0}"
