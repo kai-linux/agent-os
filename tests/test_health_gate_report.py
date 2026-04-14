@@ -141,3 +141,40 @@ def test_generate_report_empty_metrics(tmp_path):
     cfg = {"root_dir": str(tmp_path)}
     report = generate_report(cfg)
     assert "Health Gate Validation Report" in report
+
+
+def test_codex_runtime_stability_section_healthy(tmp_path):
+    """Health gate report includes codex stability section with HEALTHY status."""
+    metrics_dir = tmp_path / "runtime" / "metrics"
+    metrics_dir.mkdir(parents=True)
+    records = [
+        _make_record("codex", "complete", hours_ago=1),
+        _make_record("codex", "complete", hours_ago=2),
+        _make_record("codex", "complete", hours_ago=3),
+        _make_record("claude", "complete", hours_ago=4),
+    ]
+    (metrics_dir / "agent_stats.jsonl").write_text(
+        "\n".join(json.dumps(r) for r in records) + "\n"
+    )
+    cfg = {"root_dir": str(tmp_path)}
+    report = generate_report(cfg)
+    assert "Codex Runtime Stability" in report
+    assert "HEALTHY" in report
+
+
+def test_codex_runtime_stability_section_warning(tmp_path):
+    """Health gate report warns when codex drops below 85%."""
+    metrics_dir = tmp_path / "runtime" / "metrics"
+    metrics_dir.mkdir(parents=True)
+    records = [
+        _make_record("codex", "complete", hours_ago=1),
+        _make_record("codex", "blocked", "missing_context", hours_ago=2),
+        _make_record("codex", "blocked", "missing_context", hours_ago=3),
+    ]
+    (metrics_dir / "agent_stats.jsonl").write_text(
+        "\n".join(json.dumps(r) for r in records) + "\n"
+    )
+    cfg = {"root_dir": str(tmp_path)}
+    report = generate_report(cfg)
+    assert "Codex Runtime Stability" in report
+    assert "WARNING" in report

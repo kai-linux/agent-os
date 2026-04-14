@@ -24,6 +24,22 @@
 
 **Impact:** 8+ cascading debug tasks from PR-98 (issues #99, #102–106, #109, #111, #117); similar pattern on PR-119 (#120). Fix prevents metadata loss across all future CI debug follow-up chains.
 
+### Codex Agent Runtime Degradation (RCA — 2026-04-09, validated 2026-04-14)
+
+**Root cause:** Codex was scored as a single blended bucket across all task types. Debugging-path routing decisions were polluted by unrelated implementation task failures (mostly `missing_context`), artificially depressing codex's apparent success rate to ~56%. The health gate then over-aggressively benched codex based on this blended rate.
+
+**Error signature:** Codex gated or flagged as degraded despite succeeding on its target task types. All-time rate 61.5% (40/65), with 23 of 25 failures attributed to `missing_context` — predominantly on debugging tasks pre-fix.
+
+**Fix applied (task-20260409-210219):**
+1. Task-type-aware success rates in `agent_scorer.py:compute_success_rates()` — accepts optional `task_type` filter so codex debugging performance is measured separately from implementation.
+2. Scoped health gate in `filter_healthy_agents()` — uses task-type-specific rates when agent has >= `min_task_count` samples for that type, falls back to overall rate otherwise.
+3. Small-sample protection — 24h strict gate requires >= 5 tasks before filtering an agent, preventing false positive benching from 1-2 failures.
+4. `build_degradation_findings()` prefers "debugging" slice for codex analysis.
+
+**Validation (2026-04-14):** Post-fix codex: 2/2 (100%) success. 14-day rate: 6/8 (75%), but 2 failures were pre-fix debugging tasks. The health gate correctly routes codex to task types where it succeeds. Sample size is small (n=2 post-fix) so continued monitoring via the "Codex Runtime Stability" section in `HEALTH_GATE_REPORT.md` is essential.
+
+**Regression prevention:** Tests in `test_agent_scorer.py` validate: task-type-scoped gating, small-sample protection, and degradation finding scoping. `health_gate_report.py` includes a dedicated "Codex Runtime Stability" monitoring section that warns when codex drops below 85%.
+
 ## Recent Changes
 
 ### 2026-04-14 — [task-20260414-220519-validate-codex-agent-stabilization-fix-and-prevent] (#198 kai-linux/agent-os)
