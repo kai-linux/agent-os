@@ -26,6 +26,19 @@
 
 ## Recent Changes
 
+### 2026-04-14 — [task-20260414-220319-publish-operational-reliability-dashboard-to-drive] (#196 kai-linux/agent-os)
+Populated the reliability dashboard with live operational metrics (91% success rate, 0.1h mean completion, 0% escalation rate over 14-day window) and added GitHub stars/forks display. Added GitHub metrics fetching to public_dashboard.py via gh API, updated the run script to auto-commit dashboard refreshes, and installed a daily cron at 05:00 UTC for auto-update. The dashboard now renders with real data on GitHub at docs/reliability/README.md.
+
+**Files:** `- orchestrator/public_dashboard.py`, `- bin/run_public_dashboard.sh`, `- docs/reliability/README.md`, `- docs/reliability/index.html`, `- docs/reliability/metrics.json`
+
+**Decisions:**
+  - - Used gh api repos/{slug} for GitHub metrics instead of reading evidence JSONL, keeping the dashboard self-contained with fresh data on each run
+  - - Auto-detect repo slug from git remote origin URL rather than hardcoding
+  - - Installed cron at 05:00 UTC daily (before the 06:00 product inspector and 08:00 daily digest)
+  - - Updated run script to auto-commit+push dashboard changes so GitHub always shows current metrics
+  - - Kept existing dashboard structure (3 output files) and only added GitHub metrics as new rows/cards
+
+
 ### 2026-04-14 — [task-20260414-220222-embed-agent-performance-data-and-success-stories-i] (#194 kai-linux/agent-os)
 Embedded agent performance metrics (91% 14-day success rate, 3.2 min median completion, 18% escalation rate) directly in the README above the fold, and updated the Built with Agent OS section with current numbers (146 tasks, 103 issues closed, 79 PRs merged, 338 commits). Both sections link to the reliability dashboard and case study for detail.
 
