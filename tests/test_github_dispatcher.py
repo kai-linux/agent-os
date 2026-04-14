@@ -1474,3 +1474,114 @@ reason: This line of work is no longer worth pursuing.
     assert gh_calls and gh_calls[0][0][:4] == ["api", "repos/owner/repo/issues/42", "-X", "PATCH"]
     assert label_edits == [("owner/repo", 42, ["done"], ["blocked", "ready", "in-progress", "agent-dispatched"])]
     assert status_updates == [("project-1", "item-1", "status-field", "done-option")]
+
+
+# --- Task context validation tests ---
+
+
+def test_validate_task_context_all_present():
+    parsed = {"goal": "Do something", "success_criteria": "It works"}
+    issue = {"url": "https://github.com/owner/repo/issues/1"}
+    repo_cfg = {"github_repo": "owner/repo"}
+    result = gd.validate_task_context(parsed, issue, repo_cfg)
+    assert result["complete"] is True
+    assert result["missing"] == []
+    assert set(result["present"]) == {"issue_link", "repo", "task_description", "acceptance_criteria"}
+
+
+def test_validate_task_context_missing_goal():
+    parsed = {"goal": "", "success_criteria": "It works"}
+    issue = {"url": "https://github.com/owner/repo/issues/1"}
+    repo_cfg = {"github_repo": "owner/repo"}
+    result = gd.validate_task_context(parsed, issue, repo_cfg)
+    assert result["complete"] is False
+    assert "task_description" in result["missing"]
+
+
+def test_validate_task_context_missing_criteria():
+    parsed = {"goal": "Do something", "success_criteria": ""}
+    issue = {"url": "https://github.com/owner/repo/issues/1"}
+    repo_cfg = {"github_repo": "owner/repo"}
+    result = gd.validate_task_context(parsed, issue, repo_cfg)
+    assert result["complete"] is False
+    assert "acceptance_criteria" in result["missing"]
+
+
+def test_validate_task_context_missing_issue_link():
+    parsed = {"goal": "Do something", "success_criteria": "It works"}
+    issue = {"url": ""}
+    repo_cfg = {"github_repo": "owner/repo"}
+    result = gd.validate_task_context(parsed, issue, repo_cfg)
+    assert result["complete"] is False
+    assert "issue_link" in result["missing"]
+
+
+def test_validate_task_context_missing_repo():
+    parsed = {"goal": "Do something", "success_criteria": "It works"}
+    issue = {"url": "https://github.com/owner/repo/issues/1"}
+    repo_cfg = {"github_repo": ""}
+    result = gd.validate_task_context(parsed, issue, repo_cfg)
+    assert result["complete"] is False
+    assert "repo" in result["missing"]
+
+
+def test_build_mailbox_task_records_context_complete(monkeypatch, tmp_path):
+    cfg = {
+        "default_agent": "auto",
+        "default_task_type": "implementation",
+        "default_base_branch": "main",
+        "default_allow_push": True,
+        "default_max_attempts": 4,
+        "max_runtime_minutes": 40,
+        "formatter_model": None,
+        "root_dir": str(tmp_path),
+    }
+    repo_cfg = {"local_repo": "/tmp/repo", "github_repo": "owner/repo"}
+    issue = {
+        "number": 99,
+        "title": "Well-structured task",
+        "url": "https://github.com/owner/repo/issues/99",
+        "labels": [],
+        "body": "## Goal\nDo something\n\n## Success Criteria\n- It works\n",
+    }
+    monkeypatch.setattr(gd, "format_task", lambda title, body, model=None: None)
+    _task_id, task_md = gd.build_mailbox_task(cfg, "proj", repo_cfg, issue)
+    assert "context_complete: true" in task_md
+    assert "context_missing" not in task_md
+
+    log_file = tmp_path / "runtime" / "metrics" / "context_completeness.jsonl"
+    assert log_file.exists()
+    record = json.loads(log_file.read_text().strip())
+    assert record["complete"] is True
+    assert record["missing"] == []
+
+
+def test_build_mailbox_task_records_context_incomplete(monkeypatch, tmp_path):
+    cfg = {
+        "default_agent": "auto",
+        "default_task_type": "implementation",
+        "default_base_branch": "main",
+        "default_allow_push": True,
+        "default_max_attempts": 4,
+        "max_runtime_minutes": 40,
+        "formatter_model": None,
+        "root_dir": str(tmp_path),
+    }
+    repo_cfg = {"local_repo": "/tmp/repo", "github_repo": "owner/repo"}
+    issue = {
+        "number": 100,
+        "title": "Sparse task",
+        "url": "https://github.com/owner/repo/issues/100",
+        "labels": [],
+        "body": "Fix the thing",
+    }
+    monkeypatch.setattr(gd, "format_task", lambda title, body, model=None: None)
+    _task_id, task_md = gd.build_mailbox_task(cfg, "proj", repo_cfg, issue)
+    assert "context_complete: false" in task_md
+    assert "context_missing:" in task_md
+
+    log_file = tmp_path / "runtime" / "metrics" / "context_completeness.jsonl"
+    assert log_file.exists()
+    record = json.loads(log_file.read_text().strip())
+    assert record["complete"] is False
+    assert "acceptance_criteria" in record["missing"]

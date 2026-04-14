@@ -56,6 +56,7 @@ VALID_ASSIGNABLE_AGENTS = {"auto", "claude", "codex", "gemini", "deepseek"}
 VALID_FALLBACK_AGENTS = VALID_ASSIGNABLE_AGENTS - {"auto"}
 AGENT_UNAVAILABLE_LABEL = "dispatch:agent-unavailable"
 AGENT_UNAVAILABLE_CODE = "agent_unavailable"
+CONTEXT_VALIDATION_LABEL = "dispatch:incomplete-context"
 CI_CONTEXT_LINE_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"^\s*-\s+PR:\s+.+$", re.IGNORECASE),
     re.compile(r"^\s*-\s+Failed checks:\s*$", re.IGNORECASE),
@@ -95,6 +96,74 @@ def parse_issue_body(body: str) -> dict:
         "base_branch": sections.get("base branch", "").strip(),
         "branch": sections.get("branch", "").strip(),
     }
+
+
+def validate_task_context(
+    parsed: dict,
+    issue: dict,
+    repo_cfg: dict,
+) -> dict:
+    """Non-blocking validation of task context fields.
+
+    Returns {"complete": bool, "missing": list[str], "present": list[str]}.
+    """
+    missing: list[str] = []
+    present: list[str] = []
+
+    if issue.get("url"):
+        present.append("issue_link")
+    else:
+        missing.append("issue_link")
+
+    if repo_cfg.get("github_repo"):
+        present.append("repo")
+    else:
+        missing.append("repo")
+
+    goal = parsed.get("goal", "").strip()
+    if goal and goal.lower() not in ("none", "n/a", ""):
+        present.append("task_description")
+    else:
+        missing.append("task_description")
+
+    criteria = parsed.get("success_criteria", "").strip()
+    if criteria and criteria.lower() not in ("none", "n/a", ""):
+        present.append("acceptance_criteria")
+    else:
+        missing.append("acceptance_criteria")
+
+    return {
+        "complete": len(missing) == 0,
+        "missing": missing,
+        "present": present,
+    }
+
+
+def _record_context_completeness(
+    cfg: dict,
+    task_id: str,
+    task_type: str,
+    agent: str,
+    validation: dict,
+) -> None:
+    """Append a context completeness record to the telemetry log."""
+    metrics_dir = Path(cfg.get("root_dir", ".")).expanduser() / "runtime" / "metrics"
+    metrics_dir.mkdir(parents=True, exist_ok=True)
+    log_file = metrics_dir / "context_completeness.jsonl"
+    record = {
+        "timestamp": datetime.now().isoformat(),
+        "task_id": task_id,
+        "task_type": task_type,
+        "agent": agent,
+        "complete": validation["complete"],
+        "missing": validation["missing"],
+        "present": validation["present"],
+    }
+    try:
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record) + "\n")
+    except Exception:
+        pass
 
 
 def _preserve_ci_context(raw_context: str, formatted_context: str) -> str:
@@ -376,6 +445,17 @@ def build_mailbox_task(cfg: dict, project_key: str, repo_cfg: dict, issue: dict)
         ci_checks = _extract_ci_checks_from_body(body_text)
         if ci_checks:
             frontmatter["failed_checks"] = [c.get("name", "") for c in ci_checks if c.get("name")]
+
+    # Non-blocking context validation gate
+    ctx_validation = validate_task_context(parsed, issue, repo_cfg)
+    frontmatter["context_complete"] = ctx_validation["complete"]
+    if not ctx_validation["complete"]:
+        frontmatter["context_missing"] = ctx_validation["missing"]
+        print(
+            f"Warning: incomplete task context for #{issue.get('number', '?')}: "
+            f"missing {', '.join(ctx_validation['missing'])}"
+        )
+    _record_context_completeness(cfg, task_id, task_type, agent, ctx_validation)
 
     frontmatter_text = yaml.safe_dump(frontmatter, sort_keys=False).strip()
 
