@@ -26,6 +26,19 @@
 
 ## Recent Changes
 
+### 2026-04-14 — [task-20260414-220222-embed-agent-performance-data-and-success-stories-i] (#194 kai-linux/agent-os)
+Embedded agent performance metrics (91% 14-day success rate, 3.2 min median completion, 18% escalation rate) directly in the README above the fold, and updated the Built with Agent OS section with current numbers (146 tasks, 103 issues closed, 79 PRs merged, 338 commits). Both sections link to the reliability dashboard and case study for detail.
+
+**Files:** `- README.md`
+
+**Decisions:**
+  - - Placed performance metrics section immediately after the demo and before the Goal section for visibility within 10 seconds of scroll
+  - - Used a compact 4-column table for the key metrics (success rate, median completion, escalation rate, total tasks) to keep it scannable
+  - - Used 14-day rolling success rate (91%) as the headline number since it reflects current system health better than the all-time 62% which includes early bootstrapping failures
+  - - Updated Built with Agent OS section to show both 14-day and overall success rates for transparency
+  - - Removed redundant prose lines in Built with Agent OS section to reduce clutter while preserving all links
+
+
 ### 2026-04-14 — [task-20260414-220123-boost-github-discoverability-through-search-and-tr] (#157 kai-linux/agent-os)
 Optimized GitHub repository metadata for discoverability: updated description with key search terms (autonomous agent, multi-agent system, task routing), expanded topics from 16 to 20 (adding agent-os, agent-framework, multi-agent-system, llm-agents, self-healing, ci-cd), set homepage to the case study discussion, and added traffic metrics capture to the existing evidence export script for weekly tracking. Baseline captured: 2 stars, 0 forks, 63 views (4 unique), 2109 clones (587 unique) over the 14-day window.
 
