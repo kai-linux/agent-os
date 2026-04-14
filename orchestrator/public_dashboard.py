@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from html import escape
@@ -190,12 +191,46 @@ def _trend_summary(records: list[dict], today: datetime) -> dict:
     }
 
 
+def _fetch_github_metrics(repo_slug: str) -> dict:
+    result: dict = {"stars": None, "forks": None, "open_issues": None}
+    try:
+        proc = subprocess.run(
+            ["gh", "api", f"repos/{repo_slug}",
+             "--jq", "{stars: .stargazers_count, forks: .forks_count, open_issues: .open_issues_count}"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if proc.returncode == 0:
+            data = json.loads(proc.stdout.strip())
+            result.update(data)
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError):
+        pass
+    return result
+
+
+def _detect_repo_slug(root: Path) -> str | None:
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(root), "remote", "get-url", "origin"],
+            capture_output=True, text=True, timeout=5,
+        )
+        url = proc.stdout.strip()
+        m = re.search(r"github\.com[:/](.+?)(?:\.git)?$", url)
+        if m:
+            return m.group(1)
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+    return None
+
+
 def build_dashboard_snapshot(root: Path) -> dict:
     metrics_file = root / "runtime" / "metrics" / "agent_stats.jsonl"
     feedback_path = root / "PRODUCTION_FEEDBACK.md"
     today = datetime.now(tz=timezone.utc)
     records = load_recent_metrics(metrics_file, window_days=WINDOW_DAYS)
     feedback = _read_production_feedback(feedback_path)
+
+    repo_slug = _detect_repo_slug(root)
+    github_metrics = _fetch_github_metrics(repo_slug) if repo_slug else {"stars": None, "forks": None, "open_issues": None}
 
     rates = compute_success_rates(records)
     cycle = _compute_merge_cycle_hours(records)
@@ -264,6 +299,12 @@ def build_dashboard_snapshot(root: Path) -> dict:
         "top_blockers": top_blockers,
         "rolling_14_day": _daily_series(records, today),
         "momentum": _trend_summary(records, today),
+        "github": {
+            "repo": repo_slug,
+            "stars": github_metrics.get("stars"),
+            "forks": github_metrics.get("forks"),
+            "open_issues": github_metrics.get("open_issues"),
+        },
     }
     return snapshot
 
@@ -297,12 +338,15 @@ def render_markdown(snapshot: dict) -> str:
             "> Run `bin/run_public_dashboard.sh` in the live repo environment to publish the first refresh.",
             "",
         ])
+    gh = snapshot.get("github", {})
     lines.extend([
         "| Metric | Value |",
         "|---|---|",
         f"| Task success rate | {_format_pct(success['rate'])} ({_format_count_line(success['successes'], success['total'])}) |",
         f"| Mean completion time | {snapshot['summary']['mean_completion_time_hours']:.1f}h |" if snapshot["summary"]["mean_completion_time_hours"] is not None else "| Mean completion time | n/a |",
         f"| Escalation rate | {_format_pct(escalation['rate'])} ({_format_count_line(escalation['escalated'], escalation['total'])}) |",
+        f"| GitHub stars | {gh['stars'] if gh.get('stars') is not None else 'n/a'} |",
+        f"| GitHub forks | {gh['forks'] if gh.get('forks') is not None else 'n/a'} |",
         "",
         "## 14-Day Momentum",
         "",
@@ -374,6 +418,7 @@ def render_html(snapshot: dict) -> str:
             "</section>"
         )
 
+    gh = snapshot.get("github", {})
     cards = "\n".join([
         metric_card(
             "Task success rate",
@@ -389,6 +434,16 @@ def render_html(snapshot: dict) -> str:
             "Escalation rate",
             _format_pct(escalation["rate"]),
             _format_count_line(escalation["escalated"], escalation["total"]),
+        ),
+        metric_card(
+            "GitHub stars",
+            str(gh.get("stars")) if gh.get("stars") is not None else "n/a",
+            "stargazers",
+        ),
+        metric_card(
+            "GitHub forks",
+            str(gh.get("forks")) if gh.get("forks") is not None else "n/a",
+            "forks",
         ),
     ])
 

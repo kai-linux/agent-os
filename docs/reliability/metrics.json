@@ -1,70 +1,55 @@
 {
-  "generated_at": "2026-04-09T19:38:45.664559+00:00",
+  "generated_at": "2026-04-14T20:08:33.214073+00:00",
+  "github": {
+    "forks": 0,
+    "open_issues": 10,
+    "repo": "kai-linux/agent-os",
+    "stars": 2
+  },
   "momentum": {
     "current_week": {
-      "escalation_rate": null,
-      "mean_completion_hours": null,
-      "success_rate": null,
-      "successes": 0,
-      "total": 0
+      "escalation_rate": 0.0,
+      "mean_completion_hours": 0.11750925925925926,
+      "success_rate": 0.9230769230769231,
+      "successes": 24,
+      "total": 26
     },
     "prior_week": {
-      "escalation_rate": null,
-      "mean_completion_hours": null,
-      "success_rate": null,
-      "successes": 0,
-      "total": 0
+      "escalation_rate": 0.0,
+      "mean_completion_hours": 0.09824707602339182,
+      "success_rate": 0.9047619047619048,
+      "successes": 19,
+      "total": 21
     }
   },
-  "per_agent": [],
+  "per_agent": [
+    {
+      "agent": "deepseek",
+      "rate": 1.0,
+      "successes": 3,
+      "total": 3
+    },
+    {
+      "agent": "claude",
+      "rate": 0.9444444444444444,
+      "successes": 34,
+      "total": 36
+    },
+    {
+      "agent": "codex",
+      "rate": 0.75,
+      "successes": 6,
+      "total": 8
+    }
+  ],
   "rolling_14_day": [
     {
       "blocked": 0,
-      "date": "2026-03-27",
-      "escalation_rate": null,
-      "success_rate": null,
-      "successes": 0,
-      "total": 0
-    },
-    {
-      "blocked": 0,
-      "date": "2026-03-28",
-      "escalation_rate": null,
-      "success_rate": null,
-      "successes": 0,
-      "total": 0
-    },
-    {
-      "blocked": 0,
-      "date": "2026-03-29",
-      "escalation_rate": null,
-      "success_rate": null,
-      "successes": 0,
-      "total": 0
-    },
-    {
-      "blocked": 0,
-      "date": "2026-03-30",
-      "escalation_rate": null,
-      "success_rate": null,
-      "successes": 0,
-      "total": 0
-    },
-    {
-      "blocked": 0,
-      "date": "2026-03-31",
-      "escalation_rate": null,
-      "success_rate": null,
-      "successes": 0,
-      "total": 0
-    },
-    {
-      "blocked": 0,
       "date": "2026-04-01",
-      "escalation_rate": null,
-      "success_rate": null,
-      "successes": 0,
-      "total": 0
+      "escalation_rate": 0.0,
+      "success_rate": 0.6667,
+      "successes": 4,
+      "total": 6
     },
     {
       "blocked": 0,
@@ -85,38 +70,62 @@
     {
       "blocked": 0,
       "date": "2026-04-04",
-      "escalation_rate": null,
-      "success_rate": null,
-      "successes": 0,
-      "total": 0
+      "escalation_rate": 0.0,
+      "success_rate": 1.0,
+      "successes": 4,
+      "total": 4
     },
     {
       "blocked": 0,
       "date": "2026-04-05",
-      "escalation_rate": null,
-      "success_rate": null,
-      "successes": 0,
-      "total": 0
+      "escalation_rate": 0.0,
+      "success_rate": 1.0,
+      "successes": 4,
+      "total": 4
     },
     {
       "blocked": 0,
       "date": "2026-04-06",
-      "escalation_rate": null,
-      "success_rate": null,
-      "successes": 0,
-      "total": 0
+      "escalation_rate": 0.0,
+      "success_rate": 1.0,
+      "successes": 3,
+      "total": 3
     },
     {
       "blocked": 0,
       "date": "2026-04-07",
-      "escalation_rate": null,
-      "success_rate": null,
-      "successes": 0,
-      "total": 0
+      "escalation_rate": 0.0,
+      "success_rate": 1.0,
+      "successes": 4,
+      "total": 4
     },
     {
       "blocked": 0,
       "date": "2026-04-08",
+      "escalation_rate": 0.0,
+      "success_rate": 1.0,
+      "successes": 5,
+      "total": 5
+    },
+    {
+      "blocked": 0,
+      "date": "2026-04-09",
+      "escalation_rate": 0.0,
+      "success_rate": 0.8333,
+      "successes": 10,
+      "total": 12
+    },
+    {
+      "blocked": 0,
+      "date": "2026-04-10",
+      "escalation_rate": 0.0,
+      "success_rate": 1.0,
+      "successes": 2,
+      "total": 2
+    },
+    {
+      "blocked": 0,
+      "date": "2026-04-11",
       "escalation_rate": null,
       "success_rate": null,
       "successes": 0,
@@ -124,39 +133,72 @@
     },
     {
       "blocked": 0,
-      "date": "2026-04-09",
+      "date": "2026-04-12",
+      "escalation_rate": 0.0,
+      "success_rate": 1.0,
+      "successes": 5,
+      "total": 5
+    },
+    {
+      "blocked": 0,
+      "date": "2026-04-13",
       "escalation_rate": null,
       "success_rate": null,
       "successes": 0,
       "total": 0
+    },
+    {
+      "blocked": 0,
+      "date": "2026-04-14",
+      "escalation_rate": 0.0,
+      "success_rate": 1.0,
+      "successes": 2,
+      "total": 2
     }
   ],
   "sources": {
     "agent_stats": {
-      "available": false,
-      "latest_timestamp": null,
+      "available": true,
+      "latest_timestamp": "2026-04-14T22:06:05.302036+00:00",
       "path": "runtime/metrics/agent_stats.jsonl",
-      "records": 0
+      "records": 47
     },
     "production_feedback": {
-      "available": false,
-      "generated_at": null,
+      "available": true,
+      "generated_at": "2026-04-13T04:30:02.099526+00:00",
       "path": "PRODUCTION_FEEDBACK.md"
     }
   },
   "summary": {
     "escalation_rate": {
-      "escalated": null,
-      "rate": null,
-      "total": null
+      "escalated": 0,
+      "rate": 0.0,
+      "total": 47
     },
-    "mean_completion_time_hours": null,
+    "mean_completion_time_hours": 0.10899806201550388,
     "task_success_rate": {
-      "rate": null,
-      "successes": null,
-      "total": null
+      "rate": 0.9148936170212766,
+      "successes": 43,
+      "total": 47
     }
   },
-  "top_blockers": [],
+  "top_blockers": [
+    {
+      "code": "missing_credentials",
+      "count": 3
+    },
+    {
+      "code": "missing_context",
+      "count": 2
+    },
+    {
+      "code": "quota_limited",
+      "count": 2
+    },
+    {
+      "code": "dependency_blocked",
+      "count": 1
+    }
+  ],
   "window_days": 14
 }
