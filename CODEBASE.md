@@ -42,6 +42,19 @@
 
 ## Recent Changes
 
+### 2026-04-15 — [task-20260415-120419-implement-adoption-funnel-monitoring-and-weekly-im] (#206 kai-linux/agent-os)
+Implemented adoption funnel monitoring with daily-granularity traffic data capture and a weekly impact report generator. Enhanced the evidence exporter to capture daily views/clones breakdown, referrer details, and popular paths. Created orchestrator/adoption_report.py that fetches live GitHub traffic data, correlates referral sources with conversion rates, identifies conversion bottlenecks (top-of-funnel traffic and referral diversity), and generates a 1-page actionable report. Generated the first report showing 4 unique visitors, 2 stars, zero external referrers, and clone noise from automated operations. Installed weekly cron and sent Telegram summary.
+
+**Files:** `- orchestrator/adoption_report.py`, `- bin/run_adoption_report.sh`, `- bin/export_github_evidence.sh`, `- docs/adoption-reports/adoption-report-2026-04-15.md`, `- docs/adoption-reports/WEEKLY_ADOPTION_REPORT.md`, `- CRON.md`, `- .agent_result.md`
+
+**Decisions:**
+  - - Used live GitHub API calls in the report generator rather than only reading from evidence JSONL, ensuring fresh data even if the evidence exporter hasn't run recently
+  - - Wrote both a dated report (adoption-report-YYYY-MM-DD.md) and a latest symlink (WEEKLY_ADOPTION_REPORT.md) so historical reports are preserved while the latest is always at a stable path
+  - - Scheduled cron at 07:30 UTC Monday (after log analyzer at 07:00) to keep the weekly cadence aligned with existing monitoring jobs
+  - - Identified clone traffic as noise (591 unique cloners dominated by automated worktree operations) and explicitly flagged it as non-adoption-signal in the report
+  - - Kept bottleneck identification rule-based rather than LLM-based to avoid model costs on a weekly recurring job
+
+
 ### 2026-04-15 — [task-20260415-120322-complete-multi-agent-case-study-distribution-and-m] (#205 kai-linux/agent-os)
 Completed multi-agent case study distribution preparation by updating all promotion content with current metrics (352 commits, 110 issues closed, 85 PRs merged, 91% 14-day success rate), expanding target communities from 3 to 7 platforms (dev.to, HN, r/programming, r/SideProject, r/LocalLLaMA, r/selfhosted, plus existing GitHub Discussions #167), establishing a baseline metrics snapshot (2 stars, 0 forks, 4 unique visitors), and creating an adoption metrics tracking framework with 7/14-day measurement windows, platform ROI analysis template, and referrer attribution methodology.
 
