@@ -1,7 +1,7 @@
 ---
 title: "I Built an Autonomous Software Organization That Manages Its Own Development"
 published: false
-description: "Agent OS shipped 75 merged PRs, closed 100 issues, and produced 327 commits in 27 days — with zero human intervention per task. Here's how it works and what I learned."
+description: "Agent OS shipped 85 merged PRs, closed 110 issues, and produced 352 commits in 30 days — with zero human intervention per task. Here's how it works and what I learned."
 tags: ai, automation, github, opensource
 canonical_url: https://github.com/kai-linux/agent-os/blob/main/docs/case-study-agent-os.md
 ---
@@ -10,7 +10,7 @@ canonical_url: https://github.com/kai-linux/agent-os/blob/main/docs/case-study-a
 
 What happens when you let AI agents manage an entire software project — not just write code, but triage issues, route tasks, review CI, merge PRs, analyze failures, and file their own fix tickets?
 
-I built [Agent OS](https://github.com/kai-linux/agent-os) to find out. It bootstrapped itself from an empty repo to a fully autonomous software organization in 27 days.
+I built [Agent OS](https://github.com/kai-linux/agent-os) to find out. It bootstrapped itself from an empty repo to a fully autonomous software organization in 30 days.
 
 **The results are public, auditable, and reproducible.**
 
@@ -18,10 +18,10 @@ I built [Agent OS](https://github.com/kai-linux/agent-os) to find out. It bootst
 
 | Metric | Value |
 |---|---|
-| Issues closed | 100 of 108 (93% closure rate) |
-| PRs merged | 75 of 83 (90% merge rate) |
-| Total commits | 327 in 27 days (~12/day) |
-| Agent tasks executed | 143 (60.8% first-attempt success) |
+| Issues closed | 110 of 119 (92% closure rate) |
+| PRs merged | 85 of 90 (94% merge rate) |
+| Total commits | 352 in 30 days (~12/day) |
+| Agent tasks executed | 146+ (91% 14-day success rate) |
 | Agents in pool | 4 (Claude, Codex, Gemini, DeepSeek) |
 | Infrastructure cost | $5/month VPS |
 
@@ -108,8 +108,10 @@ The demo creates a test issue, dispatches it to Claude, and shows the agent writ
 
 4. **$5/month is enough.** The entire system runs on a cheap VPS with cron jobs. No Kubernetes, no message queues, no cloud functions.
 
+5. **91% and climbing.** The 14-day rolling success rate improved from 61% to 91% through the self-improvement loop — the system literally engineered its own reliability.
+
 ---
 
-[Full case study with architecture details](https://github.com/kai-linux/agent-os/blob/main/docs/case-study-agent-os.md) | [GitHub Discussion](https://github.com/kai-linux/agent-os/discussions/167) | [Repository](https://github.com/kai-linux/agent-os)
+[Full case study with architecture details](https://github.com/kai-linux/agent-os/blob/main/docs/case-study-agent-os.md) | [Live reliability dashboard](https://github.com/kai-linux/agent-os/blob/main/docs/reliability/README.md) | [Repository](https://github.com/kai-linux/agent-os)
 
 I'd love to hear what you think — especially if you're building with AI agents or running solo. What would you want to see next?

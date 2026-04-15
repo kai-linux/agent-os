@@ -92,8 +92,11 @@ capture_metrics() {
   STARS=$(echo "$REPO_DATA" | python3 -c "import sys,json; print(json.load(sys.stdin)['stars'])" 2>/dev/null || echo "0")
   FORKS=$(echo "$REPO_DATA" | python3 -c "import sys,json; print(json.load(sys.stdin)['forks'])" 2>/dev/null || echo "0")
 
-  echo "{\"timestamp\":\"${NOW}\",\"event\":\"case_study_distribution\",\"stars\":${STARS},\"forks\":${FORKS}}" >> "$DISTRIBUTION_LOG"
-  echo "Baseline: stars=${STARS} forks=${FORKS}"
+  REFERRERS=$(gh api repos/kai-linux/agent-os/traffic/popular/referrers 2>/dev/null | python3 -c "import sys,json; print(json.dumps([r['referrer'] for r in json.load(sys.stdin)]))" 2>/dev/null || echo "[]")
+  VIEWS=$(gh api repos/kai-linux/agent-os/traffic/views --jq '.uniques' 2>/dev/null || echo "0")
+
+  echo "{\"timestamp\":\"${NOW}\",\"event\":\"metrics_snapshot\",\"stars\":${STARS},\"forks\":${FORKS},\"unique_visitors_14d\":${VIEWS},\"referrers\":${REFERRERS}}" >> "$DISTRIBUTION_LOG"
+  echo "Baseline: stars=${STARS} forks=${FORKS} unique_visitors=${VIEWS} referrers=${REFERRERS}"
 }
 
 # --- Main ---
@@ -111,3 +114,8 @@ echo ""
 echo "Manual steps required:"
 echo "  - Hacker News: Submit at https://news.ycombinator.com/submit"
 echo "    Title and comment text in: docs/promotion/hn-submission.md"
+echo "  - Reddit: Post to r/programming, r/SideProject, r/LocalLLaMA, r/selfhosted"
+echo "    Content in: docs/promotion/reddit-posts.md"
+echo ""
+echo "After publishing, update docs/adoption-metrics-tracking.md with publication dates and URLs."
+echo "Run this script again at T+7d and T+14d to capture metric snapshots."

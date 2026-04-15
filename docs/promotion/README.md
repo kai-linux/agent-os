@@ -6,52 +6,59 @@ Publish-ready drafts for cross-posting the Agent OS multi-agent case study.
 
 | File | Platform | Status |
 |---|---|---|
-| [devto-article.md](devto-article.md) | dev.to | Ready to publish (500+ words, includes frontmatter) |
-| [hn-submission.md](hn-submission.md) | Hacker News | Ready to submit (title + Show HN comment) |
-| [reddit-posts.md](reddit-posts.md) | Reddit r/programming + r/SideProject | Ready to post |
+| [devto-article.md](devto-article.md) | dev.to | Ready to publish (requires `DEV_API_KEY`) |
+| [hn-submission.md](hn-submission.md) | Hacker News | Ready to submit (manual) |
+| [reddit-posts.md](reddit-posts.md) | Reddit (4 subreddits) | Ready to post (manual) |
+
+## Target Platforms
+
+| Platform | Type | Audience Match | Post Ready |
+|---|---|---|---|
+| dev.to | Article | Broad dev | Yes |
+| Hacker News (Show HN) | Link + comment | Technical builders | Yes |
+| r/programming | Post | General dev | Yes |
+| r/SideProject | Post | Solo builders | Yes |
+| r/LocalLLaMA | Post | Multi-agent/LLM | Yes |
+| r/selfhosted | Post | Self-hosted infra | Yes |
+| GitHub Discussions #167 | Discussion | Existing visitors | Published 2026-04-09 |
 
 ## Publishing Instructions
 
-### dev.to
-1. Go to https://dev.to/new
-2. Copy the full content of `devto-article.md` (it includes frontmatter)
-3. Set `published: true` in the editor
-4. Publish
+### dev.to (automated)
 
-Or use the API with `DEV_API_KEY`:
+Set `DEV_API_KEY` environment variable, then run:
 ```bash
-curl -X POST https://dev.to/api/articles \
-  -H "api-key: $DEV_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d "{\"article\": {\"body_markdown\": \"$(cat devto-article.md)\"}}"
+bin/publish_case_study.sh
 ```
 
-### Hacker News
+### Hacker News (manual)
 1. Go to https://news.ycombinator.com/submit
 2. Use the title and URL from `hn-submission.md`
 3. After submission, post the Show HN comment from the file
 
-### Reddit
-1. Post to r/programming using the title and body from `reddit-posts.md`
+### Reddit (manual)
+1. Post to r/programming using the first section from `reddit-posts.md`
 2. Post to r/SideProject using the second section
-
-## Automated Distribution
-
-Run `bin/publish_case_study.sh` to publish and capture metrics in one step.
-Requires `DEV_API_KEY` for dev.to. Use `--dry-run` to test without posting.
+3. Post to r/LocalLLaMA using the third section
+4. Post to r/selfhosted using the fourth section
 
 ## Tracking
 
-After publishing, check adoption signals:
-- GitHub stars/forks trend via `bin/export_github_evidence.sh`
-- Distribution events logged to `runtime/metrics/distribution_log.jsonl`
-- Referral traffic in GitHub Insights → Traffic
+After publishing, update [adoption-metrics-tracking.md](../adoption-metrics-tracking.md) with:
+- Publication date per platform
+- Post URL per platform
+- T+7d and T+14d metric snapshots
 
-### Adoption Baseline (2026-04-12)
+Automated metrics via:
+- `bin/export_github_evidence.sh` — daily GitHub metrics capture (stars, forks, traffic)
+- `bin/publish_case_study.sh` — logs distribution events to `runtime/metrics/distribution_log.jsonl`
+- `gh api repos/kai-linux/agent-os/traffic/popular/referrers` — referrer attribution
+
+### Adoption Baseline (2026-04-15)
 
 | Signal | Value |
 |---|---|
 | GitHub stars | 2 |
 | GitHub forks | 0 |
-| Discussion #167 upvotes | 1 |
-| Discussion #167 comments | 0 |
+| Unique visitors (14d) | 4 |
+| Referrers | github.com only |
