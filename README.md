@@ -290,3 +290,5 @@ reviewing CI, and merging changes with zero human intervention per task.
 **Contribute** — check [open issues](https://github.com/kai-linux/agent-os/issues) or file one. PRs welcome.
 
 **Questions?** — open a [discussion](https://github.com/kai-linux/agent-os/discussions) or reach out via the repo.
+
+If Agent OS is interesting to you, **[give it a star](https://github.com/kai-linux/agent-os)**. It helps others find the project.
