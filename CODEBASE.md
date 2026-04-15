@@ -42,6 +42,19 @@
 
 ## Recent Changes
 
+### 2026-04-15 — [task-20260415-120230-diagnose-and-optimize-github-visitor-to-star-conve] (#204 kai-linux/agent-os)
+Diagnosed the GitHub visitor-to-star conversion funnel using 14-day traffic data. The primary finding is that the funnel is empty at the top: only 4 unique visitors in 14 days with zero external referrers. All README/demo/quickstart optimization work is wasted because nobody is arriving. The 591 "unique cloners" are almost entirely automated worktree operations, not real users. Both stars were acquired on March 17-18 and none since. Documented top 3 friction barriers ranked by impact, proposed specific fixes for each, and implemented two zero-cost changes (star CTA in README, diagnostic report).
+
+**Files:** `- docs/conversion-funnel-analysis.md`, `- README.md`, `- .agent_result.md`
+
+**Decisions:**
+  - - Ranked "zero distribution" as barrier #1 because all downstream conversion optimization is moot with 4 unique visitors in 14 days
+  - - Identified clone volume as self-traffic by correlating clone spikes with task dispatch dates (e.g., 645 clones on Apr 9 = high task execution day)
+  - - Chose minimal README change (star CTA) over larger restructuring because the bottleneck is traffic, not README quality
+  - - Confirmed Discussion pinning is genuinely UI-only (no GraphQL mutation exists) — listed as manual step
+  - - Did not attempt dev.to/HN/Reddit posting because DEV_API_KEY is not set and the other platforms have no API for posting
+
+
 ### 2026-04-15 — [task-20260415-120149-create-contributing-md-with-contributor-guidelines] (#207 kai-linux/agent-os)
 Created CONTRIBUTING.md with contributor guidelines covering setup, commit conventions (Conventional Commits), PR expectations, code review process, issue filing format, code style, and project layout. Kept concise and example-driven for external Python developers familiar with git.
 
