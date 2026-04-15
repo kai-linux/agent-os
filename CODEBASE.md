@@ -42,6 +42,17 @@
 
 ## Recent Changes
 
+### 2026-04-15 — [task-20260415-120520-complete-pr-165-ci-failure-debug-and-prevent-casca] (#186 kai-linux/agent-os)
+PR-165 was already merged with all CI checks passing (SUCCESS). The PR-98 cascading-CI fix (persistent failed_checks in frontmatter) worked correctly: only 2 follow-up tasks were spawned (#166, #170) before the chain terminated, compared to 8+ cascading tasks in the pre-fix PR-98 incident. Added a regression test for failed_checks propagation through follow-up task creation to complete test coverage of the anti-cascade mechanism.
+
+**Files:** `- tests/test_queue.py`
+
+**Decisions:**
+  - - No code fix needed — PR-165 was already merged with green CI; this task validates closure and prevention
+  - - Added follow-up propagation test as the missing coverage gap — the verification gate test existed but propagation through create_followup_task was untested
+  - - No PR-98 gap found — the fix correctly prevents cascading follow-ups (2 follow-ups vs 8+ pre-fix)
+
+
 ### 2026-04-15 — [task-20260415-120419-implement-adoption-funnel-monitoring-and-weekly-im] (#206 kai-linux/agent-os)
 Implemented adoption funnel monitoring with daily-granularity traffic data capture and a weekly impact report generator. Enhanced the evidence exporter to capture daily views/clones breakdown, referrer details, and popular paths. Created orchestrator/adoption_report.py that fetches live GitHub traffic data, correlates referral sources with conversion rates, identifies conversion bottlenecks (top-of-funnel traffic and referral diversity), and generates a 1-page actionable report. Generated the first report showing 4 unique visitors, 2 stars, zero external referrers, and clone noise from automated operations. Installed weekly cron and sent Telegram summary.
 
