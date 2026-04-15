@@ -42,6 +42,18 @@
 
 ## Recent Changes
 
+### 2026-04-15 — [task-20260415-120149-create-contributing-md-with-contributor-guidelines] (#207 kai-linux/agent-os)
+Created CONTRIBUTING.md with contributor guidelines covering setup, commit conventions (Conventional Commits), PR expectations, code review process, issue filing format, code style, and project layout. Kept concise and example-driven for external Python developers familiar with git.
+
+**Files:** `- CONTRIBUTING.md`, `- .agent_result.md`
+
+**Decisions:**
+  - - Used Conventional Commits as the documented convention since existing commits follow that pattern (feat:, fix:, chore:, docs:)
+  - - Kept the guide under 100 lines of content to stay concise per constraints
+  - - Referenced the existing .github/ISSUE_TEMPLATE/agent-task.md rather than duplicating its content
+  - - Documented squash-merge as the merge strategy since PR titles follow conventional commit format
+
+
 ### 2026-04-14 — [task-20260414-220519-validate-codex-agent-stabilization-fix-and-prevent] (#198 kai-linux/agent-os)
 Validated the codex agent runtime stabilization fix (task-20260409-210219). Post-fix codex success rate is 100% (2/2), though sample size is small. The 14-day rate of 75% (6/8) includes 2 pre-fix debugging failures — the fix correctly scopes scoring by task type so these no longer affect routing. Added 3 regression tests validating task-type-scoped gating, small-sample protection, and degradation finding scoping. Added continuous "Codex Runtime Stability" monitoring section to health_gate_report.py with 85% warning threshold. Documented full RCA and validation findings in CODEBASE.md. The >85% target is met post-fix but needs continued monitoring due to small sample size.
 
