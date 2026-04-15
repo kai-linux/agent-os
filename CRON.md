@@ -45,6 +45,10 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # cron must also run at least every 15 min.
 0 * * * * /path/to/agent-os/bin/run_strategic_planner.sh >> /path/to/agent-os/runtime/logs/strategic_planner.log 2>&1
 
+# ── Adoption monitoring ────────────────────────────────────────────────
+# Weekly adoption funnel report with traffic/conversion analysis (Monday 07:30)
+30 7 * * 1 /path/to/agent-os/bin/run_adoption_report.sh >> /path/to/agent-os/runtime/logs/adoption_report.log 2>&1
+
 # ── Evidence and product inspection ────────────────────────────────────
 # Export GitHub stars/forks evidence every 6 hours (one invocation per managed repo)
 0 */6 * * * /path/to/agent-os/bin/export_github_evidence.sh owner/repo >> /path/to/agent-os/runtime/logs/evidence_export.log 2>&1
@@ -71,6 +75,7 @@ Each wrapper emits a timestamp banner like `[2026-03-30T12:34:56+0200] queue sta
 | `0 8 * * *` | `run_daily_digest.sh` | Summarizes the last 24h of completions, blockers, escalations, agent success, and PR activity to Telegram |
 | `0 * * * *` | `run_backlog_groomer.sh` | Per-repo cadence gate in config decides when each repo is groomed |
 | `0 * * * *` | `run_strategic_planner.sh` | Per-repo cadence gate in config decides when each repo is planned |
-| `0 */6 * * *` | `export_github_evidence.sh` | Snapshots GitHub stars/forks for the tracked objective metrics (one invocation per managed repo) |
+| `30 7 * * 1` | `run_adoption_report.sh` | Generates weekly adoption funnel report with traffic, referral, and conversion analysis; sends Telegram summary |
+| `0 */6 * * *` | `export_github_evidence.sh` | Snapshots GitHub stars/forks/traffic for the tracked objective metrics (one invocation per managed repo) |
 | `15 6 * * *` | `run_public_dashboard.sh` | Writes the public reliability dashboard snapshot from `PRODUCTION_FEEDBACK.md` and `runtime/metrics/agent_stats.jsonl` |
 | `0 6 * * *` | `run_product_inspector.sh` | Fetches configured public product surfaces and refreshes `PRODUCT_INSPECTION.md` for the planner/groomer |
