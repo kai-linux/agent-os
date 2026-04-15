@@ -42,6 +42,19 @@
 
 ## Recent Changes
 
+### 2026-04-15 — [task-20260415-120322-complete-multi-agent-case-study-distribution-and-m] (#205 kai-linux/agent-os)
+Completed multi-agent case study distribution preparation by updating all promotion content with current metrics (352 commits, 110 issues closed, 85 PRs merged, 91% 14-day success rate), expanding target communities from 3 to 7 platforms (dev.to, HN, r/programming, r/SideProject, r/LocalLLaMA, r/selfhosted, plus existing GitHub Discussions #167), establishing a baseline metrics snapshot (2 stars, 0 forks, 4 unique visitors), and creating an adoption metrics tracking framework with 7/14-day measurement windows, platform ROI analysis template, and referrer attribution methodology.
+
+**Files:** `- docs/case-study-agent-os.md`, `- docs/promotion/devto-article.md`, `- docs/promotion/hn-submission.md`, `- docs/promotion/reddit-posts.md`, `- docs/promotion/README.md`, `- docs/adoption-metrics-tracking.md`, `- bin/publish_case_study.sh`
+
+**Decisions:**
+  - - Updated all promotion content from 23/27-day stale metrics to current 30-day numbers (352 commits, 110 issues closed, 85 PRs merged) for accuracy and credibility
+  - - Expanded from 3 target platforms to 7 by adding r/LocalLLaMA (multi-agent audience) and r/selfhosted ($5 VPS angle) as high-signal technical communities
+  - - Each Reddit post uses contextual framing specific to the subreddit audience rather than identical cross-posts
+  - - Highlighted the 61%→91% success rate improvement arc as the leading metric in all promotion content because it demonstrates the self-improvement loop better than static numbers
+  - - Created adoption-metrics-tracking.md as the single source of truth for distribution status, baseline, and ROI analysis rather than scattering across multiple files
+
+
 ### 2026-04-15 — [task-20260415-120230-diagnose-and-optimize-github-visitor-to-star-conve] (#204 kai-linux/agent-os)
 Diagnosed the GitHub visitor-to-star conversion funnel using 14-day traffic data. The primary finding is that the funnel is empty at the top: only 4 unique visitors in 14 days with zero external referrers. All README/demo/quickstart optimization work is wasted because nobody is arriving. The 591 "unique cloners" are almost entirely automated worktree operations, not real users. Both stars were acquired on March 17-18 and none since. Documented top 3 friction barriers ranked by impact, proposed specific fixes for each, and implemented two zero-cost changes (star CTA in README, diagnostic report).
 
