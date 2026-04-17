@@ -26,15 +26,19 @@ from orchestrator.queue import (
     agent_available,
     build_escalation_message,
     create_followup_task,
+    fallback_cooldown_remaining,
     get_agent_chain,
     handle_telegram_callback,
+    has_unpushed_commits,
     maybe_requeue_prompt_inspection_recovery,
     parse_agent_result,
     parse_bullets,
     rescue_git_progress,
     run_tests,
     save_telegram_action,
+    should_attempt_git_rescue,
     split_section,
+    start_fallback_cooldown,
     telegram_action_expired,
     verify_pr_ci_debug_completion,
     write_unblock_notes_artifact,
@@ -1462,6 +1466,40 @@ def test_create_followup_task_rejects_invalid_resolved_agent(tmp_path):
     assert "agent: auto" in content
 
 
+def test_create_followup_task_propagates_failed_checks(tmp_path):
+    """Follow-up tasks propagate failed_checks from parent frontmatter (PR-98 fix)."""
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    meta = {
+        "task_id": "task-orig",
+        "repo": "/tmp/repo",
+        "base_branch": "main",
+        "branch": "agent/task-orig",
+        "allow_push": True,
+        "task_type": "debugging",
+        "attempt": 1,
+        "max_attempts": 3,
+        "max_runtime_minutes": 40,
+        "failed_checks": ["pytest", "lint"],
+    }
+    result = {
+        "status": "partial",
+        "next_step": "Rerun CI after fix",
+        "summary": "Partial progress on CI fix",
+    }
+    logfile = tmp_path / "log.txt"
+    logfile.touch()
+    summary_log = tmp_path / "summary.log"
+    summary_log.touch()
+
+    path = create_followup_task(meta, "original body", result, logfile, 3, ["claude"], inbox, summary_log)
+    assert path is not None
+    content = path.read_text(encoding="utf-8")
+    assert "failed_checks:" in content
+    assert "pytest" in content
+    assert "lint" in content
+
+
 # --- Enhanced dispatch context tests ---
 
 
@@ -1597,3 +1635,115 @@ def test_create_escalation_note_includes_prompt_snapshot_path(tmp_path):
     content = esc_path.read_text(encoding="utf-8")
     assert "## Prompt Snapshot" in content
     assert "runtime/prompts/task-snap-test.txt" in content
+
+
+# ---------------------------------------------------------------------------
+# has_unpushed_commits — the fresh-branch bug regression
+# ---------------------------------------------------------------------------
+
+def _init_origin_clone(tmp_path: Path) -> tuple[Path, Path]:
+    """Create a bare origin repo with a single commit on main, and a clone."""
+    import subprocess
+    origin = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "--bare", "-b", "main", str(origin)],
+                   check=True, capture_output=True)
+    seed = tmp_path / "seed"
+    subprocess.run(["git", "init", "-b", "main", str(seed)],
+                   check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(seed), "config", "user.email", "t@t.t"],
+                   check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(seed), "config", "user.name", "t"],
+                   check=True, capture_output=True)
+    (seed / "README.md").write_text("x", encoding="utf-8")
+    subprocess.run(["git", "-C", str(seed), "add", "-A"],
+                   check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(seed), "commit", "-m", "init"],
+                   check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(seed), "remote", "add", "origin", str(origin)],
+                   check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(seed), "push", "origin", "main"],
+                   check=True, capture_output=True)
+    clone = tmp_path / "clone"
+    subprocess.run(["git", "clone", str(origin), str(clone)],
+                   check=True, capture_output=True)
+    return origin, clone
+
+
+def test_has_unpushed_commits_false_on_fresh_agent_branch(tmp_path):
+    """Regression: a task branch freshly checked out from origin/main with no
+    agent work must not report unpushed commits. Earlier code wrongly pushed
+    such branches and flipped fallback-exhausted tasks to status=complete."""
+    import subprocess
+    _, clone = _init_origin_clone(tmp_path)
+    subprocess.run(["git", "-C", str(clone), "checkout", "-B", "agent/foo", "origin/main"],
+                   check=True, capture_output=True)
+    assert has_unpushed_commits(clone, "agent/foo") is False
+
+
+def test_has_unpushed_commits_true_after_real_commit(tmp_path):
+    import subprocess
+    _, clone = _init_origin_clone(tmp_path)
+    subprocess.run(["git", "-C", str(clone), "checkout", "-B", "agent/foo", "origin/main"],
+                   check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(clone), "config", "user.email", "t@t.t"],
+                   check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(clone), "config", "user.name", "t"],
+                   check=True, capture_output=True)
+    (clone / "NEW.md").write_text("y", encoding="utf-8")
+    subprocess.run(["git", "-C", str(clone), "add", "-A"],
+                   check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(clone), "commit", "-m", "work"],
+                   check=True, capture_output=True)
+    assert has_unpushed_commits(clone, "agent/foo") is True
+
+
+# ---------------------------------------------------------------------------
+# should_attempt_git_rescue — skip fallback_exhausted
+# ---------------------------------------------------------------------------
+
+def test_should_attempt_git_rescue_skips_fallback_exhausted(tmp_path):
+    """fallback_exhausted means no agent ran; rescue would only push an empty
+    branch and wrongly flip the task to complete."""
+    import subprocess
+    _, clone = _init_origin_clone(tmp_path)
+    subprocess.run(["git", "-C", str(clone), "checkout", "-B", "agent/foo", "origin/main"],
+                   check=True, capture_output=True)
+    result = {"status": "blocked", "blocker_code": "fallback_exhausted"}
+    assert should_attempt_git_rescue(result, clone, "agent/foo") is False
+
+
+def test_should_attempt_git_rescue_allows_other_blockers_with_work(tmp_path):
+    import subprocess
+    _, clone = _init_origin_clone(tmp_path)
+    subprocess.run(["git", "-C", str(clone), "checkout", "-B", "agent/foo", "origin/main"],
+                   check=True, capture_output=True)
+    (clone / "dirty.md").write_text("z", encoding="utf-8")  # uncommitted change
+    result = {"status": "blocked", "blocker_code": "timeout"}
+    assert should_attempt_git_rescue(result, clone, "agent/foo") is True
+
+
+# ---------------------------------------------------------------------------
+# fallback cooldown
+# ---------------------------------------------------------------------------
+
+def test_fallback_cooldown_remaining_zero_when_absent(tmp_path):
+    cfg = {"root_dir": str(tmp_path)}
+    assert fallback_cooldown_remaining(cfg) == 0
+
+
+def test_fallback_cooldown_arm_and_read(tmp_path):
+    cfg = {"root_dir": str(tmp_path)}
+    until = start_fallback_cooldown(cfg, minutes=5)
+    remaining = fallback_cooldown_remaining(cfg)
+    assert 4 * 60 < remaining <= 5 * 60
+    assert until > datetime.now(timezone.utc)
+
+
+def test_fallback_cooldown_expires(tmp_path):
+    cfg = {"root_dir": str(tmp_path)}
+    # Write an already-past timestamp directly.
+    state_file = Path(tmp_path) / "runtime" / "state" / "fallback_cooldown_until.txt"
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    state_file.write_text((datetime.now(timezone.utc) - timedelta(seconds=30)).isoformat(),
+                          encoding="utf-8")
+    assert fallback_cooldown_remaining(cfg) == 0

@@ -1576,25 +1576,22 @@ def has_changes(worktree: Path):
 
 
 def has_unpushed_commits(worktree: Path, branch: str) -> bool:
-    """Return True if local branch has commits not yet on origin."""
-    # Check whether remote branch exists at all
-    remote_check = subprocess.run(
-        ["git", "ls-remote", "--heads", "origin", branch],
+    """Return True if HEAD has commits that are not reachable from any origin ref.
+
+    Checks ``HEAD --not --remotes=origin`` so a freshly-created task branch
+    that still points at origin/<base> (no agent work) correctly reports zero
+    unpushed commits. Earlier logic returned True for any non-empty history on
+    a never-pushed branch, which caused fallback-exhausted tasks to push empty
+    branches and be wrongly marked complete by the rescue path.
+    """
+    result = subprocess.run(
+        ["git", "rev-list", "--count", "HEAD", "--not", "--remotes=origin"],
         cwd=worktree, capture_output=True, text=True,
     )
-    if not remote_check.stdout.strip():
-        # Remote branch doesn't exist — any local commit counts as unpushed
-        has_any = subprocess.run(
-            ["git", "log", "--oneline", "-1"],
-            cwd=worktree, capture_output=True, text=True,
-        )
-        return bool(has_any.stdout.strip())
-    # Remote exists — check for commits ahead of origin
-    ahead = subprocess.run(
-        ["git", "log", f"origin/{branch}..HEAD", "--oneline"],
-        cwd=worktree, capture_output=True, text=True,
-    )
-    return bool(ahead.stdout.strip())
+    try:
+        return int(result.stdout.strip() or "0") > 0
+    except ValueError:
+        return False
 
 
 def commit_and_push(worktree: Path, branch: str, task_id: str, allow_push: bool, logfile: Path, queue_summary_log: Path):
@@ -1625,6 +1622,10 @@ def should_attempt_git_rescue(result: dict, worktree: Path, branch: str) -> bool
     if not result:
         return False
     if result.get("status") not in ("partial", "blocked"):
+        return False
+    # fallback_exhausted means no agent ran — there is nothing to rescue, and
+    # pushing would flip the task to status=complete against an empty branch.
+    if result.get("blocker_code") == "fallback_exhausted":
         return False
     return has_changes(worktree) or has_unpushed_commits(worktree, branch)
 
@@ -2226,6 +2227,38 @@ def record_metrics(
     log(f"Metrics recorded for {record['task_id']}: status={record['status']}, agent={record['agent']}", logfile, queue_summary_log=queue_summary_log)
 
 
+FALLBACK_COOLDOWN_MINUTES = 15
+FALLBACK_COOLDOWN_FILE = "fallback_cooldown_until.txt"
+
+
+def _cooldown_path(cfg: dict) -> Path:
+    state_dir = Path(cfg.get("root_dir", ".")).expanduser() / "runtime" / "state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    return state_dir / FALLBACK_COOLDOWN_FILE
+
+
+def fallback_cooldown_remaining(cfg: dict) -> int:
+    """Return seconds remaining in the fallback-exhausted cooldown, or 0."""
+    path = _cooldown_path(cfg)
+    if not path.exists():
+        return 0
+    try:
+        until = datetime.fromisoformat(path.read_text(encoding="utf-8").strip())
+    except (ValueError, OSError):
+        return 0
+    if until.tzinfo is None:
+        until = until.replace(tzinfo=timezone.utc)
+    delta = (until - datetime.now(timezone.utc)).total_seconds()
+    return max(0, int(delta))
+
+
+def start_fallback_cooldown(cfg: dict, minutes: int = FALLBACK_COOLDOWN_MINUTES) -> datetime:
+    """Arm the cooldown; returns the expiry timestamp."""
+    until = datetime.now(timezone.utc) + timedelta(minutes=minutes)
+    _cooldown_path(cfg).write_text(until.isoformat(), encoding="utf-8")
+    return until
+
+
 def synthesize_exhausted_result(model_attempts: list[str]) -> dict:
     return {
         "status": "blocked",
@@ -2262,6 +2295,12 @@ def main():
     QUEUE_SUMMARY_LOG = paths["QUEUE_SUMMARY_LOG"]
 
     worker_id = os.environ.get("QUEUE_WORKER_ID", "w0")
+
+    cooldown_left = fallback_cooldown_remaining(cfg)
+    if cooldown_left > 0:
+        mins = (cooldown_left + 59) // 60
+        print(f"[{worker_id}] Fallback cooldown active — {mins} min remaining. Skipping this tick.")
+        return
 
     task = pick_task(INBOX, cfg)
     if not task:
@@ -2371,6 +2410,20 @@ def main():
                 final_result = synthesize_exhausted_result(model_attempts)
                 final_agent = "none"
                 log("No remaining agents in fallback chain.", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
+                # Arm a cooldown so the next cron ticks don't chew through the
+                # whole queue spamming the same failure. Notify only on the
+                # transition into cooldown, not once per queued task.
+                prior_cooldown = fallback_cooldown_remaining(cfg)
+                until = start_fallback_cooldown(cfg)
+                if prior_cooldown == 0:
+                    send_telegram(
+                        cfg,
+                        f"🧊 Fallback cooldown\nAll agents exhausted on {task_id} ({repo.name}).\n"
+                        f"Queue paused for {FALLBACK_COOLDOWN_MINUTES} min (until {until.strftime('%H:%M')} UTC).\n"
+                        f"Models tried: {', '.join(model_attempts) or 'none'}",
+                        logfile,
+                        QUEUE_SUMMARY_LOG,
+                    )
                 break
 
             timeout_minutes = timeout_for_agent(current_agent, meta, cfg)
