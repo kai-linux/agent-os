@@ -12,6 +12,7 @@ import yaml
 
 from orchestrator.ci_artifact_validator import validate_ci_artifacts, format_validation_log
 from orchestrator.ci_failure_signatures import extract_ci_failure_signature, extract_signature_from_body
+from orchestrator.git_branches import resolve_base_branch
 from orchestrator.paths import load_config, runtime_paths
 from orchestrator.gh_project import (
     get_ready_items,
@@ -423,7 +424,11 @@ def build_mailbox_task(cfg: dict, project_key: str, repo_cfg: dict, issue: dict)
         "agent": agent,
         "task_type": task_type,
         "branch": parsed.get("branch") or f"agent/{task_id}",
-        "base_branch": parsed.get("base_branch") or cfg["default_base_branch"],
+        "base_branch": resolve_base_branch(
+            Path(repo_cfg["local_repo"]),
+            parsed.get("base_branch"),
+            cfg["default_base_branch"],
+        ),
         "allow_push": cfg["default_allow_push"],
         "attempt": 1,
         "max_attempts": cfg["default_max_attempts"],

@@ -16,6 +16,7 @@ from uuid import uuid4
 
 import yaml
 
+from orchestrator.git_branches import detect_default_branch, remote_branch_exists
 from orchestrator.paths import load_config, runtime_paths
 from orchestrator.github_sync import sync_result
 from orchestrator.gh_project import gh_json as _gh_json
@@ -1357,6 +1358,21 @@ def ensure_worktree(cfg: dict, repo: Path, base_branch: str, branch: str, task_i
         shutil.rmtree(worktree, ignore_errors=True)
 
     _git_fetch_with_retry(repo, logfile, queue_summary_log)
+
+    # Defensive recovery for tasks queued before per-repo default-branch
+    # detection landed: if the configured base branch has no origin ref,
+    # fall back to the repo's actual default (e.g. master).
+    if not remote_branch_exists(repo, base_branch):
+        detected = detect_default_branch(repo)
+        if detected and detected != base_branch:
+            log(
+                f"origin/{base_branch} missing in {repo.name}; "
+                f"falling back to detected default branch '{detected}'",
+                logfile,
+                queue_summary_log=queue_summary_log,
+            )
+            base_branch = detected
+
     run(
         ["git", "-C", repo, "worktree", "add", "-B", branch, worktree, f"origin/{base_branch}"],
         logfile=logfile,
