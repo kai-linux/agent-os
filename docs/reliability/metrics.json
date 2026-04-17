@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-04-16T03:00:02.199037+00:00",
+  "generated_at": "2026-04-17T03:00:02.124567+00:00",
   "github": {
     "forks": 0,
     "open_issues": 8,
@@ -9,17 +9,17 @@
   "momentum": {
     "current_week": {
       "escalation_rate": 0.0,
-      "mean_completion_hours": 0.11390637860082305,
-      "success_rate": 0.9310344827586207,
-      "successes": 27,
-      "total": 29
+      "mean_completion_hours": 0.10482679738562091,
+      "success_rate": 1.0,
+      "successes": 17,
+      "total": 17
     },
     "prior_week": {
       "escalation_rate": 0.0,
-      "mean_completion_hours": 0.09186388888888888,
-      "success_rate": 1.0,
-      "successes": 20,
-      "total": 20
+      "mean_completion_hours": 0.10435648148148148,
+      "success_rate": 0.9375,
+      "successes": 30,
+      "total": 32
     }
   },
   "per_agent": [
@@ -43,14 +43,6 @@
     }
   ],
   "rolling_14_day": [
-    {
-      "blocked": 0,
-      "date": "2026-04-03",
-      "escalation_rate": null,
-      "success_rate": null,
-      "successes": 0,
-      "total": 0
-    },
     {
       "blocked": 0,
       "date": "2026-04-04",
@@ -150,6 +142,14 @@
     {
       "blocked": 0,
       "date": "2026-04-16",
+      "escalation_rate": null,
+      "success_rate": null,
+      "successes": 0,
+      "total": 0
+    },
+    {
+      "blocked": 0,
+      "date": "2026-04-17",
       "escalation_rate": null,
       "success_rate": null,
       "successes": 0,
