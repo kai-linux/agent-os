@@ -60,45 +60,59 @@ def test_validate_fails_no_run_id():
     assert "Could not determine workflow run ID" in result.errors[0]
 
 
-def test_validate_fails_no_artifacts():
-    with mock.patch("orchestrator.ci_artifact_validator.subprocess.run",
-                    return_value=_mock_run("[]")):
+def _patch_validator(artifacts_stdout: str, *, job_log: str | None = None, artifact_rc: int = 0):
+    """Patch subprocess.run so artifact-list calls and job-log calls behave independently."""
+    def fake_run(cmd, *args, **kwargs):
+        if len(cmd) >= 3 and cmd[0] == "gh" and cmd[1] == "api":
+            path = cmd[2]
+            if "/artifacts" in path:
+                return mock.Mock(stdout=artifacts_stdout, stderr="", returncode=artifact_rc)
+            if "/logs" in path:
+                if job_log is None:
+                    return mock.Mock(stdout="", stderr="not found", returncode=1)
+                return mock.Mock(stdout=job_log, stderr="", returncode=0)
+        return mock.Mock(stdout="", stderr="", returncode=1)
+    return mock.patch("orchestrator.ci_artifact_validator.subprocess.run", side_effect=fake_run)
+
+
+def test_validate_fails_no_artifacts_and_no_logs():
+    with _patch_validator("[]"):
         result = validate_ci_artifacts("owner/repo", [], run_id=100)
     assert result.valid is False
-    assert "No CI failure artifacts found" in result.errors[0]
+    assert result.context_source == "none"
+    assert any("No CI failure artifacts found" in e for e in result.errors)
 
 
-def test_validate_fails_too_small():
+def test_validate_fails_too_small_and_no_logs():
     artifacts = [
         {"name": "pr-ci-failure-test-1", "size_in_bytes": 10, "expired": False},
     ]
-    with mock.patch("orchestrator.ci_artifact_validator.subprocess.run",
-                    return_value=_mock_run(json.dumps(artifacts))):
+    with _patch_validator(json.dumps(artifacts)):
         result = validate_ci_artifacts("owner/repo", [], run_id=100)
     assert result.valid is False
-    assert "too small" in result.errors[0]
+    assert result.context_source == "none"
+    assert any("too small" in e for e in result.errors)
 
 
-def test_validate_fails_expired():
+def test_validate_fails_expired_and_no_logs():
     artifacts = [
         {"name": "pr-ci-failure-test-1", "size_in_bytes": 5000, "expired": True},
     ]
-    with mock.patch("orchestrator.ci_artifact_validator.subprocess.run",
-                    return_value=_mock_run(json.dumps(artifacts))):
+    with _patch_validator(json.dumps(artifacts)):
         result = validate_ci_artifacts("owner/repo", [], run_id=100)
     assert result.valid is False
-    assert "expired" in result.errors[0]
+    assert result.context_source == "none"
+    assert any("expired" in e for e in result.errors)
 
 
 def test_validate_ignores_non_ci_artifacts():
     artifacts = [
         {"name": "some-other-artifact", "size_in_bytes": 5000, "expired": False},
     ]
-    with mock.patch("orchestrator.ci_artifact_validator.subprocess.run",
-                    return_value=_mock_run(json.dumps(artifacts))):
+    with _patch_validator(json.dumps(artifacts)):
         result = validate_ci_artifacts("owner/repo", [], run_id=100)
     assert result.valid is False
-    assert "No CI failure artifacts found" in result.errors[0]
+    assert any("No CI failure artifacts found" in e for e in result.errors)
 
 
 def test_validate_extracts_run_id_from_checks():
@@ -107,19 +121,53 @@ def test_validate_extracts_run_id_from_checks():
     artifacts = [
         {"name": "pr-ci-failure-test-1", "size_in_bytes": 1000, "expired": False},
     ]
-    with mock.patch("orchestrator.ci_artifact_validator.subprocess.run",
-                    return_value=_mock_run(json.dumps(artifacts))):
+    with _patch_validator(json.dumps(artifacts)):
         result = validate_ci_artifacts("owner/repo", checks)
     assert result.valid is True
     assert result.run_id == 999
+    assert result.context_source == "artifacts"
 
 
 def test_validate_api_failure_returns_no_artifacts():
-    with mock.patch("orchestrator.ci_artifact_validator.subprocess.run",
-                    return_value=_mock_run("", returncode=1)):
+    with _patch_validator("", artifact_rc=1):
         result = validate_ci_artifacts("owner/repo", [], run_id=100)
     assert result.valid is False
-    assert "No CI failure artifacts found" in result.errors[0]
+    assert result.context_source == "none"
+
+
+def test_validate_falls_back_to_job_logs_when_artifacts_missing():
+    checks = [{"name": "Secret scan", "state": "FAILURE",
+                "link": "https://github.com/o/r/actions/runs/999/job/12345"}]
+    log_body = "starting secret scan...\n" * 20 + "ERROR: leaked token at config.py:42\n"
+    with _patch_validator("[]", job_log=log_body):
+        result = validate_ci_artifacts("owner/repo", checks)
+    assert result.valid is True
+    assert result.context_source == "job_logs"
+    assert result.log_excerpt is not None
+    assert "ERROR: leaked token" in result.log_excerpt
+    assert result.log_jobs == ["Secret scan"]
+
+
+def test_validate_log_fallback_truncates_tail():
+    from orchestrator.ci_artifact_validator import MAX_LOG_EXCERPT_BYTES
+    checks = [{"name": "Secret scan", "state": "FAILURE",
+                "link": "https://github.com/o/r/actions/runs/999/job/12345"}]
+    huge_log = ("noise\n" * 50_000) + "FINAL_ERROR_MARKER\n"
+    with _patch_validator("[]", job_log=huge_log):
+        result = validate_ci_artifacts("owner/repo", checks)
+    assert result.valid is True
+    assert "FINAL_ERROR_MARKER" in result.log_excerpt
+    assert len(result.log_excerpt) <= MAX_LOG_EXCERPT_BYTES + 200  # +fence overhead
+
+
+def test_validate_log_fallback_fails_when_logs_unavailable():
+    checks = [{"name": "Secret scan", "state": "FAILURE",
+                "link": "https://github.com/o/r/actions/runs/999/job/12345"}]
+    with _patch_validator("[]", job_log=None):
+        result = validate_ci_artifacts("owner/repo", checks)
+    assert result.valid is False
+    assert result.context_source == "none"
+    assert any("Could not fetch failed-job logs" in e for e in result.errors)
 
 
 # ---------------------------------------------------------------------------

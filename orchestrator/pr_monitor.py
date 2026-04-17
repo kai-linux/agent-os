@@ -918,7 +918,24 @@ def _ensure_ci_remediation_issue(cfg: dict, repo: str, pr: dict, checks: list[di
 
     check_lines = _format_failed_checks(checks)
     linked_issue_line = f"- Original issue: #{linked_issue_number}\n" if linked_issue_number else ""
-    artifact_names = ", ".join(a.get("name", "?") for a in validation.artifacts)
+
+    if validation.context_source == "job_logs":
+        context_section = (
+            f"## CI Job Logs (excerpt)\n"
+            f"- Run ID: {validation.run_id}\n"
+            f"- Jobs: {', '.join(validation.log_jobs) or '?'}\n"
+            f"- Source: job logs (no workflow artifacts available)\n\n"
+            f"{validation.log_excerpt}\n"
+        )
+    else:
+        artifact_names = ", ".join(a.get("name", "?") for a in validation.artifacts)
+        context_section = (
+            f"## CI Artifacts\n"
+            f"- Run ID: {validation.run_id}\n"
+            f"- Artifacts: {artifact_names}\n"
+            f"- Total size: {validation.total_bytes} bytes\n"
+        )
+
     body = f"""## Goal
 Repair the failing CI on PR #{pr_number} by updating its existing branch so the current pull request can merge cleanly.
 
@@ -946,11 +963,7 @@ debugging
 {linked_issue_line}- Failed checks:
 {check_lines}
 
-## CI Artifacts
-- Run ID: {validation.run_id}
-- Artifacts: {artifact_names}
-- Total size: {validation.total_bytes} bytes
-"""
+{context_section}"""
     labels = ["bug", "prio:high", "ready"]
     issue_url = _create_issue(repo, title, body, labels)
     _set_issue_ready(cfg, repo, issue_url)
