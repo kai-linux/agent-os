@@ -1853,7 +1853,16 @@ def get_agent_chain(meta: dict, cfg: dict) -> list[str]:
             passed=filtered,
             context=f"queue:get_agent_chain task_type={meta.get('task_type', 'unknown')}",
         )
-    healthy, _skipped = filter_healthy_agents(filtered, metrics_file, task_type=task_type, min_task_count=5)
+    # 24h health gate: keep aligned with dispatcher (50% over min 10 tasks).
+    # Tighter values left the trimmed [claude, codex] chain empty after one
+    # bad day, causing the worker to arm cooldown without trying any agent.
+    healthy, _skipped = filter_healthy_agents(
+        filtered,
+        metrics_file,
+        task_type=task_type,
+        threshold=0.50,
+        min_task_count=10,
+    )
     return healthy
 
 
