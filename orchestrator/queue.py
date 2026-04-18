@@ -433,16 +433,26 @@ def verify_pr_ci_debug_completion(
         )
 
     runs = runs_payload.get("workflow_runs") or []
-    candidate_runs: list[dict] = []
+    # Feature-branch pushes typically don't trigger CI directly (workflows
+    # usually fire on push-to-master or pull_request events), and follow-up
+    # tasks often only push metadata-only commits like .agent_result.md. So
+    # an exact-SHA match is frequently unavailable even when the branch is
+    # genuinely green. Prefer exact-SHA evidence when present; fall back to
+    # any post-task-start run on the branch so we reflect the actual branch
+    # state instead of looping on missing_rerun.
+    exact_match_runs: list[dict] = []
+    fallback_runs: list[dict] = []
     for run in runs:
         if str(run.get("head_branch", "")).strip() != branch:
-            continue
-        if commit_hash and str(run.get("head_sha", "")).strip() != commit_hash:
             continue
         created_at = _parse_github_timestamp(run.get("created_at")) or _parse_github_timestamp(run.get("run_started_at"))
         if created_at and created_at < task_started_at:
             continue
-        candidate_runs.append(run)
+        if commit_hash and str(run.get("head_sha", "")).strip() == commit_hash:
+            exact_match_runs.append(run)
+        fallback_runs.append(run)
+
+    candidate_runs = exact_match_runs or fallback_runs
 
     if not candidate_runs:
         return _ci_completion_partial_result(
