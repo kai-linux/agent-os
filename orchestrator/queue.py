@@ -1839,17 +1839,17 @@ def get_agent_chain(meta: dict, cfg: dict) -> list[str]:
     else:
         chain = [requested] + [a for a in task_chain if a != requested]
 
-    filtered = []
+    available_chain = []
     for agent in chain:
         if agent not in VALID_FALLBACK_AGENTS:
             continue
         available, _reason = agent_available(agent)
         if available:
-            filtered.append(agent)
+            available_chain.append(agent)
     metrics_file = Path(cfg.get("root_dir", ".")).expanduser() / "runtime" / "metrics" / "agent_stats.jsonl"
     # Adaptive gate: skip agents with <25% success rate over 7 days
-    filtered, adaptive_skipped = filter_healthy_agents(
-        filtered,
+    after_7d, adaptive_skipped = filter_healthy_agents(
+        available_chain,
         metrics_file,
         threshold=ADAPTIVE_HEALTH_THRESHOLD,
         window_days=ADAPTIVE_HEALTH_WINDOW_DAYS,
@@ -1862,19 +1862,30 @@ def get_agent_chain(meta: dict, cfg: dict) -> list[str]:
             metrics_file.parent,
             gate="adaptive_7d_25pct",
             skipped=adaptive_skipped,
-            passed=filtered,
+            passed=after_7d,
             context=f"queue:get_agent_chain task_type={meta.get('task_type', 'unknown')}",
         )
     # 24h health gate: keep aligned with dispatcher (50% over min 10 tasks).
     # Tighter values left the trimmed [claude, codex] chain empty after one
     # bad day, causing the worker to arm cooldown without trying any agent.
-    healthy, _skipped = filter_healthy_agents(
-        filtered,
+    healthy, skipped_24h = filter_healthy_agents(
+        after_7d,
         metrics_file,
         task_type=task_type,
         threshold=0.50,
         min_task_count=10,
     )
+    # Safety net: if both gates combined leave the chain empty but credential
+    # checks passed agents, fall back to the credential-available list. Better
+    # to try an under-performing agent than to spam fallback-exhausted
+    # cooldowns every 15 minutes.
+    if not healthy:
+        if after_7d:
+            print(f"24h gate would empty the chain; relaxing and keeping {after_7d}")
+            return after_7d
+        if available_chain:
+            print(f"both gates would empty the chain; falling back to credential-available {available_chain}")
+            return available_chain
     return healthy
 
 
@@ -2208,7 +2219,16 @@ def record_metrics(
     logfile: Path | None,
     queue_summary_log: Path | None,
 ) -> None:
-    """Atomically append task metrics to runtime/metrics/agent_stats.jsonl."""
+    """Atomically append task metrics to runtime/metrics/agent_stats.jsonl.
+
+    Skips records that don't reflect agent quality (fallback_exhausted
+    sentinels with agent=none, and runner_failure infra errors) so the
+    health gates don't wrongly starve the chain after infra incidents.
+    """
+    blocker_code = final_result.get("blocker_code", "")
+    if final_agent in (None, "", "none") or blocker_code in ("fallback_exhausted", "runner_failure"):
+        return
+
     metrics_dir = Path(cfg.get("root_dir", ".")).expanduser() / "runtime" / "metrics"
     metrics_dir.mkdir(parents=True, exist_ok=True)
     metrics_file = metrics_dir / "agent_stats.jsonl"
@@ -2220,7 +2240,7 @@ def record_metrics(
         "repo": str(meta.get("repo", "unknown")),
         "agent": final_agent or "unknown",
         "status": final_result.get("status", "unknown"),
-        "blocker_code": final_result.get("blocker_code", ""),
+        "blocker_code": blocker_code,
         "attempt_count": len(model_attempts),
         "duration_seconds": round(duration, 1),
         "task_type": meta.get("task_type", "unknown"),
