@@ -1577,6 +1577,33 @@ def _skip_ci_artifacts_missing(
     )
 
 
+def _reconcile_closed_items_to_done(queried):
+    """Set project status to Done for any CLOSED issue whose board status drifted.
+
+    Closed issues never dispatch (get_ready_items filters state==OPEN), but the
+    project board can drift out of sync when an issue is closed via merge,
+    manual close, or untrusted-author cleanup without the status field being
+    updated. This keeps the board tidy so the user's view matches reality.
+    """
+    for info in (v[0] for v in queried.values()):
+        done_option = info.get("status_options", {}).get("Done")
+        field_id = info.get("status_field_id")
+        project_id = info.get("project_id")
+        if not (done_option and field_id and project_id):
+            continue
+        for item in info.get("items", []):
+            if item.get("state") != "CLOSED":
+                continue
+            if item.get("status") == "Done":
+                continue
+            try:
+                set_item_status(project_id, item["item_id"], field_id, done_option)
+                item["status"] = "Done"
+                print(f"Reconciled closed item to Done: {item.get('repo','?')}#{item.get('number','?')}")
+            except Exception as e:
+                print(f"Warning: failed to reconcile {item.get('repo','?')}#{item.get('number','?')}: {e}")
+
+
 def _requeue_unblocked_items(queried, repo_to_project, issue_lookup):
     for info, _ready_items in queried.values():
         for item in info.get("items", []):
@@ -1933,6 +1960,8 @@ def dispatch_one():
             print(f"Warning: failed to query project {pn}: {e}")
             graphql_ok = False
             continue
+
+    _reconcile_closed_items_to_done(queried)
 
     issue_lookup = _build_issue_lookup(queried)
     _requeue_unblocked_items(queried, repo_to_project, issue_lookup)
