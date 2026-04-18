@@ -1,14 +1,14 @@
 # Reliability Dashboard
 
-Updated: 2026-04-17T03:00:02.124567+00:00
+Updated: 2026-04-18T03:00:01.741806+00:00
 Window: rolling 14 days
 Sources: `runtime/metrics/agent_stats.jsonl` + `PRODUCTION_FEEDBACK.md`
 
 | Metric | Value |
 |---|---|
-| Task success rate | 96% (47/49) |
+| Task success rate | 80% (53/66) |
 | Mean completion time | 0.1h |
-| Escalation rate | 0% (0/49) |
+| Escalation rate | 33% (32/97) |
 | GitHub stars | 2 |
 | GitHub forks | 0 |
 
@@ -16,14 +16,13 @@ Sources: `runtime/metrics/agent_stats.jsonl` + `PRODUCTION_FEEDBACK.md`
 
 | Period | Success | Mean time | Escalation |
 |---|---|---|---|
-| Last 7 days | 100% (17/17) | 0.1h | 0% |
-| Prior 7 days | 94% (30/32) | 0.1h | 0% |
+| Last 7 days | 66% (21/32) | 0.1h | 51% |
+| Prior 7 days | 94% (32/34) | 0.1h | 0% |
 
 ## Daily Trend
 
 | Date | Success | Escalation | Volume |
 |---|---|---|---|
-| 2026-04-04 | `############` 100% | `............` 0% | 4 |
 | 2026-04-05 | `############` 100% | `............` 0% | 4 |
 | 2026-04-06 | `############` 100% | `............` 0% | 3 |
 | 2026-04-07 | `############` 100% | `............` 0% | 4 |
@@ -36,21 +35,25 @@ Sources: `runtime/metrics/agent_stats.jsonl` + `PRODUCTION_FEEDBACK.md`
 | 2026-04-14 | `############` 100% | `............` 0% | 5 |
 | 2026-04-15 | `############` 100% | `............` 0% | 5 |
 | 2026-04-16 | `............` n/a | `............` n/a | 0 |
-| 2026-04-17 | `............` n/a | `............` n/a | 0 |
+| 2026-04-17 | `###.........` 27% | `########....` 67% | 48 |
+| 2026-04-18 | `............` n/a | `............` n/a | 0 |
 
 ## Per-Agent Breakdown
 
 | Agent | Success | Volume |
 |---|---|---|
-| deepseek | 100% (3/3) | 3 |
-| codex | 100% (2/2) | 2 |
-| claude | 95% (42/44) | 44 |
+| claude | 92% (45/49) | 49 |
+| deepseek | 62% (5/8) | 8 |
+| codex | 40% (2/5) | 5 |
+| gemini | 25% (1/4) | 4 |
 
 ## Top Blocker Categories
 
-- `missing_credentials`: 3
-- `quota_limited`: 2
-- `dependency_blocked`: 1
+- `fallback_exhausted`: 31
+- `missing_credentials`: 8
+- `quota_limited`: 5
+- `dependency_blocked`: 4
+- `runner_failure`: 3
 
 ## Notes
 

@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-04-17T03:00:02.124567+00:00",
+  "generated_at": "2026-04-18T03:00:01.741806+00:00",
   "github": {
     "forks": 0,
     "open_issues": 8,
@@ -8,49 +8,47 @@
   },
   "momentum": {
     "current_week": {
-      "escalation_rate": 0.0,
-      "mean_completion_hours": 0.10482679738562091,
-      "success_rate": 1.0,
-      "successes": 17,
-      "total": 17
+      "escalation_rate": 0.5079365079365079,
+      "mean_completion_hours": 0.07788988095238095,
+      "success_rate": 0.65625,
+      "successes": 21,
+      "total": 32
     },
     "prior_week": {
       "escalation_rate": 0.0,
-      "mean_completion_hours": 0.10435648148148148,
-      "success_rate": 0.9375,
-      "successes": 30,
-      "total": 32
+      "mean_completion_hours": 0.11969270833333334,
+      "success_rate": 0.9411764705882353,
+      "successes": 32,
+      "total": 34
     }
   },
   "per_agent": [
     {
+      "agent": "claude",
+      "rate": 0.9183673469387755,
+      "successes": 45,
+      "total": 49
+    },
+    {
       "agent": "deepseek",
-      "rate": 1.0,
-      "successes": 3,
-      "total": 3
+      "rate": 0.625,
+      "successes": 5,
+      "total": 8
     },
     {
       "agent": "codex",
-      "rate": 1.0,
+      "rate": 0.4,
       "successes": 2,
-      "total": 2
+      "total": 5
     },
     {
-      "agent": "claude",
-      "rate": 0.9545454545454546,
-      "successes": 42,
-      "total": 44
+      "agent": "gemini",
+      "rate": 0.25,
+      "successes": 1,
+      "total": 4
     }
   ],
   "rolling_14_day": [
-    {
-      "blocked": 0,
-      "date": "2026-04-04",
-      "escalation_rate": 0.0,
-      "success_rate": 1.0,
-      "successes": 4,
-      "total": 4
-    },
     {
       "blocked": 0,
       "date": "2026-04-05",
@@ -148,8 +146,16 @@
       "total": 0
     },
     {
-      "blocked": 0,
+      "blocked": 32,
       "date": "2026-04-17",
+      "escalation_rate": 0.6667,
+      "success_rate": 0.2708,
+      "successes": 13,
+      "total": 48
+    },
+    {
+      "blocked": 0,
+      "date": "2026-04-18",
       "escalation_rate": null,
       "success_rate": null,
       "successes": 0,
@@ -159,9 +165,9 @@
   "sources": {
     "agent_stats": {
       "available": true,
-      "latest_timestamp": "2026-04-15T12:25:29.389902+00:00",
+      "latest_timestamp": "2026-04-17T21:01:45.022945+00:00",
       "path": "runtime/metrics/agent_stats.jsonl",
-      "records": 49
+      "records": 97
     },
     "production_feedback": {
       "available": true,
@@ -171,29 +177,37 @@
   },
   "summary": {
     "escalation_rate": {
-      "escalated": 0,
-      "rate": 0.0,
-      "total": 49
+      "escalated": 32,
+      "rate": 0.32989690721649484,
+      "total": 97
     },
-    "mean_completion_time_hours": 0.10452659574468084,
+    "mean_completion_time_hours": 0.10018472222222223,
     "task_success_rate": {
-      "rate": 0.9591836734693877,
-      "successes": 47,
-      "total": 49
+      "rate": 0.803030303030303,
+      "successes": 53,
+      "total": 66
     }
   },
   "top_blockers": [
     {
+      "code": "fallback_exhausted",
+      "count": 31
+    },
+    {
       "code": "missing_credentials",
-      "count": 3
+      "count": 8
     },
     {
       "code": "quota_limited",
-      "count": 2
+      "count": 5
     },
     {
       "code": "dependency_blocked",
-      "count": 1
+      "count": 4
+    },
+    {
+      "code": "runner_failure",
+      "count": 3
     }
   ],
   "window_days": 14
