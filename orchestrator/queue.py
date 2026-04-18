@@ -2274,9 +2274,26 @@ def fallback_cooldown_remaining(cfg: dict) -> int:
 
 
 def start_fallback_cooldown(cfg: dict, minutes: int = FALLBACK_COOLDOWN_MINUTES) -> datetime:
-    """Arm the cooldown; returns the expiry timestamp."""
-    until = datetime.now(timezone.utc) + timedelta(minutes=minutes)
-    _cooldown_path(cfg).write_text(until.isoformat(), encoding="utf-8")
+    """Arm the cooldown if not already active; returns the active expiry timestamp.
+
+    Idempotent: workers that race into the exhausted branch simultaneously
+    will all see the same expiry rather than each extending the window. This
+    is what stops 'one telegram per worker' spam — combined with the
+    prior_cooldown==0 debounce in the caller, only the first arming sends.
+    """
+    path = _cooldown_path(cfg)
+    now = datetime.now(timezone.utc)
+    if path.exists():
+        try:
+            existing = datetime.fromisoformat(path.read_text(encoding="utf-8").strip())
+            if existing.tzinfo is None:
+                existing = existing.replace(tzinfo=timezone.utc)
+            if existing > now:
+                return existing
+        except (ValueError, OSError):
+            pass
+    until = now + timedelta(minutes=minutes)
+    path.write_text(until.isoformat(), encoding="utf-8")
     return until
 
 
@@ -2763,12 +2780,18 @@ def main():
                     QUEUE_SUMMARY_LOG,
                 )
         elif final_result["status"] in ("partial", "blocked"):
+            # Suppress per-task Partial/Blocked telegrams when the cause is
+            # fallback_exhausted — that case already emits the consolidated
+            # "🧊 Fallback cooldown" telegram (debounced once per cooldown
+            # window). Sending both per-task spams the channel.
+            suppress_partial_telegram = final_result.get("blocker_code") == "fallback_exhausted"
             github_followup_url = sync_info.get("followup_issue_url")
             if github_followup_url:
                 log("Final queue state: blocked", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
                 shutil.move(str(processing), str(BLOCKED / processing.name))
-                send_telegram(
-                    cfg,
+                if not suppress_partial_telegram:
+                    send_telegram(
+                        cfg,
                         f"⏸️ Partial/Blocked\nTask: {task_id}\nRepo: {repo.name}\nBranch: {branch}\nLast model: {final_agent}\nModels tried: {', '.join(model_attempts)}\nNext: {final_result['next_step']}\nFollow-up: {github_followup_url}",
                         logfile,
                         QUEUE_SUMMARY_LOG,
@@ -2782,12 +2805,13 @@ def main():
                 )
                 log("Final queue state: blocked", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
                 shutil.move(str(processing), str(BLOCKED / processing.name))
-                send_telegram(
-                    cfg,
-                    f"⏸️ Partial/Blocked\nTask: {task_id}\nRepo: {repo.name}\nBranch: {branch}\nLast model: {final_agent}\nModels tried: {', '.join(model_attempts)}\nNext: {final_result['next_step']}\nAutomation: dispatcher_only (manual requeue required)",
-                    logfile,
-                    QUEUE_SUMMARY_LOG,
-                )
+                if not suppress_partial_telegram:
+                    send_telegram(
+                        cfg,
+                        f"⏸️ Partial/Blocked\nTask: {task_id}\nRepo: {repo.name}\nBranch: {branch}\nLast model: {final_agent}\nModels tried: {', '.join(model_attempts)}\nNext: {final_result['next_step']}\nAutomation: dispatcher_only (manual requeue required)",
+                        logfile,
+                        QUEUE_SUMMARY_LOG,
+                    )
             else:
                 followup = create_followup_task(
                     meta,
@@ -2802,12 +2826,13 @@ def main():
                 if followup is not None:
                     log("Final queue state: blocked", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
                     shutil.move(str(processing), str(BLOCKED / processing.name))
-                    send_telegram(
-                        cfg,
-                        f"⏸️ Partial/Blocked\nTask: {task_id}\nRepo: {repo.name}\nBranch: {branch}\nLast model: {final_agent}\nModels tried: {', '.join(model_attempts)}\nNext: {final_result['next_step']}\nFollow-up: {followup.name}",
-                        logfile,
-                        QUEUE_SUMMARY_LOG,
-                    )
+                    if not suppress_partial_telegram:
+                        send_telegram(
+                            cfg,
+                            f"⏸️ Partial/Blocked\nTask: {task_id}\nRepo: {repo.name}\nBranch: {branch}\nLast model: {final_agent}\nModels tried: {', '.join(model_attempts)}\nNext: {final_result['next_step']}\nFollow-up: {followup.name}",
+                            logfile,
+                            QUEUE_SUMMARY_LOG,
+                        )
                 else:
                     esc = create_escalation_note(meta, body, final_result, logfile, model_attempts, ESCALATED, QUEUE_SUMMARY_LOG)
                     log("No follow-up created. Final queue state: escalated", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
