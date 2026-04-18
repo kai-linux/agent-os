@@ -26,6 +26,7 @@ from orchestrator.queue import (
     agent_available,
     build_escalation_message,
     create_followup_task,
+    downgrade_no_diff_complete,
     fallback_cooldown_remaining,
     get_agent_chain,
     handle_telegram_callback,
@@ -1747,3 +1748,59 @@ def test_fallback_cooldown_expires(tmp_path):
     state_file.write_text((datetime.now(timezone.utc) - timedelta(seconds=30)).isoformat(),
                           encoding="utf-8")
     assert fallback_cooldown_remaining(cfg) == 0
+
+
+# ---------------------------------------------------------------------------
+# downgrade_no_diff_complete
+# ---------------------------------------------------------------------------
+
+def _complete_result():
+    return {
+        "status": "complete",
+        "summary": "Implemented the feature.",
+        "done": ["- Wrote code."],
+        "blockers": [],
+        "next_step": "None",
+        "files_changed": ["- foo.py"],
+        "tests_run": ["- pytest"],
+        "decisions": ["- Chose X over Y"],
+        "risks": ["- None"],
+        "attempted_approaches": ["- Direct"],
+        "raw": "STATUS: complete\n",
+    }
+
+
+def test_downgrade_no_diff_complete_implementation_downgrades():
+    meta = {"task_type": "implementation"}
+    result = _complete_result()
+    out = downgrade_no_diff_complete(meta, result, "gemini")
+    assert out is not result
+    assert out["status"] == "partial"
+    assert out["blocker_code"] == "no_diff_produced"
+    assert "gemini" in out["summary"]
+    assert any("STATUS: complete" in b for b in out["blockers"])
+    assert out["unblock_notes"]["blocking_cause"] == out["summary"]
+
+
+def test_downgrade_no_diff_complete_research_passes_through():
+    meta = {"task_type": "research"}
+    result = _complete_result()
+    out = downgrade_no_diff_complete(meta, result, "claude")
+    assert out is result
+    assert out["status"] == "complete"
+
+
+def test_downgrade_no_diff_complete_already_partial_unchanged():
+    meta = {"task_type": "debugging"}
+    result = _complete_result()
+    result["status"] = "partial"
+    result["blocker_code"] = "test_failure"
+    out = downgrade_no_diff_complete(meta, result, "codex")
+    assert out is result
+
+
+def test_downgrade_no_diff_complete_unknown_task_type_passes_through():
+    meta = {"task_type": "exploration"}
+    result = _complete_result()
+    out = downgrade_no_diff_complete(meta, result, "claude")
+    assert out is result

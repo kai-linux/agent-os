@@ -42,8 +42,20 @@ BLOCKER_CODE_DESCRIPTIONS = {
     "fallback_exhausted": "All configured automated fallback attempts were exhausted.",
     "invalid_result_contract": "The worker produced an invalid or missing task outcome contract.",
     "push_not_ready": "Task requires git publish capability but push-readiness checks failed.",
+    "no_diff_produced": "The agent claimed completion but produced no file changes for a task type that requires a diff.",
 }
 VALID_BLOCKER_CODES = set(BLOCKER_CODE_DESCRIPTIONS)
+# Task types where status=complete is meaningless without an accompanying
+# diff. Investigative types (research, architecture) can legitimately conclude
+# with only a result-contract summary, so they are excluded.
+DIFF_REQUIRED_TASK_TYPES = frozenset({
+    "implementation",
+    "debugging",
+    "docs",
+    "content",
+    "design",
+    "browser_automation",
+})
 PROMPT_INSPECTION_BLOCKER_CODES = {"invalid_result_contract"}
 _CI_REMEDIATION_TITLE_RE = re.compile(r"^fix ci failure on pr #(\d+)$", re.IGNORECASE)
 _CI_REMEDIATION_PR_RE = re.compile(r"\bPR\s*#(\d+)\b", re.IGNORECASE)
@@ -2268,6 +2280,46 @@ def start_fallback_cooldown(cfg: dict, minutes: int = FALLBACK_COOLDOWN_MINUTES)
     return until
 
 
+def downgrade_no_diff_complete(meta: dict, final_result: dict, agent: str | None) -> dict:
+    """Downgrade status=complete to partial when a diff-required task produced no changes.
+
+    Some agents (notably gemini in observed runs) report STATUS: complete even
+    when they wrote nothing to the worktree, leading the orchestrator to close
+    issues with no actual work delivered. For task types that should produce
+    a diff, treat zero-change "complete" as partial with a no_diff_produced
+    blocker so the issue stays open and gets re-attempted.
+    """
+    task_type = str(meta.get("task_type", "") or "").strip().lower()
+    if task_type not in DIFF_REQUIRED_TASK_TYPES:
+        return final_result
+    if final_result.get("status") != "complete":
+        return final_result
+
+    agent_label = agent or "unknown"
+    summary = (
+        f"Agent {agent_label} reported STATUS: complete but produced no file "
+        f"changes for a {task_type} task."
+    )
+    next_step = (
+        "Re-dispatch the task. If this recurs, inspect the agent transcript for "
+        "tooling failures (e.g. missing write_file/run_shell_command) or refine "
+        "the task brief so the expected diff is unambiguous."
+    )
+    downgraded = dict(final_result)
+    downgraded["status"] = "partial"
+    downgraded["blocker_code"] = "no_diff_produced"
+    downgraded["summary"] = summary
+    downgraded["blockers"] = list(final_result.get("blockers") or []) + [
+        f"- No file changes were committed despite STATUS: complete (agent={agent_label})."
+    ]
+    downgraded["next_step"] = next_step
+    downgraded["unblock_notes"] = {
+        "blocking_cause": summary,
+        "next_action": next_step,
+    }
+    return downgraded
+
+
 def synthesize_exhausted_result(model_attempts: list[str]) -> dict:
     return {
         "status": "blocked",
@@ -2600,6 +2652,16 @@ def main():
                 log(f"Final commit hash: {commit_hash}", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
             else:
                 log("Task completed but nothing changed, so no commit/push happened.", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
+                if final_result is not None:
+                    downgraded = downgrade_no_diff_complete(meta, final_result, final_agent)
+                    if downgraded is not final_result:
+                        final_result = downgraded
+                        log(
+                            f"Downgraded STATUS: complete → partial (no_diff_produced) for {meta.get('task_type')} task; agent did not write any files.",
+                            logfile,
+                            also_summary=True,
+                            queue_summary_log=QUEUE_SUMMARY_LOG,
+                        )
         except WorkflowValidationError as e:
             push_validation_error = str(e)
             final_result = {
