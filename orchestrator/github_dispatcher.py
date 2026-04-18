@@ -359,7 +359,18 @@ def _validated_agent_assignment(cfg: dict, project_key: str, task_type: str, req
             passed=chain,
             context=f"dispatcher:resolve_agent task_type={task_type}",
         )
-    healthy_chain, skipped_agents = filter_healthy_agents(chain, metrics_file, task_type=task_type, min_task_count=5)
+    # 24h dispatcher gate: with the chain trimmed to [claude, codex] one bad
+    # day at the prior 80% bar killed all dispatch. Lower to 50% and require
+    # 10 same-day samples so a small noisy window cannot gate everything out.
+    dispatcher_gate_threshold = 0.50
+    dispatcher_gate_min_tasks = 10
+    healthy_chain, skipped_agents = filter_healthy_agents(
+        chain,
+        metrics_file,
+        task_type=task_type,
+        threshold=dispatcher_gate_threshold,
+        min_task_count=dispatcher_gate_min_tasks,
+    )
     if not healthy_chain:
         skipped_summary = ", ".join(
             f"{agent} ({round(stats['rate'] * 100, 1)}% success over {stats['total']} task(s) in the last 24h)"
@@ -367,7 +378,8 @@ def _validated_agent_assignment(cfg: dict, project_key: str, task_type: str, req
         ) or "none"
         raise ValueError(
             f"No healthy agents available for task_type={task_type!r}. "
-            f"All configured candidates are at or below the >80% success-rate gate: {skipped_summary}."
+            f"All configured candidates are at or below the {round(dispatcher_gate_threshold * 100)}% "
+            f"success-rate gate (min {dispatcher_gate_min_tasks} tasks/24h): {skipped_summary}."
         )
 
     return requested_agent
