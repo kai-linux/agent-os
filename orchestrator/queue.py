@@ -2268,7 +2268,7 @@ def record_metrics(
     log(f"Metrics recorded for {record['task_id']}: status={record['status']}, agent={record['agent']}", logfile, queue_summary_log=queue_summary_log)
 
 
-FALLBACK_COOLDOWN_MINUTES = 15
+FALLBACK_COOLDOWN_MINUTES = 120
 FALLBACK_COOLDOWN_FILE = "fallback_cooldown_until.txt"
 
 
@@ -2517,7 +2517,7 @@ def main():
                     send_telegram(
                         cfg,
                         f"🧊 Fallback cooldown\nAll agents exhausted on {task_id} ({repo.name}).\n"
-                        f"Queue paused for {FALLBACK_COOLDOWN_MINUTES} min (until {until.strftime('%H:%M')} UTC).\n"
+                        f"Queue paused for {FALLBACK_COOLDOWN_MINUTES // 60}h{(' %dm' % (FALLBACK_COOLDOWN_MINUTES % 60)) if FALLBACK_COOLDOWN_MINUTES % 60 else ''} (until {until.strftime('%H:%M')} UTC).\n"
                         f"Models tried: {', '.join(model_attempts) or 'none'}",
                         logfile,
                         QUEUE_SUMMARY_LOG,
