@@ -2694,13 +2694,17 @@ def main():
             else:
                 log("Task completed but nothing changed, so no commit/push happened.", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
                 if final_result is not None:
-                    # If the branch already has commits ahead of base, a prior
-                    # run delivered the work and this run correctly did nothing.
-                    # Don't downgrade complete → partial in that case.
+                    # If the branch already has commits ahead of the REPO
+                    # default branch, a prior run delivered the work and this
+                    # run correctly did nothing. Don't downgrade. Using the
+                    # repo default (not meta["base_branch"]) because follow-ups
+                    # often inherit base_branch = <agent branch>, which would
+                    # make this check trivially compare HEAD against itself.
+                    repo_default = detect_default_branch(repo) or base_branch
                     branch_has_prior_work = False
                     try:
                         ahead = run(
-                            ["git", "rev-list", "--count", f"origin/{base_branch}..HEAD"],
+                            ["git", "rev-list", "--count", f"origin/{repo_default}..HEAD"],
                             cwd=worktree, logfile=logfile, queue_summary_log=QUEUE_SUMMARY_LOG,
                             check=False,
                         )
@@ -2710,7 +2714,7 @@ def main():
 
                     if branch_has_prior_work and final_result.get("status") == "complete":
                         log(
-                            f"Branch {branch} already has commits ahead of {base_branch}; treating no-diff complete as legitimate (prior-run work).",
+                            f"Branch {branch} already has commits ahead of {repo_default}; treating no-diff complete as legitimate (prior-run work).",
                             logfile,
                             also_summary=True,
                             queue_summary_log=QUEUE_SUMMARY_LOG,
