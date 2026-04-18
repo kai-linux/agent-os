@@ -2694,15 +2694,37 @@ def main():
             else:
                 log("Task completed but nothing changed, so no commit/push happened.", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
                 if final_result is not None:
-                    downgraded = downgrade_no_diff_complete(meta, final_result, final_agent)
-                    if downgraded is not final_result:
-                        final_result = downgraded
+                    # If the branch already has commits ahead of base, a prior
+                    # run delivered the work and this run correctly did nothing.
+                    # Don't downgrade complete → partial in that case.
+                    branch_has_prior_work = False
+                    try:
+                        ahead = run(
+                            ["git", "rev-list", "--count", f"origin/{base_branch}..HEAD"],
+                            cwd=worktree, logfile=logfile, queue_summary_log=QUEUE_SUMMARY_LOG,
+                            check=False,
+                        )
+                        branch_has_prior_work = int((ahead.stdout or "0").strip() or "0") > 0
+                    except Exception:
+                        branch_has_prior_work = False
+
+                    if branch_has_prior_work and final_result.get("status") == "complete":
                         log(
-                            f"Downgraded STATUS: complete → partial (no_diff_produced) for {meta.get('task_type')} task; agent did not write any files.",
+                            f"Branch {branch} already has commits ahead of {base_branch}; treating no-diff complete as legitimate (prior-run work).",
                             logfile,
                             also_summary=True,
                             queue_summary_log=QUEUE_SUMMARY_LOG,
                         )
+                    else:
+                        downgraded = downgrade_no_diff_complete(meta, final_result, final_agent)
+                        if downgraded is not final_result:
+                            final_result = downgraded
+                            log(
+                                f"Downgraded STATUS: complete → partial (no_diff_produced) for {meta.get('task_type')} task; agent did not write any files.",
+                                logfile,
+                                also_summary=True,
+                                queue_summary_log=QUEUE_SUMMARY_LOG,
+                            )
         except WorkflowValidationError as e:
             push_validation_error = str(e)
             final_result = {
