@@ -1970,7 +1970,11 @@ def create_followup_task(
         "attempt": next_attempt,
         "max_attempts": max_attempts,
         "max_runtime_minutes": max_runtime_minutes,
-        "model_attempts": model_attempts,
+        # Follow-ups are a NEW task (the parent's next_step), so every agent
+        # deserves a fresh attempt. Inheriting the parent's model_attempts
+        # caused cascades where a fallback_exhausted parent produced a
+        # follow-up that instantly exhausted again, spamming telegrams.
+        "model_attempts": [],
         "github_repo": original_meta.get("github_repo"),
         "github_issue_number": original_meta.get("github_issue_number"),
         "github_issue_url": original_meta.get("github_issue_url"),
