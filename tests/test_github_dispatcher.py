@@ -722,18 +722,15 @@ def test_build_mailbox_task_rejects_when_no_healthy_agent_available(tmp_path, mo
     metrics_dir = tmp_path / "runtime" / "metrics"
     metrics_dir.mkdir(parents=True)
     now = gd.datetime.now().isoformat()
-    records = [
-        {"timestamp": now, "agent": "codex", "status": "complete"},
-        {"timestamp": now, "agent": "codex", "status": "blocked"},
-        {"timestamp": now, "agent": "codex", "status": "blocked"},
-        {"timestamp": now, "agent": "codex", "status": "blocked"},
-        {"timestamp": now, "agent": "codex", "status": "blocked"},
-        {"timestamp": now, "agent": "claude", "status": "complete"},
-        {"timestamp": now, "agent": "claude", "status": "blocked"},
-        {"timestamp": now, "agent": "claude", "status": "blocked"},
-        {"timestamp": now, "agent": "claude", "status": "blocked"},
-        {"timestamp": now, "agent": "claude", "status": "blocked"},
-    ]
+    # Each agent: 2 complete + 10 blocked = 16.7% over 12 tasks. Crosses the
+    # genuinely-broken threshold (>=10 samples at <=50%) so Fix B's fail-open
+    # does NOT apply — dispatcher must raise.
+    records = (
+        [{"timestamp": now, "agent": "codex", "status": "complete"}] * 2 +
+        [{"timestamp": now, "agent": "codex", "status": "blocked"}] * 10 +
+        [{"timestamp": now, "agent": "claude", "status": "complete"}] * 2 +
+        [{"timestamp": now, "agent": "claude", "status": "blocked"}] * 10
+    )
     (metrics_dir / "agent_stats.jsonl").write_text(
         "".join(json.dumps(record) + "\n" for record in records),
         encoding="utf-8",
@@ -1116,18 +1113,14 @@ def test_dispatch_item_escalates_to_human_review_when_all_agents_unhealthy(tmp_p
     metrics_dir = tmp_path / "runtime" / "metrics"
     metrics_dir.mkdir(parents=True)
     now = gd.datetime.now().isoformat()
-    records = [
-        {"timestamp": now, "agent": "codex", "status": "complete"},
-        {"timestamp": now, "agent": "codex", "status": "blocked"},
-        {"timestamp": now, "agent": "codex", "status": "blocked"},
-        {"timestamp": now, "agent": "codex", "status": "blocked"},
-        {"timestamp": now, "agent": "codex", "status": "blocked"},
-        {"timestamp": now, "agent": "claude", "status": "complete"},
-        {"timestamp": now, "agent": "claude", "status": "blocked"},
-        {"timestamp": now, "agent": "claude", "status": "blocked"},
-        {"timestamp": now, "agent": "claude", "status": "blocked"},
-        {"timestamp": now, "agent": "claude", "status": "blocked"},
-    ]
+    # 12 samples per agent at ~17% success — crosses the >=10-sample genuinely-
+    # broken threshold so the dispatcher still escalates instead of failing open.
+    records = (
+        [{"timestamp": now, "agent": "codex", "status": "complete"}] * 2 +
+        [{"timestamp": now, "agent": "codex", "status": "blocked"}] * 10 +
+        [{"timestamp": now, "agent": "claude", "status": "complete"}] * 2 +
+        [{"timestamp": now, "agent": "claude", "status": "blocked"}] * 10
+    )
     (metrics_dir / "agent_stats.jsonl").write_text(
         "".join(json.dumps(record) + "\n" for record in records),
         encoding="utf-8",

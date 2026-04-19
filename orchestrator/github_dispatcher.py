@@ -341,6 +341,7 @@ def _validated_agent_assignment(cfg: dict, project_key: str, task_type: str, req
         )
 
     metrics_file = Path(cfg.get("root_dir", ".")).expanduser() / "runtime" / "metrics" / "agent_stats.jsonl"
+    original_chain = list(chain)
     # Adaptive gate: skip agents with <25% success rate over 7 days
     chain, adaptive_skipped = filter_healthy_agents(
         chain,
@@ -372,14 +373,39 @@ def _validated_agent_assignment(cfg: dict, project_key: str, task_type: str, req
         min_task_count=dispatcher_gate_min_tasks,
     )
     if not healthy_chain:
+        # Fix B: fail open only when uninformed, not when agents are
+        # genuinely broken. If any agent was stripped with stats >=
+        # min_task_count at a rate <= threshold, treat that as a real
+        # signal and escalate. If the chain only emptied because of
+        # low-sample / scoped-task-type gaps (total < min_task_count),
+        # dispatch anyway — starving the backlog is worse than trying.
+        combined_skipped = {**adaptive_skipped, **skipped_agents}
+        genuinely_broken = any(
+            stats.get("total", 0) >= dispatcher_gate_min_tasks
+            for stats in combined_skipped.values()
+        )
         skipped_summary = ", ".join(
             f"{agent} ({round(stats['rate'] * 100, 1)}% success over {stats['total']} task(s) in the last 24h)"
             for agent, stats in skipped_agents.items()
         ) or "none"
-        raise ValueError(
-            f"No healthy agents available for task_type={task_type!r}. "
-            f"All configured candidates are at or below the {round(dispatcher_gate_threshold * 100)}% "
-            f"success-rate gate (min {dispatcher_gate_min_tasks} tasks/24h): {skipped_summary}."
+        if genuinely_broken:
+            raise ValueError(
+                f"No healthy agents available for task_type={task_type!r}. "
+                f"All configured candidates are at or below the {round(dispatcher_gate_threshold * 100)}% "
+                f"success-rate gate (min {dispatcher_gate_min_tasks} tasks/24h): {skipped_summary}."
+            )
+        print(
+            f"Warning: gates emptied the chain for task_type={task_type!r} "
+            f"({skipped_summary}) but no agent has >={dispatcher_gate_min_tasks} "
+            f"samples. Failing open with original chain {original_chain} to "
+            f"avoid backlog starvation (Fix B)."
+        )
+        log_gate_decision(
+            metrics_file.parent,
+            gate="dispatcher_fail_open_insufficient_signal",
+            skipped=combined_skipped,
+            passed=original_chain,
+            context=f"dispatcher:resolve_agent task_type={task_type}",
         )
 
     return requested_agent

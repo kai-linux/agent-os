@@ -1,6 +1,7 @@
 """PR monitor: polls CI status for agent-created PRs and auto-merges on green."""
 from __future__ import annotations
 
+import functools
 import json
 import re
 import subprocess
@@ -454,6 +455,23 @@ def _missing_checks_stub() -> list[dict]:
         "bucket": "fail",
         "link": "",
     }]
+
+
+@functools.lru_cache(maxsize=64)
+def _repo_has_active_workflows(repo: str) -> bool:
+    """True if the repo has at least one active GitHub Actions workflow.
+
+    Cached for the process lifetime (one PR-monitor cron invocation), which
+    is short-lived enough that workflow adds take effect on the next run.
+    """
+    try:
+        data = gh_json([
+            "api", f"repos/{repo}/actions/workflows", "--jq", "{workflows}",
+        ]) or {}
+    except Exception:
+        return True  # fail-safe: assume workflows exist so escalations still fire
+    workflows = data.get("workflows") or []
+    return any((w.get("state") or "").lower() == "active" for w in workflows)
 
 
 def _find_repo_project(cfg: dict, repo: str) -> tuple[str, dict, dict] | tuple[None, None, None]:
@@ -1225,6 +1243,13 @@ def monitor_prs():
             continue
         print(f"{repo}: found {len(prs)} agent PR(s)")
 
+        # Repos without any CI workflow cannot produce checks — the "required
+        # checks missing" escalation path would spam forever. Detect once per
+        # repo per poll and suppress the missing-checks escalation there.
+        repo_has_workflows = _repo_has_active_workflows(repo)
+        if not repo_has_workflows:
+            print(f"  {repo}: no active workflows — missing-checks escalations suppressed")
+
         for pr in prs:
             pr_url = pr["url"]
             pr_number = pr["number"]
@@ -1245,6 +1270,16 @@ def monitor_prs():
                 _save_state(paths, state)
 
             if not checks:
+                if not repo_has_workflows:
+                    # No CI configured — nothing to wait for, nothing to escalate.
+                    # Reset any stale counter so re-adding CI later starts clean.
+                    if pr_state.get("no_checks_polls") or pr_state.get("attempts"):
+                        pr_state.pop("no_checks_polls", None)
+                        pr_state["attempts"] = 0
+                        _save_state(paths, state)
+                    print(f"  PR #{pr_number}: no checks and repo has no workflows — skipping")
+                    continue
+
                 no_checks_polls = pr_state.get("no_checks_polls", 0) + 1
                 pr_state["no_checks_polls"] = no_checks_polls
                 _save_state(paths, state)
