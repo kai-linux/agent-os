@@ -1761,7 +1761,8 @@ def _dispatch_item(cfg, paths, owner, repo_to_project, info, ready_items, issue_
         # Per-repo Telegram switch — operator can pause a single repo without
         # touching config or the global kill-switch.
         from orchestrator.control_state import is_repo_disabled
-        if is_repo_disabled(paths["ROOT"], rcfg.get("key", "")):
+        root = paths.get("ROOT")
+        if root and is_repo_disabled(root, rcfg.get("key", "")):
             print(f"Skipped {repo_full}#{item['number']} — repo disabled via /repo off")
             continue
 
@@ -1989,10 +1990,11 @@ def dispatch_one():
     if not graphql_ok:
         print("Falling back to label-based dispatch...")
         from orchestrator.control_state import is_repo_disabled
+        root = paths.get("ROOT")
         for project_key, project_cfg in cfg["github_projects"].items():
             for repo_cfg in project_cfg.get("repos", []):
                 repo_full = repo_cfg["github_repo"]
-                if is_repo_disabled(paths["ROOT"], repo_cfg.get("key", "")):
+                if root and is_repo_disabled(root, repo_cfg.get("key", "")):
                     print(f"Skipped {repo_full} — repo disabled via /repo off")
                     continue
                 issues = list_ready_issues(repo_full, limit=20)
