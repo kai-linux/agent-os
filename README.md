@@ -306,6 +306,19 @@ reviewing CI, and merging changes with zero human intervention per task.
 **[Case study →](docs/case-study-agent-os.md)** ·
 [GitHub Discussion](https://github.com/kai-linux/agent-os/discussions/167)
 
+Agent OS manages its own development. In 23 days it shipped 59 merged PRs,
+closed 79 issues, and produced 275 commits — autonomously dispatching tasks,
+reviewing CI, and merging changes with zero human intervention per task.
+
+**[Read the full case study →](docs/case-study-agent-os.md)**
+
+| Metric | Value |
+|---|---|
+| Issues closed | 79 of 86 (92%) |
+| PRs merged | 59 of 65 (91%) |
+| Commits | 275 in 23 days (~12/day) |
+| Agent tasks executed | 122 (55.7% first-attempt success) |
+
 ---
 
 ## Documentation
@@ -318,6 +331,7 @@ reviewing CI, and merging changes with zero human intervention per task.
 | Configuration, objectives, evidence, cron setup | [docs/configuration.md](docs/configuration.md) |
 | Roadmap and capability ladder | [docs/roadmap.md](docs/roadmap.md) |
 | Case study: self-managed repo | [docs/case-study-agent-os.md](docs/case-study-agent-os.md) |
+
 | Public reliability dashboard | [docs/reliability/README.md](docs/reliability/README.md) |
 | Case study discussion | [GitHub Discussions #167](https://github.com/kai-linux/agent-os/discussions/167) |
 
@@ -332,3 +346,4 @@ reviewing CI, and merging changes with zero human intervention per task.
 **Questions?** — open a [discussion](https://github.com/kai-linux/agent-os/discussions) or reach out via the repo.
 
 If Agent OS is interesting to you, **[give it a star](https://github.com/kai-linux/agent-os)**. It helps others find the project.
+
