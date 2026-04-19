@@ -219,6 +219,17 @@ bin/agentos status    # show current state
 
 When OFF, cron jobs still fire on schedule but exit immediately (exit 0, cron-silent). Interactive runs that need to bypass the switch can set `AGENT_OS_IGNORE_DISABLED=1`.
 
+**From Telegram.** The existing bot doubles as a control tower — the same chat that receives escalations and digests accepts commands:
+
+| Command | Effect |
+|---|---|
+| `/on` | remove the kill-switch — cron resumes on next tick |
+| `/off` | engage the kill-switch — pause the orchestrator |
+| `/status` | report current ON/OFF state |
+| `/help` | list commands |
+
+A dedicated poller (`bin/run_telegram_control.sh`) runs every minute with `AGENT_OS_IGNORE_DISABLED=1` so `/on` still reaches the orchestrator while it is paused.
+
 ---
 
 ## How It Works

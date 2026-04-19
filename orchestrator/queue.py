@@ -1067,6 +1067,77 @@ def handle_telegram_callback(
     return {"text": result_text, "show_alert": False, "remove_keyboard": True}
 
 
+def _kill_switch_path(paths: dict) -> Path:
+    return paths["ROOT"] / "runtime" / "state" / "disabled"
+
+
+def _kill_switch_state(paths: dict) -> tuple[bool, str]:
+    """Returns (is_disabled, since_or_empty)."""
+    path = _kill_switch_path(paths)
+    if not path.exists():
+        return False, ""
+    try:
+        since = path.read_text(encoding="utf-8").strip()
+    except Exception:
+        since = ""
+    return True, since
+
+
+def handle_telegram_command(
+    cfg: dict,
+    paths: dict,
+    text: str,
+    logfile: Path | None = None,
+    queue_summary_log: Path | None = None,
+) -> str | None:
+    """Handle a Telegram text command. Returns a reply string, or None to ignore."""
+    raw = (text or "").strip()
+    if not raw.startswith("/"):
+        return None
+    # Strip leading slash and any bot username suffix ("/off@agentos_bot arg").
+    first = raw.split()[0][1:]
+    command = first.split("@", 1)[0].lower()
+
+    if command in {"off", "disable", "stop"}:
+        disabled, _ = _kill_switch_state(paths)
+        if disabled:
+            return "🔴 Agent-OS already OFF."
+        switch = _kill_switch_path(paths)
+        switch.parent.mkdir(parents=True, exist_ok=True)
+        switch.write_text(
+            datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S%z"),
+            encoding="utf-8",
+        )
+        log("Telegram command: kill-switch engaged (off)", logfile, queue_summary_log=queue_summary_log)
+        return "🔴 Agent-OS OFF — cron entrypoints will exit early until /on."
+
+    if command in {"on", "enable", "start"}:
+        switch = _kill_switch_path(paths)
+        if switch.exists():
+            switch.unlink()
+            log("Telegram command: kill-switch cleared (on)", logfile, queue_summary_log=queue_summary_log)
+            return "🟢 Agent-OS ON — cron will resume on next tick."
+        return "🟢 Agent-OS already ON."
+
+    if command == "status":
+        disabled, since = _kill_switch_state(paths)
+        if disabled:
+            since_txt = f" since {since}" if since else ""
+            return f"🔴 Agent-OS OFF{since_txt}."
+        return "🟢 Agent-OS ON."
+
+    if command == "help":
+        return (
+            "Agent-OS control:\n"
+            "/on — enable orchestrator\n"
+            "/off — disable orchestrator (kill-switch)\n"
+            "/status — show current state\n"
+            "/help — this message"
+        )
+
+    return None
+
+
 def process_telegram_callbacks(
     cfg: dict,
     paths: dict,
@@ -1088,6 +1159,21 @@ def process_telegram_callbacks(
     max_update_id = last_update_id
     for update in updates:
         max_update_id = max(max_update_id, int(update.get("update_id", 0)))
+
+        # Handle /commands from the authorized chat (control-tower mode).
+        message = update.get("message") or {}
+        message_text = str(message.get("text", "")).strip()
+        message_chat = str((message.get("chat") or {}).get("id", ""))
+        if message_text.startswith("/") and message_chat == chat_id:
+            try:
+                reply = handle_telegram_command(cfg, paths, message_text, logfile, queue_summary_log)
+                if reply is not None:
+                    send_telegram(cfg, reply, logfile, queue_summary_log)
+            except Exception as e:
+                log(f"Telegram command handling failed: {e}", logfile, queue_summary_log=queue_summary_log)
+                send_telegram(cfg, f"Command failed: {e}", logfile, queue_summary_log)
+            continue
+
         callback = update.get("callback_query") or {}
         if not callback:
             continue
