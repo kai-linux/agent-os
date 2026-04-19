@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# agentos — turn the whole orchestrator on/off in one command.
+#
+# Usage:
+#   agentos off      # create the kill-switch; all cron entrypoints exit early
+#   agentos on       # remove the kill-switch; cron jobs run normally
+#   agentos status   # report current state
+#
+# The switch is a single file: runtime/state/disabled. Every bin/run_*.sh
+# sources common_env.sh, which checks for this file and exits early if
+# present. Your crontab stays untouched — no editing required.
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SWITCH="$ROOT/runtime/state/disabled"
+
+cmd="${1:-status}"
+
+case "$cmd" in
+  off|disable|stop)
+    mkdir -p "$(dirname "$SWITCH")"
+    date '+%Y-%m-%dT%H:%M:%S%z' > "$SWITCH"
+    echo "agent-os: OFF (kill-switch at $SWITCH)"
+    ;;
+  on|enable|start)
+    if [[ -f "$SWITCH" ]]; then
+      rm -f "$SWITCH"
+      echo "agent-os: ON (kill-switch removed)"
+    else
+      echo "agent-os: already ON"
+    fi
+    ;;
+  status)
+    if [[ -f "$SWITCH" ]]; then
+      echo "agent-os: OFF (disabled since $(cat "$SWITCH"))"
+    else
+      echo "agent-os: ON"
+    fi
+    ;;
+  *)
+    echo "usage: agentos {on|off|status}" >&2
+    exit 2
+    ;;
+esac

@@ -9,6 +9,16 @@ export AGENT_OS_COMMON_ENV_LOADED=1
 ROOT="${ORCH_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 export ORCH_ROOT="$ROOT"
 
+# Kill-switch: if this file exists, every cron entrypoint exits early
+# without running anything. Toggle with bin/agentos (on|off|status).
+# Bypass for interactive/manual runs by setting AGENT_OS_IGNORE_DISABLED=1.
+if [[ -z "${AGENT_OS_IGNORE_DISABLED:-}" && -f "$ROOT/runtime/state/disabled" ]]; then
+  if [[ -t 2 ]]; then
+    printf '[agent-os] disabled (runtime/state/disabled present) — exiting.\n' >&2
+  fi
+  exit 0
+fi
+
 append_path() {
   local dir="$1"
   [[ -d "$dir" ]] || return 0
