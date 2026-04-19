@@ -243,6 +243,8 @@ A dedicated poller (`bin/run_telegram_control.sh`) runs every minute with `AGENT
 
 `/repo mode` and `/repo cadence` are the only commands that touch `config.yaml`; both do surgical line edits that preserve comments.
 
+**Secret guard.** A `hooks/pre-commit` hook blocks commits to `config.yaml` or `objectives/*.yaml` (except `objectives/example.yaml`) and rejects any staged diff containing a Telegram-bot-token shape. Enable once with `git config core.hooksPath hooks`.
+
 ---
 
 ## How It Works

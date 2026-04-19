@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# agent-os pre-commit guard
+#
+# Blocks two specific failure modes that have burned us before:
+#   1. Committing config.yaml or objectives/*.yaml (they hold bot tokens, repo
+#      tokens, project IDs). Only objectives/example.yaml is allowed.
+#   2. Any staged diff line that matches a Telegram-bot-token shape
+#      (digits ":" 35-char base64ish), regardless of file.
+#
+# Bypass with `git commit --no-verify` only when you are sure.
+
+set -u
+
+red()   { printf '\033[31m%s\033[0m\n' "$*" >&2; }
+yellow(){ printf '\033[33m%s\033[0m\n' "$*" >&2; }
+
+fail=0
+
+mapfile -t staged < <(git diff --cached --name-only --diff-filter=ACMR)
+
+for f in "${staged[@]}"; do
+  case "$f" in
+    config.yaml|config.yml)
+      red "✖ refusing to commit $f — secrets file (rotate via .gitignore + local-only)."
+      fail=1
+      ;;
+    objectives/*.yaml|objectives/*.yml)
+      if [[ "$f" != "objectives/example.yaml" && "$f" != "objectives/example.yml" ]]; then
+        red "✖ refusing to commit $f — objectives carry repo tokens. Only objectives/example.yaml is allowed."
+        fail=1
+      fi
+      ;;
+  esac
+done
+
+# Token-shape scan over the staged diff itself. -U0 keeps the diff small and
+# avoids matching unchanged context lines.
+diff_blob="$(git diff --cached -U0 --no-color)"
+if [[ -n "$diff_blob" ]]; then
+  # Telegram bot token: 9-10 digit bot id, ":", 35 chars of [A-Za-z0-9_-].
+  # Only inspect added lines (leading "+", but not the "+++ b/file" header).
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^\+[^+] ]]; then
+      if [[ "$line" =~ [0-9]{9,10}:[A-Za-z0-9_-]{35} ]]; then
+        red "✖ staged diff contains what looks like a Telegram bot token."
+        red "   line: ${line:0:120}"
+        fail=1
+        break
+      fi
+    fi
+  done <<< "$diff_blob"
+fi
+
+if [[ "$fail" -ne 0 ]]; then
+  yellow ""
+  yellow "If this is a false positive, rerun with: git commit --no-verify"
+  exit 1
+fi
+exit 0
