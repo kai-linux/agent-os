@@ -207,6 +207,20 @@ Once cron is running, the system dispatches, executes, reviews, and merges auton
 
 ---
 
+## Pause & Resume
+
+One command stops or restarts the whole orchestrator — no crontab editing, no process hunting. Every cron entrypoint sources `bin/common_env.sh`, which bails out early when a kill-switch file exists.
+
+```bash
+bin/agentos off       # pause all dispatch, queue, PR-monitor, groomer, etc.
+bin/agentos on        # resume
+bin/agentos status    # show current state
+```
+
+When OFF, cron jobs still fire on schedule but exit immediately (exit 0, cron-silent). Interactive runs that need to bypass the switch can set `AGENT_OS_IGNORE_DISABLED=1`.
+
+---
+
 ## How It Works
 
 | Component | Role | Cadence |
