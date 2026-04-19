@@ -1206,12 +1206,22 @@ def monitor_prs():
     paths = runtime_paths(cfg)
     state = _load_state(paths)
 
+    from orchestrator.control_state import is_repo_disabled
+    root = paths.get("ROOT")
+
     repos: set[str] = set()
     for project_cfg in cfg.get("github_projects", {}).values():
         for repo_cfg in project_cfg.get("repos", []):
             r = repo_cfg.get("github_repo")
-            if r and not is_dispatcher_only_repo(cfg, r):
-                repos.add(r)
+            if not r or is_dispatcher_only_repo(cfg, r):
+                continue
+            # Honor /repo off — don't monitor PRs on paused repos. pr_monitor's
+            # "required checks missing" path would otherwise spam Telegram for
+            # repos the operator explicitly turned off.
+            if root and is_repo_disabled(root, repo_cfg.get("key", "")):
+                print(f"Skipping {r} — repo disabled via /repo off")
+                continue
+            repos.add(r)
 
     if not repos:
         print("No repos configured in github_projects. Nothing to monitor.")
@@ -1278,6 +1288,18 @@ def monitor_prs():
                         pr_state["attempts"] = 0
                         _save_state(paths, state)
                     print(f"  PR #{pr_number}: no checks and repo has no workflows — skipping")
+                    continue
+
+                # Unmergeable PRs (conflicts with base) won't auto-merge regardless
+                # of CI. Escalating "required checks missing" here just spams — the
+                # real next step is conflict resolution, which is handled elsewhere.
+                merge_state = str(pr.get("mergeStateStatus", "")).upper()
+                if merge_state in ("DIRTY", "CONFLICTING"):
+                    if pr_state.get("no_checks_polls") or pr_state.get("attempts"):
+                        pr_state.pop("no_checks_polls", None)
+                        pr_state["attempts"] = 0
+                        _save_state(paths, state)
+                    print(f"  PR #{pr_number}: no checks but PR is {merge_state} — skipping missing-checks escalation")
                     continue
 
                 no_checks_polls = pr_state.get("no_checks_polls", 0) + 1

@@ -947,6 +947,24 @@ def _escalate_over_retried_blocked_tasks(cfg: dict, paths: dict) -> bool:
             shutil.move(str(task_path), str(paths["DONE"] / task_path.name))
             print(f"Skipped escalation for dispatcher-only repo {repo_full}: {task_path.stem}")
             continue
+
+        # Skip escalation when the repo has been paused via /repo off. Leave the
+        # task in BLOCKED so it can be reconsidered after the operator re-enables
+        # the repo — don't move to DONE (the kill-switch is meant to be temporary).
+        from orchestrator.control_state import is_repo_disabled
+        root = paths.get("ROOT")
+        repo_cfg_key = ""
+        for _pk, _pcfg in cfg.get("github_projects", {}).items():
+            for _rcfg in _pcfg.get("repos", []):
+                if _rcfg.get("github_repo") == repo_full:
+                    repo_cfg_key = _rcfg.get("key", "")
+                    break
+            if repo_cfg_key:
+                break
+        if root and repo_cfg_key and is_repo_disabled(root, repo_cfg_key):
+            print(f"Skipped escalation for {repo_full} — repo disabled via /repo off: {task_path.stem}")
+            continue
+
         try:
             snapshot = gh_json(["issue", "view", str(issue_number), "-R", repo_full, "--json", "state"]) or {}
             if str(snapshot.get("state", "")).upper() == "CLOSED":
