@@ -1279,17 +1279,8 @@ def monitor_prs():
             if _reconcile_open_pr_state(cfg, repo, pr, checks, state):
                 _save_state(paths, state)
 
+            no_ci_merge_ok = False
             if not checks:
-                if not repo_has_workflows:
-                    # No CI configured — nothing to wait for, nothing to escalate.
-                    # Reset any stale counter so re-adding CI later starts clean.
-                    if pr_state.get("no_checks_polls") or pr_state.get("attempts"):
-                        pr_state.pop("no_checks_polls", None)
-                        pr_state["attempts"] = 0
-                        _save_state(paths, state)
-                    print(f"  PR #{pr_number}: no checks and repo has no workflows — skipping")
-                    continue
-
                 # Unmergeable PRs (conflicts with base) won't auto-merge regardless
                 # of CI. Escalating "required checks missing" here just spams — the
                 # real next step is conflict resolution, which is handled elsewhere.
@@ -1302,6 +1293,19 @@ def monitor_prs():
                     print(f"  PR #{pr_number}: no checks but PR is {merge_state} — skipping missing-checks escalation")
                     continue
 
+                if not repo_has_workflows:
+                    # No CI configured — nothing to wait for. Fall through to the
+                    # merge path: with no required checks to satisfy, a clean PR
+                    # from a trusted agent should merge.
+                    if pr_state.get("no_checks_polls"):
+                        pr_state.pop("no_checks_polls", None)
+                        _save_state(paths, state)
+                    print(f"  PR #{pr_number}: no checks and repo has no workflows — proceeding to merge")
+                    no_ci_merge_ok = True
+                    # Skip the _checks_*_ guards below by jumping straight to merge
+                    # via the no_ci_merge_ok flag.
+
+            if not no_ci_merge_ok and not checks:
                 no_checks_polls = pr_state.get("no_checks_polls", 0) + 1
                 pr_state["no_checks_polls"] = no_checks_polls
                 _save_state(paths, state)
@@ -1321,7 +1325,7 @@ def monitor_prs():
                 _handle_ci_failure(cfg, repo, pr, _missing_checks_stub(), new_attempts)
                 continue
 
-            if _checks_any_failed(checks):
+            if not no_ci_merge_ok and _checks_any_failed(checks):
                 remediation_issue = _find_open_issue_by_title(repo, f"Fix CI failure on PR #{pr_number}")
                 if remediation_issue:
                     print(f"  PR #{pr_number}: CI failed and remediation issue #{remediation_issue['number']} is active")
@@ -1333,7 +1337,7 @@ def monitor_prs():
                 _handle_ci_failure(cfg, repo, pr, checks, new_attempts)
                 continue
 
-            if not _checks_all_passed(checks):
+            if not no_ci_merge_ok and not _checks_all_passed(checks):
                 print(f"  PR #{pr_number}: checks pending, will retry next poll")
                 continue
 
