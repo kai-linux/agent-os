@@ -30,6 +30,10 @@ for f in "${staged[@]}"; do
         fail=1
       fi
       ;;
+    .agent_result.md)
+      red "✖ refusing to commit .agent_result.md — worktree-local agent artifact, gitignored. Tracking it pollutes PRs (see #229)."
+      fail=1
+      ;;
   esac
 done
 

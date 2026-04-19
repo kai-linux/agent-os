@@ -1824,6 +1824,15 @@ def commit_and_push(worktree: Path, branch: str, task_id: str, allow_push: bool,
 
     if uncommitted:
         run(["git", "add", "-A"], cwd=worktree, logfile=logfile, queue_summary_log=queue_summary_log)
+        # .agent_result.md is a worktree-local artifact (gitignored). Some
+        # historical branches tracked it before the ignore landed; defensively
+        # unstage and untrack so agent commits never carry it forward into PRs.
+        run(
+            ["git", "rm", "--cached", "-f", "--ignore-unmatch", ".agent_result.md"],
+            cwd=worktree,
+            logfile=logfile,
+            queue_summary_log=queue_summary_log,
+        )
         run(["git", "commit", "-m", f"agent {task_id}"], cwd=worktree, logfile=logfile, queue_summary_log=queue_summary_log)
     else:
         log("Agent already committed changes; pushing unpushed commits.", logfile, queue_summary_log=queue_summary_log)
