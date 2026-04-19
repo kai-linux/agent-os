@@ -19,6 +19,24 @@ if [[ -z "${AGENT_OS_IGNORE_DISABLED:-}" && -f "$ROOT/runtime/state/disabled" ]]
   exit 0
 fi
 
+# Per-job switch: if runtime/state/job_disabled/<job> exists, skip just that
+# entrypoint. Job name is derived from the calling script's basename, with
+# the leading "run_" and trailing ".sh" stripped (run_pr_monitor.sh -> pr_monitor).
+# Toggle from Telegram with /job on|off <name>.
+if [[ -z "${AGENT_OS_IGNORE_DISABLED:-}" ]]; then
+  _aos_caller="${BASH_SOURCE[-1]:-}"
+  if [[ -n "$_aos_caller" ]]; then
+    _aos_job="$(basename "$_aos_caller" .sh)"
+    _aos_job="${_aos_job#run_}"
+    if [[ -n "$_aos_job" && -f "$ROOT/runtime/state/job_disabled/$_aos_job" ]]; then
+      if [[ -t 2 ]]; then
+        printf '[agent-os] job %s disabled — exiting.\n' "$_aos_job" >&2
+      fi
+      exit 0
+    fi
+  fi
+fi
+
 append_path() {
   local dir="$1"
   [[ -d "$dir" ]] || return 0

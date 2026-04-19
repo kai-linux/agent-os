@@ -223,12 +223,25 @@ When OFF, cron jobs still fire on schedule but exit immediately (exit 0, cron-si
 
 | Command | Effect |
 |---|---|
-| `/on` | remove the kill-switch — cron resumes on next tick |
-| `/off` | engage the kill-switch — pause the orchestrator |
+| `/on` | remove the global kill-switch — cron resumes on next tick |
+| `/off` | engage the global kill-switch — pause the orchestrator |
 | `/status` | report current ON/OFF state |
+| `/repos` | list configured repos with mode + cadence + per-repo state |
+| `/repo on <key>` / `/repo off <key>` | pause/resume a single repo without touching config |
+| `/repo mode <key> full\|dispatcher` | flip the parent project's `automation_mode` |
+| `/repo cadence <key> <days>` | set sprint + groomer cadence (in days) for that repo |
+| `/jobs` | list cron entrypoints and their per-job state |
+| `/job on <name>` / `/job off <name>` | pause/resume a single cron job (e.g. `pr_monitor`) |
 | `/help` | list commands |
 
-A dedicated poller (`bin/run_telegram_control.sh`) runs every minute with `AGENT_OS_IGNORE_DISABLED=1` so `/on` still reaches the orchestrator while it is paused.
+A dedicated poller (`bin/run_telegram_control.sh`) runs every minute with `AGENT_OS_IGNORE_DISABLED=1` so `/on` still reaches the orchestrator while it is paused. The `telegram_control` job itself is protected — `/job off telegram_control` is rejected so you can never lock yourself out.
+
+**State lives in flag files** under `runtime/state/`:
+- `disabled` — global kill-switch
+- `repo_disabled/<key>` — per-repo skip
+- `job_disabled/<name>` — per-job skip
+
+`/repo mode` and `/repo cadence` are the only commands that touch `config.yaml`; both do surgical line edits that preserve comments.
 
 ---
 

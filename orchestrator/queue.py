@@ -1091,12 +1091,17 @@ def handle_telegram_command(
     queue_summary_log: Path | None = None,
 ) -> str | None:
     """Handle a Telegram text command. Returns a reply string, or None to ignore."""
+    from orchestrator import control_state as cs
+
     raw = (text or "").strip()
     if not raw.startswith("/"):
         return None
-    # Strip leading slash and any bot username suffix ("/off@agentos_bot arg").
-    first = raw.split()[0][1:]
+    parts = raw.split()
+    first = parts[0][1:]
     command = first.split("@", 1)[0].lower()
+    args = parts[1:]
+    root = paths["ROOT"]
+    cfg_path = paths["CONFIG"]
 
     if command in {"off", "disable", "stop"}:
         disabled, _ = _kill_switch_state(paths)
@@ -1126,16 +1131,121 @@ def handle_telegram_command(
             return f"🔴 Agent-OS OFF{since_txt}."
         return "🟢 Agent-OS ON."
 
+    if command == "repos":
+        rows = cs.list_repos(cfg)
+        if not rows:
+            return "No repos configured."
+        lines = ["Repos:"]
+        for r in rows:
+            state = "🔴 OFF" if cs.is_repo_disabled(root, r["key"]) else "🟢 ON"
+            mode = "full" if r["automation_mode"] == "full" else "dispatcher"
+            cad = r.get("sprint_cadence_days")
+            cad_txt = f" · {cad}d" if cad is not None else ""
+            lines.append(f"• {r['key']} — {state} · {mode}{cad_txt} ({r['github_repo']})")
+        return "\n".join(lines)
+
+    if command == "repo":
+        return _handle_repo_subcommand(cfg, cfg_path, root, args, logfile, queue_summary_log)
+
+    if command == "jobs":
+        lines = ["Cron jobs:"]
+        for job in cs.KNOWN_JOBS:
+            state = "🔴 OFF" if cs.is_job_disabled(root, job) else "🟢 ON"
+            lines.append(f"• {job} — {state}")
+        lines.append(f"\n(protected, always on: {', '.join(sorted(cs.PROTECTED_JOBS))})")
+        return "\n".join(lines)
+
+    if command == "job":
+        return _handle_job_subcommand(root, args, logfile, queue_summary_log)
+
     if command == "help":
         return (
             "Agent-OS control:\n"
-            "/on — enable orchestrator\n"
-            "/off — disable orchestrator (kill-switch)\n"
-            "/status — show current state\n"
+            "/on /off /status — global kill-switch\n"
+            "/repos — list repos\n"
+            "/repo on|off <key> — pause/resume a single repo\n"
+            "/repo mode <key> full|dispatcher — set parent project's automation_mode\n"
+            "/repo cadence <key> <days> — set sprint+groomer cadence in days\n"
+            "/jobs — list cron jobs\n"
+            "/job on|off <name> — pause/resume a single cron entrypoint\n"
             "/help — this message"
         )
 
     return None
+
+
+def _handle_repo_subcommand(cfg, cfg_path, root, args, logfile, queue_summary_log) -> str:
+    from orchestrator import control_state as cs
+
+    if not args:
+        return "Usage: /repo on|off|mode|cadence <key> [value]"
+    sub = args[0].lower()
+
+    if sub in {"on", "off"}:
+        if len(args) < 2:
+            return f"Usage: /repo {sub} <key>"
+        key = args[1]
+        if not cs.find_repo(cfg, key):
+            return f"Unknown repo key: {key}. Try /repos."
+        cs.set_repo_disabled(root, key, sub == "off")
+        log(f"Telegram: /repo {sub} {key}", logfile, queue_summary_log=queue_summary_log)
+        return f"{'🔴' if sub == 'off' else '🟢'} Repo {key} now {sub.upper()}."
+
+    if sub == "mode":
+        if len(args) < 3:
+            return "Usage: /repo mode <key> full|dispatcher"
+        key, mode_arg = args[1], args[2].lower()
+        normalized = "dispatcher_only" if mode_arg in {"dispatcher", "dispatcher_only"} else mode_arg
+        if normalized not in cs.VALID_AUTOMATION_MODES:
+            return f"Invalid mode {mode_arg!r}. Use full or dispatcher."
+        repo = cs.find_repo(cfg, key)
+        if not repo:
+            return f"Unknown repo key: {key}. Try /repos."
+        try:
+            cs.set_project_automation_mode(cfg_path, repo["project_key"], normalized)
+        except Exception as exc:
+            return f"Failed to update config.yaml: {exc}"
+        log(f"Telegram: /repo mode {key} {normalized}", logfile, queue_summary_log=queue_summary_log)
+        return (
+            f"✅ Project {repo['project_key']} (containing {key}) → automation_mode={normalized}.\n"
+            "Note: this affects every repo in that project."
+        )
+
+    if sub == "cadence":
+        if len(args) < 3:
+            return "Usage: /repo cadence <key> <days>"
+        key, days_arg = args[1], args[2]
+        try:
+            days = int(days_arg)
+        except ValueError:
+            return f"Days must be an integer, got {days_arg!r}."
+        repo = cs.find_repo(cfg, key)
+        if not repo:
+            return f"Unknown repo key: {key}. Try /repos."
+        try:
+            cs.set_repo_cadence(cfg_path, key, days, repo["project_key"])
+        except Exception as exc:
+            return f"Failed to update config.yaml: {exc}"
+        log(f"Telegram: /repo cadence {key} {days}", logfile, queue_summary_log=queue_summary_log)
+        return f"✅ Repo {key} → sprint_cadence_days={days}, groomer_cadence_days={days}."
+
+    return f"Unknown /repo subcommand: {sub}. Try /help."
+
+
+def _handle_job_subcommand(root, args, logfile, queue_summary_log) -> str:
+    from orchestrator import control_state as cs
+
+    if len(args) < 2 or args[0].lower() not in {"on", "off"}:
+        return "Usage: /job on|off <name>"
+    sub = args[0].lower()
+    name = args[1]
+    if name in cs.PROTECTED_JOBS:
+        return f"❌ {name} is protected and cannot be disabled (would lock you out)."
+    if name not in cs.KNOWN_JOBS:
+        return f"Unknown job {name!r}. Try /jobs."
+    cs.set_job_disabled(root, name, sub == "off")
+    log(f"Telegram: /job {sub} {name}", logfile, queue_summary_log=queue_summary_log)
+    return f"{'🔴' if sub == 'off' else '🟢'} Job {name} now {sub.upper()}."
 
 
 def process_telegram_callbacks(
