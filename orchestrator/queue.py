@@ -1568,6 +1568,28 @@ def _git_fetch_with_retry(repo: Path, logfile: Path, queue_summary_log: Path, ma
                     pass
 
 
+def _ensure_local_excludes(repo: Path) -> None:
+    """Add .agent_result.md to the repo's local exclude file.
+
+    .agent_result.md is the agent → orchestrator handoff contract; it lives in
+    every worktree but must never enter a commit. Adding it to
+    .git/info/exclude (per-repo, not committed) means `git add -A` skips it
+    even on managed repos that have not added it to their tracked .gitignore.
+    Cheap, idempotent, runs once per worktree creation.
+    """
+    exclude_path = repo / ".git" / "info" / "exclude"
+    try:
+        exclude_path.parent.mkdir(parents=True, exist_ok=True)
+        existing = exclude_path.read_text(encoding="utf-8") if exclude_path.exists() else ""
+        if any(line.strip() == ".agent_result.md" for line in existing.splitlines()):
+            return
+        prefix = "" if existing.endswith("\n") or existing == "" else "\n"
+        with exclude_path.open("a", encoding="utf-8") as fh:
+            fh.write(f"{prefix}# agent-os: handoff contract, never commit\n.agent_result.md\n")
+    except OSError:
+        pass  # best-effort; commit_and_push has a defensive untrack as backstop
+
+
 def ensure_worktree(cfg: dict, repo: Path, base_branch: str, branch: str, task_id: str, logfile: Path, queue_summary_log: Path):
     worktree = Path(cfg["worktrees_dir"]) / repo.name / task_id
     worktree.parent.mkdir(parents=True, exist_ok=True)
@@ -1575,6 +1597,7 @@ def ensure_worktree(cfg: dict, repo: Path, base_branch: str, branch: str, task_i
     if worktree.exists():
         shutil.rmtree(worktree, ignore_errors=True)
 
+    _ensure_local_excludes(repo)
     _git_fetch_with_retry(repo, logfile, queue_summary_log)
 
     # Defensive recovery for tasks queued before per-repo default-branch
