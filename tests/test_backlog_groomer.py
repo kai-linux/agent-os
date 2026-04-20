@@ -13,8 +13,11 @@ from orchestrator.backlog_groomer import (
     _assess_readme,
     _bootstrap_doc_issues,
     _count_backlog_issues,
+    _expected_status_for,
     _filter_records_for_repo,
     _gather_adoption_signals,
+    _reap_stale_in_progress,
+    _reconcile_board_state,
     _repo_backlog_depth_target,
     _repo_gap_signals,
     _repo_groomer_cadence_days,
@@ -713,3 +716,208 @@ def test_groomer_cadence_backoff_on_auto_skips(tmp_path, monkeypatch):
     # The key assertion is that the prompt was generated (LLM was called)
     # and the cadence backoff message was printed.
     assert result.get("status") in {"created", "skipped"}
+
+
+# ---------------------------------------------------------------------------
+# Board reconciliation + stale in-progress reaper
+# ---------------------------------------------------------------------------
+
+PROJECT_CFG = {
+    "ready_value": "Ready",
+    "in_progress_value": "In Progress",
+    "review_value": "Review",
+    "blocked_value": "Blocked",
+    "done_value": "Done",
+    "backlog_value": "Backlog",
+}
+
+
+def test_expected_status_blocked_label_overrides_ready():
+    assert _expected_status_for({"blocked", "ready"}, "OPEN", PROJECT_CFG) == "Blocked"
+
+
+def test_expected_status_in_progress_label():
+    assert _expected_status_for({"in-progress"}, "OPEN", PROJECT_CFG) == "In Progress"
+    assert _expected_status_for({"agent-dispatched"}, "OPEN", PROJECT_CFG) == "In Progress"
+
+
+def test_expected_status_closed_issue_maps_to_done():
+    assert _expected_status_for({"in-progress"}, "CLOSED", PROJECT_CFG) == "Done"
+
+
+def test_expected_status_no_labels_maps_to_backlog():
+    assert _expected_status_for(set(), "OPEN", PROJECT_CFG) == "Backlog"
+
+
+def _make_cfg() -> dict:
+    return {
+        "github_owner": "owner",
+        "github_projects": {
+            "proj": {
+                "project_number": 1,
+                "repos": [{"github_repo": "owner/repo", "local_repo": "/tmp/repo"}],
+                **PROJECT_CFG,
+            }
+        },
+    }
+
+
+class _FakeProject:
+    """Stand-in for query_project output that tracks set_item_status calls."""
+
+    def __init__(self, items: list[dict]):
+        self.items = items
+        self.moves: list[tuple[str, str]] = []  # (item_id, option_id)
+
+    def info(self) -> dict:
+        return {
+            "project_id": "PID",
+            "status_field_id": "SFID",
+            "status_options": {
+                "Ready": "opt-ready",
+                "In Progress": "opt-ip",
+                "Review": "opt-review",
+                "Blocked": "opt-blocked",
+                "Done": "opt-done",
+                "Backlog": "opt-backlog",
+            },
+            "items": self.items,
+        }
+
+
+def test_reconcile_moves_blocked_label_out_of_ready(monkeypatch):
+    fake = _FakeProject([{
+        "item_id": "I1", "number": 42,
+        "url": "https://github.com/owner/repo/issues/42",
+        "state": "OPEN", "status": "Ready",
+        "labels": {"blocked"},
+    }])
+    monkeypatch.setattr(bg, "query_project", lambda pn, owner: fake.info())
+    monkeypatch.setattr(bg, "set_item_status", lambda pid, iid, fid, oid: fake.moves.append((iid, oid)))
+    monkeypatch.setattr(bg, "edit_issue_labels", lambda *a, **kw: None)
+
+    summary = _reconcile_board_state(_make_cfg(), "owner/repo")
+    assert fake.moves == [("I1", "opt-blocked")]
+    assert summary["moved"] == 1
+
+
+def test_reconcile_moves_ready_label_out_of_backlog(monkeypatch):
+    fake = _FakeProject([{
+        "item_id": "I2", "number": 7,
+        "url": "https://github.com/owner/repo/issues/7",
+        "state": "OPEN", "status": "Backlog",
+        "labels": {"ready"},
+    }])
+    monkeypatch.setattr(bg, "query_project", lambda pn, owner: fake.info())
+    monkeypatch.setattr(bg, "set_item_status", lambda pid, iid, fid, oid: fake.moves.append((iid, oid)))
+    monkeypatch.setattr(bg, "edit_issue_labels", lambda *a, **kw: None)
+
+    summary = _reconcile_board_state(_make_cfg(), "owner/repo")
+    assert fake.moves == [("I2", "opt-ready")]
+    assert summary["moved"] == 1
+
+
+def test_reconcile_closed_with_stale_labels_moves_to_done_and_strips(monkeypatch):
+    fake = _FakeProject([{
+        "item_id": "I3", "number": 99,
+        "url": "https://github.com/owner/repo/issues/99",
+        "state": "CLOSED", "status": "In Progress",
+        "labels": {"in-progress"},
+    }])
+    stripped: list[dict] = []
+    monkeypatch.setattr(bg, "query_project", lambda pn, owner: fake.info())
+    monkeypatch.setattr(bg, "set_item_status", lambda pid, iid, fid, oid: fake.moves.append((iid, oid)))
+    monkeypatch.setattr(
+        bg, "edit_issue_labels",
+        lambda repo, number, add=None, remove=None: stripped.append({"add": add, "remove": remove}),
+    )
+
+    summary = _reconcile_board_state(_make_cfg(), "owner/repo")
+    assert fake.moves == [("I3", "opt-done")]
+    assert summary["closed_reconciled"] == 1
+    assert any("in-progress" in (s.get("remove") or []) for s in stripped)
+
+
+def test_reconcile_leaves_review_column_alone(monkeypatch):
+    fake = _FakeProject([{
+        "item_id": "I4", "number": 4,
+        "url": "https://github.com/owner/repo/issues/4",
+        "state": "OPEN", "status": "Review",
+        "labels": {"in-progress"},  # Review overrides — human gate
+    }])
+    monkeypatch.setattr(bg, "query_project", lambda pn, owner: fake.info())
+    monkeypatch.setattr(bg, "set_item_status", lambda pid, iid, fid, oid: fake.moves.append((iid, oid)))
+    monkeypatch.setattr(bg, "edit_issue_labels", lambda *a, **kw: None)
+
+    _reconcile_board_state(_make_cfg(), "owner/repo")
+    assert fake.moves == []
+
+
+def test_reconcile_noop_when_aligned(monkeypatch):
+    fake = _FakeProject([{
+        "item_id": "I5", "number": 5,
+        "url": "https://github.com/owner/repo/issues/5",
+        "state": "OPEN", "status": "Ready",
+        "labels": {"ready"},
+    }])
+    monkeypatch.setattr(bg, "query_project", lambda pn, owner: fake.info())
+    monkeypatch.setattr(bg, "set_item_status", lambda pid, iid, fid, oid: fake.moves.append((iid, oid)))
+    monkeypatch.setattr(bg, "edit_issue_labels", lambda *a, **kw: None)
+
+    summary = _reconcile_board_state(_make_cfg(), "owner/repo")
+    assert fake.moves == []
+    assert summary == {"moved": 0, "labels_fixed": 0, "closed_reconciled": 0, "errors": 0}
+
+
+def test_reap_stale_in_progress_demotes_when_no_open_pr(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    old = (datetime.now(tz=timezone.utc) - timedelta(hours=48)).isoformat().replace("+00:00", "Z")
+    issues = [{
+        "number": 11, "url": "https://github.com/owner/repo/issues/11",
+        "updatedAt": old,
+        "labels": [{"name": "in-progress"}],
+    }]
+    calls: list[dict] = []
+    monkeypatch.setattr(bg, "_list_open_pr_issue_refs", lambda repo: set())
+    monkeypatch.setattr(
+        bg, "edit_issue_labels",
+        lambda repo, num, add=None, remove=None: calls.append({"num": num, "add": add, "remove": remove}),
+    )
+    monkeypatch.setattr(bg, "add_issue_comment", lambda *a, **kw: None)
+    monkeypatch.setattr(bg, "query_project", lambda *a, **kw: {"project_id": "P", "status_field_id": "F", "status_options": {"Ready": "R"}, "items": []})
+    monkeypatch.setattr(bg, "set_item_status", lambda *a, **kw: None)
+
+    demoted = _reap_stale_in_progress(_make_cfg(), "owner/repo", issues)
+    assert demoted == [11]
+    assert any("in-progress" in (c.get("remove") or []) for c in calls)
+    assert any("ready" in (c.get("add") or []) for c in calls)
+
+
+def test_reap_stale_in_progress_skips_when_open_pr_references_issue(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    old = (datetime.now(tz=timezone.utc) - timedelta(hours=48)).isoformat().replace("+00:00", "Z")
+    issues = [{
+        "number": 11, "url": "https://github.com/owner/repo/issues/11",
+        "updatedAt": old,
+        "labels": [{"name": "in-progress"}],
+    }]
+    monkeypatch.setattr(bg, "_list_open_pr_issue_refs", lambda repo: {11})
+    monkeypatch.setattr(bg, "edit_issue_labels", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("should not edit")))
+
+    demoted = _reap_stale_in_progress(_make_cfg(), "owner/repo", issues)
+    assert demoted == []
+
+
+def test_reap_stale_in_progress_skips_recent_activity(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    recent = (datetime.now(tz=timezone.utc) - timedelta(hours=2)).isoformat().replace("+00:00", "Z")
+    issues = [{
+        "number": 12, "url": "https://github.com/owner/repo/issues/12",
+        "updatedAt": recent,
+        "labels": [{"name": "in-progress"}],
+    }]
+    monkeypatch.setattr(bg, "_list_open_pr_issue_refs", lambda repo: set())
+    monkeypatch.setattr(bg, "edit_issue_labels", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("should not edit")))
+
+    demoted = _reap_stale_in_progress(_make_cfg(), "owner/repo", issues)
+    assert demoted == []

@@ -30,7 +30,15 @@ from pathlib import Path
 
 from orchestrator.paths import load_config
 from orchestrator.agent_scorer import load_recent_metrics, findings_path as scorer_findings_path
-from orchestrator.gh_project import ensure_labels, query_project, set_item_status, gh
+from orchestrator.gh_project import (
+    add_issue_comment,
+    edit_issue_labels,
+    ensure_labels,
+    gh,
+    gh_json,
+    query_project,
+    set_item_status,
+)
 from orchestrator.objectives import load_repo_objective, format_objective_for_prompt
 from orchestrator.outcome_attribution import get_repo_outcome_check_ids, format_outcome_checks_section
 from orchestrator.repo_context import (
@@ -59,6 +67,8 @@ ANALYSIS_MODEL = "haiku"
 SIMILARITY_THRESHOLD = 0.75  # Title similarity threshold for dedup
 PR_NUMBER_RE = re.compile(r"\bPR\s*#(\d+)\b|/pull/(\d+)\b", re.IGNORECASE)
 _BACKLOG_EXCLUDE_LABELS = {"in-progress", "agent-dispatched", "ready", "done", "blocked"}
+_LIFECYCLE_LABELS = ("blocked", "in-progress", "agent-dispatched", "ready", "done")
+STALE_IN_PROGRESS_HOURS = 24
 
 
 def _repo_plan_size(cfg: dict, github_slug: str) -> int:
@@ -239,6 +249,218 @@ def _cleanup_stale_issues(cfg: dict, github_slug: str, open_issues: list[dict]) 
         except Exception as e:
             print(f"  Warning: failed to close stale issue #{issue.get('number')}: {e}")
     return cleaned
+
+
+def _find_project_cfg_for_repo(cfg: dict, github_slug: str) -> dict | None:
+    for project_cfg in cfg.get("github_projects", {}).values():
+        if not isinstance(project_cfg, dict):
+            continue
+        if any(rc.get("github_repo") == github_slug for rc in project_cfg.get("repos", [])):
+            return project_cfg
+    return None
+
+
+def _expected_status_for(labels: set[str], issue_state: str, project_cfg: dict) -> str | None:
+    """Return the project column an issue *should* be in, given its labels/state.
+
+    ``None`` means "no opinion" — e.g. the issue sits in Review (manual gate)
+    or has no lifecycle labels and is already in Backlog.
+    """
+    state = (issue_state or "").upper()
+    if state == "CLOSED" or "done" in labels:
+        return project_cfg.get("done_value", "Done")
+    # Priority: safety-first — blocked wins over in-progress wins over ready.
+    if "blocked" in labels:
+        return project_cfg.get("blocked_value", "Blocked")
+    if "in-progress" in labels or "agent-dispatched" in labels:
+        return project_cfg.get("in_progress_value", "In Progress")
+    if "ready" in labels:
+        return project_cfg.get("ready_value", "Ready")
+    return project_cfg.get("backlog_value", "Backlog")
+
+
+def _resolve_label_conflicts(repo: str, issue_number: int, labels: set[str]) -> set[str]:
+    """Strip conflicting lifecycle labels, keeping only the highest-priority one.
+
+    Returns the new label set (for bookkeeping). Safe to call even when labels
+    are already consistent — does nothing in that case.
+    """
+    lifecycle_present = [lbl for lbl in _LIFECYCLE_LABELS if lbl in labels]
+    if len(lifecycle_present) <= 1:
+        return set(labels)
+    keep = lifecycle_present[0]  # highest-priority per _LIFECYCLE_LABELS order
+    to_remove = [lbl for lbl in lifecycle_present if lbl != keep]
+    try:
+        edit_issue_labels(repo, issue_number, remove=to_remove)
+    except Exception as e:
+        print(f"  Warning: failed to strip conflicting labels on #{issue_number}: {e}")
+    return (set(labels) - set(to_remove))
+
+
+def _list_open_pr_issue_refs(repo: str) -> set[int]:
+    """Return the set of issue numbers referenced by any open PR in the repo.
+
+    Scans PR titles and bodies for ``#N`` references. Used to decide whether
+    an in-progress issue has an in-flight PR (in which case it is *not* stale).
+    """
+    refs: set[int] = set()
+    try:
+        prs = gh_json([
+            "pr", "list", "-R", repo, "--state", "open",
+            "--json", "number,title,body", "--limit", "100",
+        ]) or []
+    except Exception as e:
+        print(f"  Warning: failed to list open PRs for {repo}: {e}")
+        return refs
+    issue_ref_re = re.compile(r"#(\d+)\b")
+    for pr in prs:
+        for text in (pr.get("title") or "", pr.get("body") or ""):
+            for match in issue_ref_re.finditer(text):
+                try:
+                    refs.add(int(match.group(1)))
+                except ValueError:
+                    continue
+    return refs
+
+
+def _reconcile_board_state(cfg: dict, github_slug: str) -> dict:
+    """Align GitHub labels with project column for every issue in the project.
+
+    Label wins: if an issue is labeled ``blocked`` but sits in Ready, it is
+    moved to Blocked. If an issue is CLOSED but still carries lifecycle labels,
+    they are stripped and the project status is set to Done.
+
+    Also strips conflicting lifecycle labels (e.g. both ``ready`` and
+    ``blocked``) keeping the highest-priority one.
+
+    Returns a summary dict with counters per action.
+    """
+    summary = {"moved": 0, "labels_fixed": 0, "closed_reconciled": 0, "errors": 0}
+    project_cfg = _find_project_cfg_for_repo(cfg, github_slug)
+    owner = cfg.get("github_owner", "")
+    if not project_cfg or not owner:
+        return summary
+    try:
+        info = query_project(project_cfg["project_number"], owner)
+    except Exception as e:
+        print(f"  Warning: board reconciler could not query project: {e}")
+        summary["errors"] += 1
+        return summary
+    status_field_id = info.get("status_field_id")
+    status_options = info.get("status_options") or {}
+    if not status_field_id:
+        return summary
+
+    slug_suffix = f"/{github_slug.rsplit('/', 1)[-1]}/"
+    for item in info.get("items", []):
+        if slug_suffix and slug_suffix not in (item.get("url") or ""):
+            continue
+        labels = set(item.get("labels") or set())
+        issue_number = item.get("number")
+        if not issue_number:
+            continue
+        labels = _resolve_label_conflicts(github_slug, int(issue_number), labels)
+        if labels != set(item.get("labels") or set()):
+            summary["labels_fixed"] += 1
+
+        expected = _expected_status_for(labels, item.get("state", "OPEN"), project_cfg)
+        if expected is None:
+            continue
+        current = item.get("status")
+        # Leave Review column alone unless the labels explicitly disagree
+        # (e.g. a Review issue got re-labeled ``blocked``).
+        review_value = project_cfg.get("review_value")
+        if review_value and current == review_value and not (labels & {"blocked", "done"}):
+            continue
+        if current == expected:
+            continue
+        option_id = status_options.get(expected)
+        if not option_id:
+            continue
+        try:
+            set_item_status(info["project_id"], item["item_id"], status_field_id, option_id)
+            summary["moved"] += 1
+            if (item.get("state") or "").upper() == "CLOSED":
+                # Also strip lingering lifecycle labels on closed items.
+                stale_labels = [lbl for lbl in ("blocked", "in-progress", "agent-dispatched", "ready") if lbl in labels]
+                if stale_labels:
+                    try:
+                        edit_issue_labels(github_slug, int(issue_number), add=["done"], remove=stale_labels)
+                    except Exception:
+                        pass
+                summary["closed_reconciled"] += 1
+            print(f"  Reconciled #{issue_number}: {current!r} -> {expected!r}")
+        except Exception as e:
+            print(f"  Warning: failed to move #{issue_number} to {expected}: {e}")
+            summary["errors"] += 1
+    return summary
+
+
+def _reap_stale_in_progress(cfg: dict, github_slug: str, open_issues: list[dict]) -> list[int]:
+    """Demote in-progress issues that have stalled past STALE_IN_PROGRESS_HOURS.
+
+    An issue is *stale in-progress* when it carries ``in-progress`` or
+    ``agent-dispatched``, its ``updatedAt`` is older than the threshold, and
+    no open PR references it. We strip the lifecycle labels, add ``ready``,
+    leave a comment, and move the project card back to Ready so the planner
+    or a human can reconsider it.
+    """
+    demoted: list[int] = []
+    project_cfg = _find_project_cfg_for_repo(cfg, github_slug)
+    owner = cfg.get("github_owner", "")
+    cutoff = datetime.now(tz=timezone.utc) - timedelta(hours=STALE_IN_PROGRESS_HOURS)
+
+    candidates: list[dict] = []
+    for issue in open_issues:
+        names = {(l.get("name") or "").lower() for l in issue.get("labels", [])}
+        if not (names & {"in-progress", "agent-dispatched"}):
+            continue
+        updated = issue.get("updatedAt") or ""
+        try:
+            ts = datetime.fromisoformat(updated.replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            continue
+        if ts >= cutoff:
+            continue
+        candidates.append(issue)
+
+    if not candidates:
+        return demoted
+
+    referenced = _list_open_pr_issue_refs(github_slug)
+    for issue in candidates:
+        num = int(issue.get("number"))
+        if num in referenced:
+            continue
+        age_hours = (datetime.now(tz=timezone.utc) - datetime.fromisoformat(
+            issue.get("updatedAt", "").replace("Z", "+00:00"))).total_seconds() / 3600
+        try:
+            edit_issue_labels(
+                github_slug, num,
+                add=["ready"],
+                remove=["in-progress", "agent-dispatched"],
+            )
+            add_issue_comment(
+                github_slug, num,
+                f"Demoted to Ready by backlog groomer: no active PR and no activity "
+                f"for {age_hours:.0f}h (threshold {STALE_IN_PROGRESS_HOURS}h).",
+            )
+            if project_cfg and owner:
+                try:
+                    info = query_project(project_cfg["project_number"], owner)
+                    option_id = info["status_options"].get(project_cfg.get("ready_value", "Ready"))
+                    if info.get("status_field_id") and option_id:
+                        for item in info["items"]:
+                            if item.get("url") == issue.get("url"):
+                                set_item_status(info["project_id"], item["item_id"], info["status_field_id"], option_id)
+                                break
+                except Exception as e:
+                    print(f"  Warning: failed to move #{num} to Ready column: {e}")
+            demoted.append(num)
+            print(f"  Demoted stale in-progress #{num} ({age_hours:.0f}h inactive)")
+        except Exception as e:
+            print(f"  Warning: failed to demote stale #{num}: {e}")
+    return demoted
 
 
 def _stale_issues(issues: list[dict], stale_days: int = STALE_DAYS) -> list[dict]:
@@ -935,9 +1157,29 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
     cleaned = _cleanup_stale_issues(cfg, github_slug, open_issues)
     if cleaned:
         open_issues = [issue for issue in open_issues if issue.get("number") not in cleaned]
+
+    # 1a. Demote stale in-progress issues back to Ready before reconciling
+    # columns, so the reconciler sees the corrected labels.
+    demoted = _reap_stale_in_progress(cfg, github_slug, open_issues)
+    if demoted:
+        open_issues = _list_open_issues(github_slug, cfg)
+
+    # 1b. Align project column ↔ labels (label wins). Keeps kanban honest even
+    # when a human drags a card or a crash leaves state inconsistent.
+    board_summary = _reconcile_board_state(cfg, github_slug)
+    if any(board_summary.values()):
+        print(
+            f"  Board reconciled: moved={board_summary['moved']}, "
+            f"labels_fixed={board_summary['labels_fixed']}, "
+            f"closed_reconciled={board_summary['closed_reconciled']}"
+        )
+
     open_titles = [i.get("title", "") for i in open_issues]
     stale = _stale_issues(open_issues)
-    print(f"  Open issues: {len(open_issues)}, stale (>{STALE_DAYS}d): {len(stale)}, cleaned: {len(cleaned)}")
+    print(
+        f"  Open issues: {len(open_issues)}, stale (>{STALE_DAYS}d): {len(stale)}, "
+        f"cleaned: {len(cleaned)}, demoted-stale-in-progress: {len(demoted)}"
+    )
 
     # 2. Recent completions from metrics
     root = Path(cfg.get("root_dir", ".")).expanduser()
