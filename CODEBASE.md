@@ -42,6 +42,18 @@
 
 ## Recent Changes
 
+### 2026-04-21 — [task-20260421-093931-attach-goal-ancestry-objective-sprint-issue-to-eve] (#240 kai-linux/agent-os)
+Implemented optional goal ancestry fields through dispatch, prompt rendering, escalations, and generated issue creation so agents and humans can see objective, sprint, and parent-issue context without breaking tasks that lack ancestry.
+
+**Files:** `- orchestrator/task_formatter.py`, `- orchestrator/github_dispatcher.py`, `- orchestrator/queue.py`, `- orchestrator/backlog_groomer.py`, `- orchestrator/log_analyzer.py`, `- tests/test_github_dispatcher.py`, `- tests/test_queue.py`, `- tests/test_log_analyzer.py`
+
+**Decisions:**
+  - - Centralized ancestry resolution/rendering in `task_formatter.py` so dispatcher, generators, and escalation paths reuse one bounded format
+  - - Derived `objective_id` from the objective file path when no explicit id exists, preserving current objective schema
+  - - Used `runtime/next_sprint_focus.json` as the active sprint source and derived `sprint_id` from its `generated_at` date
+  - - Persisted ancestry into `agent_stats.jsonl` so log-analyzer tickets can inherit ancestry from the failure records they summarize
+
+
 ### 2026-04-21 — [task-20260421-093841-add-quality-harness-architect-with-modality-detect] (#250 kai-linux/agent-os)
 Implemented a quality-harness architect flow with repo modality detection, opt-in eval-suite planning and merge gating, plus a Telegram/GitHub field-failure capture path that writes permanent regression fixtures.
 
