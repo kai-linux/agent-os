@@ -217,6 +217,12 @@ def _repo_entry_range(lines: list[str], project_start: int, project_end: int, re
 
 
 def set_repo_cadence(cfg_path: Path, repo_key: str, days: float, project_key: str) -> None:
+    """Set ``sprint_cadence_days`` for a repo and drop any explicit
+    ``groomer_cadence_days`` override so the groomer auto-derives at half
+    the sprint cadence (see ``_repo_groomer_cadence_days`` in
+    backlog_groomer.py). Users who want a custom groomer cadence must edit
+    config.yaml directly — rare enough to not warrant its own Telegram verb.
+    """
     if days < 0:
         raise ValueError("days must be >= 0")
     # Store integers as ints (e.g. `1`) and fractional days as floats (e.g. `0.5`)
@@ -225,14 +231,22 @@ def set_repo_cadence(cfg_path: Path, repo_key: str, days: float, project_key: st
     lines = _read_lines(cfg_path)
     p_start, p_end = _project_block_range(lines, project_key)
     r_start, r_end = _repo_entry_range(lines, p_start, p_end, repo_key)
-    targets = ("sprint_cadence_days", "groomer_cadence_days")
-    pat = re.compile(rf"^(\s*)({'|'.join(targets)}):\s*\S+(.*)$")
-    found = 0
-    for i in range(r_start, r_end):
-        m = pat.match(lines[i])
-        if m:
-            lines[i] = f"{m.group(1)}{m.group(2)}: {days_val}{m.group(3)}\n" if lines[i].endswith("\n") else f"{m.group(1)}{m.group(2)}: {days_val}{m.group(3)}"
-            found += 1
-    if not found:
-        raise ValueError(f"no cadence keys found for repo {repo_key!r}")
-    _write_lines_atomic(cfg_path, lines)
+    sprint_pat = re.compile(r"^(\s*)(sprint_cadence_days):\s*\S+(.*)$")
+    groomer_pat = re.compile(r"^\s*groomer_cadence_days:\s*\S+.*$")
+    new_lines: list[str] = []
+    sprint_found = False
+    for i, line in enumerate(lines):
+        if r_start <= i < r_end:
+            m = sprint_pat.match(line)
+            if m:
+                trailing = "\n" if line.endswith("\n") else ""
+                new_lines.append(f"{m.group(1)}{m.group(2)}: {days_val}{m.group(3).rstrip(chr(10))}{trailing}")
+                sprint_found = True
+                continue
+            if groomer_pat.match(line):
+                # Drop the explicit override; groomer will fall back to sprint * 0.5.
+                continue
+        new_lines.append(line)
+    if not sprint_found:
+        raise ValueError(f"no sprint_cadence_days key found for repo {repo_key!r}")
+    _write_lines_atomic(cfg_path, new_lines)

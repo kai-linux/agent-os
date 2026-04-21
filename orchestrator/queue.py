@@ -1330,7 +1330,7 @@ def handle_telegram_command(
             "/repos — list repos\n"
             "/repo on|off <key> — pause/resume a single repo\n"
             "/repo mode <key> full|dispatcher — set parent project's automation_mode\n"
-            "/repo cadence <key> <days> — set sprint+groomer cadence in days\n"
+            "/repo cadence <key> <days> — set sprint cadence in days (groomer auto-halves)\n"
             "/qa-fail <repo> <suite> <fixture_id> [issue_number] — capture a regression fixture\n"
             "/jobs — list cron jobs\n"
             "/job on|off <name> — pause/resume a single cron entrypoint\n"
@@ -1415,7 +1415,11 @@ def _handle_repo_subcommand(cfg, cfg_path, root, args, logfile, queue_summary_lo
             "repo_cadence_change",
             {"repo_key": key, "project_key": repo["project_key"], "days": days},
         )
-        return f"✅ Repo {key} → sprint_cadence_days={days}, groomer_cadence_days={days}."
+        groomer_days = days / 2 if days > 0 else 0
+        return (
+            f"✅ Repo {key} → sprint_cadence_days={days}. "
+            f"Groomer auto-derives to {groomer_days}d (half the sprint)."
+        )
 
     return f"Unknown /repo subcommand: {sub}. Try /help."
 
