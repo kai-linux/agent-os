@@ -42,6 +42,17 @@
 
 ## Recent Changes
 
+### 2026-04-21 — [task-20260421-094128-implement-cost-tracking-infrastructure] (#253 kai-linux/agent-os)
+Implemented foundational cost tracking by persisting per-attempt model metadata into `agent_stats.jsonl`, rebuilding `runtime/metrics/cost_records.jsonl` from a new `orchestrator/cost_tracker.py` module, and documenting/configuring the pricing assumptions and override knobs.
+
+**Files:** `- .agent_result.md`, `- docs/cost-tracking.md`, `- example.config.yaml`, `- orchestrator/cost_tracker.py`, `- orchestrator/queue.py`, `- tests/test_cost_tracker.py`, `- tests/test_queue.py`
+
+**Decisions:**
+  - - Kept cost tracking file-based and rebuilt from `agent_stats.jsonl` so there is still a single source of runtime telemetry truth
+  - - Used rough `chars / 4` token estimates from prompt/result artifacts because governance-grade approximation is acceptable and raw provider usage is not persisted today
+  - - Stored task, repo, and global cost rows in one JSONL file via `record_type` fields so downstream consumers can read one artifact
+
+
 ### 2026-04-21 — [task-20260421-093931-attach-goal-ancestry-objective-sprint-issue-to-eve] (#240 kai-linux/agent-os)
 Implemented optional goal ancestry fields through dispatch, prompt rendering, escalations, and generated issue creation so agents and humans can see objective, sprint, and parent-issue context without breaking tasks that lack ancestry.
 
