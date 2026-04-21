@@ -14,7 +14,7 @@ import sys
 import time
 
 from orchestrator.paths import load_config, runtime_paths
-from orchestrator.queue import maybe_run_stall_watchdog, process_telegram_callbacks
+from orchestrator.queue import maybe_run_stall_watchdog
 
 
 def main():
@@ -27,15 +27,13 @@ def main():
     python = sys.executable
     procs: list[tuple[str, subprocess.Popen]] = []
     worker_counter = 0
-    last_callback_poll = 0.0
 
     print(f"[supervisor] Starting with max_parallel_workers={max_workers}")
 
     while True:
-        now = time.time()
-        if now - last_callback_poll >= 15:
-            process_telegram_callbacks(cfg, paths)
-            last_callback_poll = now
+        # Telegram polling is owned by bin/run_telegram_control.sh — polling
+        # here too would race on the shared offset file and produce duplicate
+        # replies (and HTTP 409 from the Bot API).
         maybe_run_stall_watchdog(cfg, paths, worker_id="supervisor", queue_summary_log=paths["QUEUE_SUMMARY_LOG"])
 
         # Reap finished workers

@@ -1397,9 +1397,11 @@ def _handle_repo_subcommand(cfg, cfg_path, root, args, logfile, queue_summary_lo
             return "Usage: /repo cadence <key> <days>"
         key, days_arg = args[1], args[2]
         try:
-            days = int(days_arg)
+            days = float(days_arg)
         except ValueError:
-            return f"Days must be an integer, got {days_arg!r}."
+            return f"Days must be a number, got {days_arg!r}."
+        if days < 0:
+            return f"Days must be >= 0, got {days}."
         repo = cs.find_repo(cfg, key)
         if not repo:
             return f"Unknown repo key: {key}. Try /repos."

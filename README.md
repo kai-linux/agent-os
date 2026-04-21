@@ -276,7 +276,7 @@ When OFF, cron jobs still fire on schedule but exit immediately (exit 0, cron-si
 | `/repos` | list configured repos with mode + cadence + per-repo state |
 | `/repo on <key>` / `/repo off <key>` | pause/resume a single repo without touching config |
 | `/repo mode <key> full\|dispatcher` | flip the parent project's `automation_mode` |
-| `/repo cadence <key> <days>` | set sprint + groomer cadence (in days) for that repo |
+| `/repo cadence <key> <days>` | set sprint + groomer cadence (in days, fractional allowed — e.g. `0.5`) for that repo |
 | `/jobs` | list cron entrypoints and their per-job state |
 | `/job on <name>` / `/job off <name>` | pause/resume a single cron job (e.g. `pr_monitor`) |
 | `/help` | list commands |

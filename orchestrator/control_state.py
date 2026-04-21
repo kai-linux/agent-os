@@ -216,9 +216,12 @@ def _repo_entry_range(lines: list[str], project_start: int, project_end: int, re
     return start, end
 
 
-def set_repo_cadence(cfg_path: Path, repo_key: str, days: int, project_key: str) -> None:
+def set_repo_cadence(cfg_path: Path, repo_key: str, days: float, project_key: str) -> None:
     if days < 0:
         raise ValueError("days must be >= 0")
+    # Store integers as ints (e.g. `1`) and fractional days as floats (e.g. `0.5`)
+    # so the YAML stays idiomatic and parses back to the same type.
+    days_val = int(days) if float(days).is_integer() else float(days)
     lines = _read_lines(cfg_path)
     p_start, p_end = _project_block_range(lines, project_key)
     r_start, r_end = _repo_entry_range(lines, p_start, p_end, repo_key)
@@ -228,7 +231,7 @@ def set_repo_cadence(cfg_path: Path, repo_key: str, days: int, project_key: str)
     for i in range(r_start, r_end):
         m = pat.match(lines[i])
         if m:
-            lines[i] = f"{m.group(1)}{m.group(2)}: {days}{m.group(3)}\n" if lines[i].endswith("\n") else f"{m.group(1)}{m.group(2)}: {days}{m.group(3)}"
+            lines[i] = f"{m.group(1)}{m.group(2)}: {days_val}{m.group(3)}\n" if lines[i].endswith("\n") else f"{m.group(1)}{m.group(2)}: {days_val}{m.group(3)}"
             found += 1
     if not found:
         raise ValueError(f"no cadence keys found for repo {repo_key!r}")
