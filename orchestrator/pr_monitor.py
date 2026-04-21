@@ -34,6 +34,17 @@ from orchestrator.ci_artifact_validator import (
 from orchestrator.pr_risk_assessment import assess_pr_risk, RiskAssessment
 from orchestrator.privacy import redact_text
 from orchestrator.repo_modes import is_dispatcher_only_repo
+from orchestrator.quality_harness import (
+    append_quality_harness_eval_record,
+    build_field_failure_prompt,
+    evaluate_quality_harness,
+    find_labeled_field_failures,
+    mark_field_failure_prompted,
+    pr_deletes_fixtures,
+    quality_harness_enabled,
+    resolve_quality_harness_config,
+    resolve_repo_local_path,
+)
 from orchestrator.review_signals import record_review_signal, generate_followup_issues
 
 MAX_MERGE_ATTEMPTS = 3
@@ -1227,6 +1238,97 @@ def _send_risk_telegram(cfg: dict, repo: str, pr_number: int, risk: RiskAssessme
         print(f"Warning: failed to send risk telegram for PR #{pr_number}: {e}")
 
 
+def _send_quality_harness_telegram(cfg: dict, repo: str, pr_number: int, failing_fixtures: list[str], score: float, threshold: float):
+    token = str(cfg.get("telegram_bot_token", "")).strip()
+    chat_id = str(cfg.get("telegram_chat_id", "")).strip()
+    if not token or not chat_id:
+        return
+    fixture_lines = "\n".join(f"- {item}" for item in (failing_fixtures[:8] or ["unknown failure"]))
+    text = (
+        f"🧪 Quality harness gate blocked merge\n"
+        f"Repo: {repo}\n"
+        f"PR: #{pr_number}\n"
+        f"Score: {score:.2f} (threshold {threshold:.2f})\n"
+        f"Failing fixtures:\n{fixture_lines}"
+    )
+    try:
+        subprocess.run(
+            [
+                "curl", "-sS", "-X", "POST",
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                "-d", f"chat_id={chat_id}",
+                "--data-urlencode", f"text={text}",
+            ],
+            capture_output=True, text=True, timeout=20,
+        )
+    except Exception as e:
+        print(f"Warning: failed to send quality harness telegram for PR #{pr_number}: {e}")
+
+
+def _quality_harness_gate(cfg: dict, repo: str, pr_number: int) -> tuple[bool, str]:
+    if not quality_harness_enabled(cfg, repo):
+        return True, "disabled"
+
+    deleted = pr_deletes_fixtures(repo, pr_number)
+    if deleted:
+        return False, f"fixture deletions are not allowed: {', '.join(deleted[:5])}"
+
+    repo_path = resolve_repo_local_path(cfg, repo)
+    if repo_path is None or not repo_path.exists():
+        return False, "local repo unavailable for quality harness evaluation"
+
+    harness_cfg = resolve_quality_harness_config(cfg, repo)
+    result = evaluate_quality_harness(repo_path, harness_cfg)
+    append_quality_harness_eval_record(
+        cfg,
+        {
+            "repo": repo,
+            "pr_number": pr_number,
+            "score": result["score"],
+            "threshold": result["threshold"],
+            "passed": result["passed"],
+            "failing_fixtures": result["failing_fixtures"],
+        },
+    )
+    if result["passed"]:
+        return True, "passed"
+
+    _send_quality_harness_telegram(
+        cfg,
+        repo,
+        pr_number,
+        result["failing_fixtures"],
+        result["score"],
+        result["threshold"],
+    )
+    return False, (
+        f"quality harness score {result['score']:.2f} below threshold {result['threshold']:.2f}; "
+        f"failing fixtures: {', '.join(result['failing_fixtures'][:5]) or 'unknown'}"
+    )
+
+
+def _prompt_labeled_field_failures(cfg: dict, repo: str):
+    token = str(cfg.get("telegram_bot_token", "")).strip()
+    chat_id = str(cfg.get("telegram_chat_id", "")).strip()
+    if not token or not chat_id:
+        return
+    for issue in find_labeled_field_failures(repo):
+        text = build_field_failure_prompt(repo, issue)
+        try:
+            subprocess.run(
+                [
+                    "curl", "-sS", "-X", "POST",
+                    f"https://api.telegram.org/bot{token}/sendMessage",
+                    "-d", f"chat_id={chat_id}",
+                    "--data-urlencode", f"text={text}",
+                ],
+                capture_output=True, text=True, timeout=20,
+            )
+            mark_field_failure_prompted(repo, int(issue["number"]))
+        except Exception as e:
+            print(f"Warning: failed to prompt field failure for {repo}#{issue.get('number')}: {e}")
+
+
 def _purge_stale_inbox_tasks(paths: dict, repo: str, pr: dict):
     """Move inbox tasks for a merged issue to done so they don't run stale."""
     import shutil
@@ -1421,6 +1523,24 @@ def monitor_prs():
             _save_state(paths, state)
             print(f"  PR #{pr_number}: all checks passed, merging (attempt {new_attempts}/{MAX_MERGE_ATTEMPTS})")
 
+            harness_ok, harness_reason = _quality_harness_gate(cfg, repo, pr_number)
+            if not harness_ok:
+                print(f"  PR #{pr_number}: quality harness gate blocked merge ({harness_reason})")
+                try:
+                    add_issue_comment(
+                        repo,
+                        pr_number,
+                        (
+                            "## Auto-merge blocked: quality harness gate\n\n"
+                            f"{harness_reason}\n\n"
+                            "Committed fixtures cannot be deleted silently. "
+                            "Raise the eval score or restore deleted fixtures before merge."
+                        ),
+                    )
+                except Exception as e:
+                    print(f"Warning: failed to post quality harness comment on PR #{pr_number}: {e}")
+                continue
+
             if _try_merge(repo, pr_number):
                 print(f"  PR #{pr_number}: merged successfully")
                 state.pop(pr_url, None)
@@ -1439,6 +1559,10 @@ def monitor_prs():
                 print(f"{repo}: created {len(created)} review follow-up(s)")
         except Exception as e:
             print(f"Warning: review follow-up generation failed for {repo}: {e}")
+        try:
+            _prompt_labeled_field_failures(cfg, repo)
+        except Exception as e:
+            print(f"Warning: field-failure prompting failed for {repo}: {e}")
 
 
 if __name__ == "__main__":
