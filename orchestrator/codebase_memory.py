@@ -6,9 +6,22 @@ Per-repo CODEBASE.md memory.
 """
 from __future__ import annotations
 
+import re
 import subprocess
 from datetime import datetime
 from pathlib import Path
+
+
+# The on-disk CODEBASE.md grows unbounded as an audit trail, but prompts must
+# stay well under the 100 KB argv ceiling. When injecting into a prompt we keep
+# the curated header sections (Architecture / Key Files / Known Issues) in full
+# and cap the auto-accumulated "Recent Changes" tail to the N newest entries.
+RECENT_CHANGES_MAX_ENTRIES = 15
+
+_RECENT_CHANGES_RE = re.compile(
+    r"(^|\n)(## Recent Changes\s*\n)(.*)\Z",
+    re.DOTALL,
+)
 
 
 _TEMPLATE = """\
@@ -33,6 +46,33 @@ _TEMPLATE = """\
 """
 
 
+def _truncate_recent_changes(content: str, max_entries: int = RECENT_CHANGES_MAX_ENTRIES) -> str:
+    """Keep only the newest ``max_entries`` items under ``## Recent Changes``.
+
+    Entries are appended newest-first by ``update_codebase_memory`` (prepended
+    after the anchor), so slicing the first N ``### `` headers preserves
+    freshness. The header sections above ``## Recent Changes`` are left intact.
+    """
+    m = _RECENT_CHANGES_RE.search(content)
+    if not m:
+        return content
+    prefix = content[:m.start(2)]
+    header = m.group(2)
+    tail = m.group(3)
+
+    entries = re.split(r"(?m)^(?=### )", tail)
+    leading = entries[0] if entries else ""
+    items = entries[1:]
+    if len(items) <= max_entries:
+        return content
+    kept = "".join(items[:max_entries])
+    note = (
+        f"\n_(Truncated for prompt budget — showing {max_entries} most recent of "
+        f"{len(items)} entries. Full history lives in CODEBASE.md on disk.)_\n"
+    )
+    return f"{prefix}{header}{leading}{kept}{note}"
+
+
 def read_codebase_context(worktree: Path) -> str:
     """Return CODEBASE.md content formatted for prompt injection, or empty string."""
     codebase_md = worktree / "CODEBASE.md"
@@ -41,6 +81,7 @@ def read_codebase_context(worktree: Path) -> str:
     content = codebase_md.read_text(encoding="utf-8").strip()
     if not content:
         return ""
+    content = _truncate_recent_changes(content)
     return f"\n\n---\n# Codebase Memory (read-only context)\n\n{content}\n---\n"
 
 
