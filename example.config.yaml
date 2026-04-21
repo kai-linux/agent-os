@@ -252,6 +252,11 @@ quality_harness:
                                        # multimodal_eval, llm_judge_eval, bot_conversation_eval
   suite_commands: {}                   # Optional per-suite command; may print JSON {"score": 0.95, "failing_fixtures": [...]}
 
+dependency_watcher:
+  enabled: true                        # Weekly dependency/CVE watcher; set false to disable globally
+  cadence_days: 7                      # Per-repo scan cadence; 0 makes the watcher dormant
+  max_actions_per_week: 3              # Cap total PRs + issues per repo per ISO week to prevent flood
+
 agent_timeout_minutes:
   codex: 40
   claude: 45
