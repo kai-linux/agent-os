@@ -22,6 +22,9 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # Poll CI status on agent PRs, merge on green, rebase on conflict
 */5 * * * * /path/to/agent-os/bin/run_pr_monitor.sh >> /path/to/agent-os/runtime/logs/pr_monitor.log 2>&1
 
+# Deploy watchdog: inspect recent merges against production telemetry and queue revert PRs for operator approval
+*/10 * * * * /path/to/agent-os/bin/run_deploy_watchdog.sh >> /path/to/agent-os/runtime/logs/deploy_watchdog.log 2>&1
+
 # ── Weekly self-improvement ─────────────────────────────────────────────
 # Score per-agent success rates, flag underperformers (Monday 06:30)
 # MUST run before log_analyzer so findings are ready to consume
@@ -70,6 +73,7 @@ Each wrapper emits a timestamp banner like `[2026-03-30T12:34:56+0200] queue sta
 | `* * * * *` | `run_dispatcher.sh` | Picks up Ready issues, formats them, writes to mailbox |
 | `* * * * *` | `run_queue.sh` | Executes tasks in isolated worktrees, manages agent fallback |
 | `*/5 * * * *` | `run_pr_monitor.sh` | CI gate + auto-merge + auto-rebase for agent PRs |
+| `*/10 * * * *` | `run_deploy_watchdog.sh` | Watches recent merges against external telemetry and opens operator-gated revert PRs on production regression |
 | `30 6 * * 1` | `run_agent_scorer.sh` | Computes agent success rates, flags degradation |
 | `0 7 * * 1` | `run_log_analyzer.sh` | Reads failure logs + scorer findings, files fix tickets via Claude Haiku |
 | `0 8 * * *` | `run_daily_digest.sh` | Summarizes the last 24h of completions, blockers, escalations, agent success, and PR activity to Telegram |

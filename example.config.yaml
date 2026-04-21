@@ -257,6 +257,12 @@ dependency_watcher:
   cadence_days: 7                      # Per-repo scan cadence; 0 makes the watcher dormant
   max_actions_per_week: 3              # Cap total PRs + issues per repo per ISO week to prevent flood
 
+deploy_watchdog:
+  enabled: false                       # Opt-in per repo; when enabled, checks recent merges every cron run
+  window_minutes: 60                   # Watch merges and signals in this post-merge window
+  error_rate_spike_ratio: 2.0          # Regression when post-merge error rate exceeds 2x baseline
+  latency_p95_spike_ratio: 1.5         # Regression when post-merge p95 exceeds 150% of baseline
+
 agent_timeout_minutes:
   codex: 40
   claude: 45
@@ -339,6 +345,11 @@ github_projects:
               url: "https://analytics.example.com/repo1-post-merge"
               measurement_window_days: 7
               comparison_window: "Compare 7 days after merge vs 7 days before merge"
+        deploy_watchdog:
+          enabled: true
+          window_minutes: 60
+          error_rate_spike_ratio: 2.0
+          latency_p95_spike_ratio: 1.5
       - github_repo: "yourname/repo2"
         path: "/path/to/repo2"
         automation_mode: dispatcher_only  # Dispatch only: manual Ready -> dispatch -> PR, no planner/groomer/analyzer/pr_monitor
@@ -354,6 +365,8 @@ github_projects:
         production_feedback:
           enabled: false
         outcome_attribution:
+          enabled: false
+        deploy_watchdog:
           enabled: false
 
 telegram_bot_token: "YOUR_TELEGRAM_BOT_TOKEN"

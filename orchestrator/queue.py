@@ -983,7 +983,7 @@ def handle_telegram_callback(
     logfile: Path | None = None,
     queue_summary_log: Path | None = None,
 ) -> dict:
-    m = re.fullmatch(r"(esc|plan):([a-f0-9]{12}):(requeue|retry|close|skip|approve|reject)", callback_data or "")
+    m = re.fullmatch(r"(esc|plan|rvt):([a-f0-9]{12}):(requeue|retry|close|skip|approve|reject|cancel)", callback_data or "")
     if not m:
         return {"text": "Unknown action.", "show_alert": True, "remove_keyboard": False}
 
@@ -1015,6 +1015,20 @@ def handle_telegram_callback(
         )
         save_telegram_action(actions_dir, action)
         return {"text": action["result_text"], "show_alert": False, "remove_keyboard": True}
+
+    if action_type == "rvt":
+        if operation not in {"approve", "cancel"}:
+            return {"text": "Unknown revert action.", "show_alert": True, "remove_keyboard": True}
+        from orchestrator.deploy_watchdog import handle_revert_callback
+
+        result_text = handle_revert_callback(cfg, action, operation, logfile, queue_summary_log)
+        action["status"] = "done"
+        action["handled_action"] = operation
+        action["handled_at"] = datetime.now(timezone.utc).isoformat()
+        action["approval"] = "approved" if operation == "approve" else "canceled"
+        action["result_text"] = result_text
+        save_telegram_action(actions_dir, action)
+        return {"text": result_text, "show_alert": False, "remove_keyboard": True}
 
     if action.get("type") == "blocked_task_escalation":
         result_text = _handle_blocked_task_escalation_callback(cfg, action, operation, logfile, queue_summary_log)
