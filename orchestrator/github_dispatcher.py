@@ -24,7 +24,11 @@ from orchestrator.gh_project import (
     gh_json,
 )
 from orchestrator.repo_modes import is_dispatcher_only_repo
-from orchestrator.task_formatter import format_task
+from orchestrator.task_formatter import (
+    format_goal_ancestry_block,
+    format_task,
+    resolve_goal_ancestry,
+)
 from orchestrator.task_decomposer import decompose_issue, create_sub_issues
 from orchestrator.outcome_attribution import parse_outcome_check_ids
 from orchestrator.agent_scorer import filter_healthy_agents, log_gate_decision, ADAPTIVE_HEALTH_WINDOW_DAYS, ADAPTIVE_HEALTH_THRESHOLD
@@ -96,6 +100,10 @@ def parse_issue_body(body: str) -> dict:
         "context": sections.get("context", "").strip(),
         "base_branch": sections.get("base branch", "").strip(),
         "branch": sections.get("branch", "").strip(),
+        "objective_id": sections.get("objective id", "").strip(),
+        "sprint_id": sections.get("sprint id", "").strip(),
+        "parent_issue": sections.get("parent issue", "").strip(),
+        "parent_goal_summary": sections.get("parent goal summary", "").strip(),
     }
 
 
@@ -432,6 +440,18 @@ def build_mailbox_task(cfg: dict, project_key: str, repo_cfg: dict, issue: dict)
         raw_parsed.get("context", ""),
         parsed.get("context", ""),
     )
+    ancestry = resolve_goal_ancestry(
+        cfg=cfg,
+        repo_path=Path(repo_cfg["local_repo"]),
+        github_slug=str(repo_cfg.get("github_repo") or "").strip(),
+        issue=issue,
+        existing={
+            "objective_id": parsed.get("objective_id") or raw_parsed.get("objective_id"),
+            "sprint_id": parsed.get("sprint_id") or raw_parsed.get("sprint_id"),
+            "parent_issue": parsed.get("parent_issue") or raw_parsed.get("parent_issue"),
+            "parent_goal_summary": parsed.get("parent_goal_summary") or raw_parsed.get("parent_goal_summary"),
+        },
+    )
 
     criteria = parsed["success_criteria"] or "- Match the issue goal\n- Keep the diff minimal\n- Leave a valid .agent_result.md"
     constraints = parsed["constraints"] or "- Work only inside the repo\n- Prefer minimal diffs"
@@ -481,6 +501,10 @@ def build_mailbox_task(cfg: dict, project_key: str, repo_cfg: dict, issue: dict)
         "prompt_snapshot_path": str(Path(cfg.get("root_dir", Path.cwd())) / "runtime" / "prompts" / f"{task_id}.txt"),
         "outcome_check_ids": parsed.get("outcome_checks", []),
     }
+    for key in ("objective_id", "sprint_id", "parent_issue", "parent_goal_summary"):
+        value = str(ancestry.get(key) or "").strip()
+        if value:
+            frontmatter[key] = value
 
     # Persist failed CI check names as structured metadata so the CI
     # verification gate survives follow-up body reformatting (PR-98 RCA).
@@ -501,6 +525,12 @@ def build_mailbox_task(cfg: dict, project_key: str, repo_cfg: dict, issue: dict)
     _record_context_completeness(cfg, task_id, task_type, agent, ctx_validation)
 
     frontmatter_text = yaml.safe_dump(frontmatter, sort_keys=False).strip()
+    goal_ancestry_block = format_goal_ancestry_block(
+        {
+            **frontmatter,
+            "issue_url": issue.get("url", ""),
+        }
+    )
 
     body = f"""---
 {frontmatter_text}
@@ -517,6 +547,8 @@ def build_mailbox_task(cfg: dict, project_key: str, repo_cfg: dict, issue: dict)
 # Constraints
 
 {constraints}
+
+{goal_ancestry_block}
 
 # Context
 
@@ -798,6 +830,7 @@ def _resolve_prompt_snapshot_path(meta: dict) -> str:
 
 def _build_blocked_task_escalation_note(meta: dict, body: str, entries: list[dict], task_path: Path, reason: str) -> str:
     blocker_codes, error_patterns = _blocked_task_error_patterns(entries)
+    goal_ancestry = format_goal_ancestry_block(meta)
     return f"""# Escalation Note
 
 ## Parent Task ID
@@ -827,6 +860,8 @@ def _build_blocked_task_escalation_note(meta: dict, body: str, entries: list[dic
 ## Error Patterns
 {chr(10).join(f"- {pattern}" for pattern in error_patterns)}
 
+{goal_ancestry}
+
 ## Attempt Log
 {chr(10).join(_format_attempt_log(entries))}
 
@@ -838,6 +873,7 @@ def _build_blocked_task_escalation_note(meta: dict, body: str, entries: list[dic
 def _build_blocked_task_comment(meta: dict, task_path: Path, entries: list[dict], reason: str) -> str:
     blocker_codes, error_patterns = _blocked_task_error_patterns(entries)
     attempt_log = _format_attempt_log(entries)
+    goal_ancestry = format_goal_ancestry_block(meta)
     return f"""## Blocked task escalation
 {BLOCKED_ESCALATION_COMMENT_MARKER}
 
@@ -853,6 +889,8 @@ def _build_blocked_task_comment(meta: dict, task_path: Path, entries: list[dict]
 
 ### Error patterns
 {chr(10).join(f"- {pattern}" for pattern in error_patterns)}
+
+{goal_ancestry}
 
 ### Attempt log
 {chr(10).join(attempt_log)}
@@ -882,6 +920,11 @@ def _build_blocked_task_telegram_message(meta: dict, task_path: Path, entries: l
         f"Trigger: {reason}",
         f"Blocker codes: {', '.join(blocker_codes) if blocker_codes else 'unknown'}",
         "",
+    ]
+    ancestry_summary = str(meta.get("parent_goal_summary") or "").strip()
+    if ancestry_summary:
+        lines.extend([f"Goal context: {ancestry_summary}", ""])
+    lines.extend([
         "Error patterns:",
         *[f"- {pattern}" for pattern in error_patterns[:3]],
         "",
@@ -889,7 +932,7 @@ def _build_blocked_task_telegram_message(meta: dict, task_path: Path, entries: l
         *_format_attempt_log(entries)[:4],
         "",
         f"Note: {note_path.name}",
-    ]
+    ])
     text = "\n".join(lines).strip()
     return text if len(text) <= 4000 else text[:3997] + "..."
 
@@ -1009,6 +1052,7 @@ def _escalate_over_retried_blocked_tasks(cfg: dict, paths: dict) -> bool:
 
 def _build_unassigned_blocked_escalation_note(meta: dict, body: str) -> str:
     parent_task_id = meta.get("parent_task_id", meta.get("task_id", "unknown"))
+    goal_ancestry = format_goal_ancestry_block(meta)
     return f"""# Escalation Note
 
 ## Parent Task ID
@@ -1034,6 +1078,8 @@ manual_intervention_required
 
 ## Summary
 Blocked task has no assigned agent after one scheduler cycle.
+
+{goal_ancestry}
 
 ## Original Task
 {body}

@@ -13,6 +13,7 @@ import pytest
 # Ensure orchestrator package is importable
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from orchestrator import github_dispatcher as gd
 from orchestrator.repo_context import (
     gather_objective_alignment,
     gather_recent_git_state,
@@ -42,6 +43,7 @@ from orchestrator.queue import (
     split_section,
     start_fallback_cooldown,
     telegram_action_expired,
+    parse_task,
     verify_pr_ci_debug_completion,
     write_unblock_notes_artifact,
     WorkflowValidationError,
@@ -415,6 +417,92 @@ def test_write_prompt_skips_research_for_plain_implementation(tmp_path):
     assert "Planning Research (PLANNING_RESEARCH.md)" not in text
     snapshot = root / "runtime" / "prompts" / "task-2.txt"
     assert snapshot.read_text(encoding="utf-8") == text
+
+
+def test_goal_ancestry_flows_from_dispatcher_to_prompt_and_result(tmp_path, monkeypatch):
+    root = tmp_path / "root"
+    repo = tmp_path / "repo"
+    root.mkdir()
+    repo.mkdir()
+    (repo / "README.md").write_text("## Goal\n\nShip autonomous improvements.\n", encoding="utf-8")
+    (repo / "CODEBASE.md").write_text("# Codebase Memory\n\nKnown gotcha.\n", encoding="utf-8")
+    (repo / "runtime").mkdir()
+    (repo / "runtime" / "next_sprint_focus.json").write_text(
+        json.dumps(
+            {
+                "generated_at": "2026-04-21T09:00:00+00:00",
+                "headline": "Carry objective and sprint context into dispatched work",
+            }
+        ),
+        encoding="utf-8",
+    )
+    objectives_dir = tmp_path / "objectives"
+    objectives_dir.mkdir()
+    (objectives_dir / "repo.yaml").write_text(
+        "primary_outcome: Trusted adoption by technical builders\n",
+        encoding="utf-8",
+    )
+
+    cfg = {
+        "root_dir": str(root),
+        "objectives_dir": str(objectives_dir),
+        "default_agent": "auto",
+        "default_task_type": "implementation",
+        "default_base_branch": "main",
+        "default_allow_push": True,
+        "default_max_attempts": 4,
+        "max_runtime_minutes": 40,
+        "formatter_model": None,
+    }
+    repo_cfg = {"local_repo": str(repo), "github_repo": "owner/repo"}
+    issue = {
+        "number": 240,
+        "title": "Attach goal ancestry to dispatched tasks",
+        "url": "https://github.com/owner/repo/issues/240",
+        "labels": [],
+        "body": "## Goal\nShip ancestry.\n",
+    }
+
+    monkeypatch.setattr(gd, "format_task", lambda title, body, model=None: None)
+    monkeypatch.setattr("orchestrator.queue.load_config", lambda: cfg)
+
+    task_id, task_text = gd.build_mailbox_task(cfg, "proj", repo_cfg, issue)
+    task_path = tmp_path / f"{task_id}.md"
+    task_path.write_text(task_text, encoding="utf-8")
+    meta, body = parse_task(task_path)
+
+    prompt_file = write_prompt(task_id, meta, body, "codex", [], root, worktree=repo)
+    prompt_text = prompt_file.read_text(encoding="utf-8")
+    assert "## Goal Ancestry" in prompt_text
+    assert "Objective: `repo`" in prompt_text
+    assert "Parent issue: [owner/repo#240](https://github.com/owner/repo/issues/240)" in prompt_text
+
+    result = {
+        "status": "blocked",
+        "blocker_code": "missing_context",
+        "summary": "Need to confirm ancestry appears in all escalation surfaces.",
+        "done": ["- Added ancestry fields to task frontmatter"],
+        "blockers": ["- Still validating escalation rendering"],
+        "next_step": "Retry after checking escalation output.",
+        "files_changed": ["- orchestrator/github_dispatcher.py"],
+        "tests_run": ["- pytest tests/test_queue.py -q → passed"],
+        "decisions": ["- Persist ancestry in frontmatter instead of recomputing later"],
+        "risks": ["- Summary must stay bounded"],
+        "attempted_approaches": ["- Verified prompt rendering from dispatcher output"],
+        "unblock_notes": None,
+    }
+    logfile = tmp_path / "task.log"
+    logfile.write_text("", encoding="utf-8")
+    queue_summary_log = tmp_path / "queue-summary.log"
+    queue_summary_log.write_text("", encoding="utf-8")
+    escalated = tmp_path / "escalated"
+    escalated.mkdir()
+
+    esc_path = create_escalation_note(meta, body, result, logfile, ["codex"], escalated, queue_summary_log)
+    esc_text = esc_path.read_text(encoding="utf-8")
+    assert "## Goal Ancestry" in esc_text
+    assert "Objective: `repo`" in esc_text
+    assert "Issue owner/repo#240" in esc_text
 
 
 def test_read_evaluation_rubric_returns_content(tmp_path):

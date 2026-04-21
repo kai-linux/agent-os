@@ -683,6 +683,60 @@ Improve activation.
     assert "- activation_rate" in task_md
 
 
+def test_build_mailbox_task_resolves_goal_ancestry_from_objective_and_sprint(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    runtime_dir = repo / "runtime"
+    runtime_dir.mkdir()
+    (runtime_dir / "next_sprint_focus.json").write_text(
+        json.dumps(
+            {
+                "generated_at": "2026-04-21T09:00:00+00:00",
+                "headline": "Eliminate missing_context as the top task failure mode",
+                "next_sprint_focus": ["Keep goal-trace context attached to dispatched work"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    objectives_dir = tmp_path / "objectives"
+    objectives_dir.mkdir()
+    (objectives_dir / "repo.yaml").write_text(
+        "primary_outcome: Trusted adoption by technical builders\n",
+        encoding="utf-8",
+    )
+    cfg = {
+        "root_dir": str(tmp_path),
+        "objectives_dir": str(objectives_dir),
+        "default_agent": "auto",
+        "default_task_type": "implementation",
+        "default_base_branch": "main",
+        "default_allow_push": True,
+        "default_max_attempts": 4,
+        "max_runtime_minutes": 40,
+        "formatter_model": None,
+    }
+    repo_cfg = {"local_repo": str(repo), "github_repo": "owner/repo"}
+    issue = {
+        "number": 240,
+        "title": "Attach goal ancestry to dispatched tasks",
+        "url": "https://github.com/owner/repo/issues/240",
+        "labels": [],
+        "body": "## Goal\nShip ancestry.\n",
+    }
+
+    monkeypatch.setattr(gd, "format_task", lambda title, body, model=None: None)
+
+    _task_id, task_md = gd.build_mailbox_task(cfg, "proj", repo_cfg, issue)
+
+    assert "objective_id: repo" in task_md
+    assert "sprint_id: sprint-2026-04-21" in task_md
+    assert "parent_issue: owner/repo#240" in task_md
+    assert "parent_goal_summary:" in task_md
+    assert "## Goal Ancestry" in task_md
+    assert "Objective: `repo`" in task_md
+    assert "Parent issue: [owner/repo#240](https://github.com/owner/repo/issues/240)" in task_md
+
+
 def test_build_mailbox_task_rejects_invalid_agent_preference(monkeypatch):
     cfg = {
         "default_agent": "auto",

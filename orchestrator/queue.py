@@ -25,7 +25,9 @@ from orchestrator.gh_project import add_issue_comment, gh, gh_json, query_projec
 from orchestrator.repo_context import build_execution_context, gather_recent_git_state, gather_objective_alignment, read_sprint_directives
 from orchestrator.repo_modes import is_dispatcher_only_repo
 from orchestrator.agent_scorer import filter_healthy_agents, log_gate_decision, ADAPTIVE_HEALTH_WINDOW_DAYS, ADAPTIVE_HEALTH_THRESHOLD
+
 from orchestrator.cost_tracker import rebuild_cost_records, resolve_attempt_model, resolve_attempt_provider, estimate_text_tokens
+
 from orchestrator.quality_harness import (
     FIXED_SUITE_TAXONOMY,
     clear_pending_qa_action,
@@ -36,6 +38,7 @@ from orchestrator.quality_harness import (
     write_field_failure_fixture,
 )
 
+from orchestrator.task_formatter import format_goal_ancestry_block
 
 TELEGRAM_ACTION_TTL_HOURS = 48
 BLOCKER_CODE_DESCRIPTIONS = {
@@ -72,15 +75,12 @@ _CI_REMEDIATION_PR_RE = re.compile(r"\bPR\s*#(\d+)\b", re.IGNORECASE)
 _CI_REMEDIATION_PR_URL_RE = re.compile(r"/pull/(\d+)", re.IGNORECASE)
 _CI_FAILED_CHECK_RE = re.compile(r"^- \*\*(.+?)\*\*:", re.MULTILINE)
 
-
 def now_ts():
     return datetime.now().strftime("%Y%m%d-%H%M%S")
-
 
 def sanitize_slug(text: str, max_len: int = 50) -> str:
     slug = re.sub(r"[^a-zA-Z0-9]+", "-", text.strip().lower()).strip("-")
     return slug[:max_len] or "task"
-
 
 def log(msg: str, logfile: Path | None = None, also_summary: bool = False, queue_summary_log: Path | None = None):
     print(msg)
@@ -90,7 +90,6 @@ def log(msg: str, logfile: Path | None = None, also_summary: bool = False, queue
     if also_summary and queue_summary_log:
         with queue_summary_log.open("a", encoding="utf-8") as f:
             f.write(msg + "\n")
-
 
 class CommandExecutionError(RuntimeError):
     def __init__(self, cmd: list[str], returncode: int, stdout: str, stderr: str):
@@ -106,10 +105,8 @@ class CommandExecutionError(RuntimeError):
             details.append(f"stderr: {_tail_text(stderr)}")
         super().__init__(" | ".join(details))
 
-
 class WorkflowValidationError(RuntimeError):
     """Raised when a modified GitHub Actions workflow is invalid before push."""
-
 
 def _tail_text(text: str, max_lines: int = 12, max_chars: int = 1200) -> str:
     cleaned = (text or "").strip()
@@ -120,7 +117,6 @@ def _tail_text(text: str, max_lines: int = 12, max_chars: int = 1200) -> str:
     if len(tail) > max_chars:
         tail = tail[-max_chars:]
     return tail
-
 
 def _changed_workflow_files(worktree: Path) -> list[Path]:
     commands = [
@@ -149,7 +145,6 @@ def _changed_workflow_files(worktree: Path) -> list[Path]:
             seen.add(abs_path)
             changed.append(abs_path)
     return changed
-
 
 def _validate_workflow_files(worktree: Path) -> None:
     changed = _changed_workflow_files(worktree)
@@ -187,7 +182,6 @@ def _validate_workflow_files(worktree: Path) -> None:
                 f"Workflow validation failed for {rel_path}: " + " ".join(violations)
             )
 
-
 def _classify_runner_failure(text: str) -> str | None:
     lowered = (text or "").lower()
     if not lowered:
@@ -199,7 +193,6 @@ def _classify_runner_failure(text: str) -> str | None:
     if any(token in lowered for token in ["command not found", "no such file or directory", "unknown option", "unrecognized option"]):
         return "runner/cli configuration failure"
     return None
-
 
 def _format_runner_failure(exc: Exception) -> tuple[str, list[str], str | None]:
     if isinstance(exc, CommandExecutionError):
@@ -221,7 +214,6 @@ def _format_runner_failure(exc: Exception) -> tuple[str, list[str], str | None]:
         return summary, blockers, detail
     return str(exc), [f"- Runner/model failure: {exc}"], str(exc)
 
-
 def _blocker_code_from_runner_failure(summary: str, detail: str | None = None) -> str:
     classification = _classify_runner_failure("\n".join(part for part in [summary, detail or ""] if part))
     if classification == "usage limit / rate limit":
@@ -232,17 +224,14 @@ def _blocker_code_from_runner_failure(summary: str, detail: str | None = None) -
         return "environment_failure"
     return "runner_failure"
 
-
 def normalize_blocker_code(value: str | None) -> str:
     raw = str(value or "").strip().lower()
     if raw in {"", "none", "- none", "n/a", "na"}:
         return ""
     return raw
 
-
 def result_contract_blocker_guidance() -> str:
     return "\n".join(f"- `{code}`: {desc}" for code, desc in BLOCKER_CODE_DESCRIPTIONS.items())
-
 
 def _invalid_result_contract_result(
     *,
@@ -277,7 +266,6 @@ def _invalid_result_contract_result(
         "raw": raw,
     }
 
-
 def _upsert_single_value_section(text: str, section: str, value: str, next_sections: list[str]) -> str:
     pattern = rf"(?ms)^({section}:\s*\n?)(.*?)(?=^\s*(?:{'|'.join(re.escape(s) for s in next_sections)})\s*:|\Z)"
     match = re.search(pattern, text)
@@ -288,7 +276,6 @@ def _upsert_single_value_section(text: str, section: str, value: str, next_secti
     if anchor:
         return text[:anchor.start()] + replacement + "\n" + text[anchor.start():]
     return text.rstrip("\n") + f"\n\n{replacement}"
-
 
 def _result_contract_text(result: dict) -> str:
     status = str(result.get("status", "blocked")).strip().lower()
@@ -312,10 +299,8 @@ def _result_contract_text(result: dict) -> str:
         sections.append(("UNBLOCK_NOTES", f"- blocking_cause: {unblock['blocking_cause']}\n- next_action: {unblock['next_action']}"))
     return "\n\n".join(f"{name}:\n{value}" for name, value in sections) + "\n"
 
-
 def _write_result_contract(worktree: Path, result: dict) -> None:
     (worktree / ".agent_result.md").write_text(_result_contract_text(result), encoding="utf-8")
-
 
 def _extract_ci_remediation_pr_number(meta: dict, body: str) -> int | None:
     issue_title = str(meta.get("github_issue_title", "")).strip()
@@ -330,7 +315,6 @@ def _extract_ci_remediation_pr_number(meta: dict, body: str) -> int | None:
             return int(match.group(1))
     return None
 
-
 def _extract_ci_failed_checks(body: str) -> list[str]:
     names: list[str] = []
     seen: set[str] = set()
@@ -343,7 +327,6 @@ def _extract_ci_failed_checks(body: str) -> list[str]:
         names.append(name)
     return names
 
-
 def _parse_github_timestamp(value: str | None) -> datetime | None:
     text = str(value or "").strip()
     if not text:
@@ -352,7 +335,6 @@ def _parse_github_timestamp(value: str | None) -> datetime | None:
         return datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError:
         return None
-
 
 def _ci_completion_partial_result(
     result: dict,
@@ -383,7 +365,6 @@ def _ci_completion_partial_result(
         "next_action": next_step,
     }
     return updated
-
 
 def verify_pr_ci_debug_completion(
     meta: dict,
@@ -536,13 +517,11 @@ def verify_pr_ci_debug_completion(
         next_step="Rerun the workflow that owns the previously failing job and verify those job names complete successfully.",
     )
 
-
 def _command_available(cmd: str) -> bool:
     if not cmd:
         return False
     first = shlex.split(str(cmd))[0]
     return shutil.which(first) is not None
-
 
 def _load_json_file(path: Path) -> dict | None:
     try:
@@ -550,7 +529,6 @@ def _load_json_file(path: Path) -> dict | None:
     except (OSError, json.JSONDecodeError):
         return None
     return data if isinstance(data, dict) else None
-
 
 def _openrouter_api_key_status(config_dir: Path) -> tuple[bool, str | None]:
     secrets_path = config_dir / "secrets.json"
@@ -566,7 +544,6 @@ def _openrouter_api_key_status(config_dir: Path) -> tuple[bool, str | None]:
     if lowered in {"your_openrouter_api_key", "your-api-key", "changeme"} or "your_openrouter_api_key" in lowered:
         return False, f"OpenRouter credential is placeholder text in {secrets_path}"
     return True, None
-
 
 def agent_available(agent: str) -> tuple[bool, str | None]:
     agent = str(agent).strip().lower()
@@ -614,7 +591,6 @@ def agent_available(agent: str) -> tuple[bool, str | None]:
         return True, None
     return True, None
 
-
 def run(cmd, *, cwd=None, logfile: Path | None = None, check=True, timeout=None, queue_summary_log: Path | None = None):
     cmd_str = " ".join(map(str, cmd))
     log(f"$ {cmd_str}", logfile, queue_summary_log=queue_summary_log)
@@ -632,7 +608,6 @@ def run(cmd, *, cwd=None, logfile: Path | None = None, check=True, timeout=None,
     if check and result.returncode != 0:
         raise CommandExecutionError(cmd, result.returncode, result.stdout, result.stderr)
     return result
-
 
 def telegram_api(
     cfg: dict,
@@ -667,7 +642,6 @@ def telegram_api(
         log(f"Telegram {method} exception: {e}", logfile, queue_summary_log=queue_summary_log)
         return None
 
-
 def send_telegram(
     cfg: dict,
     text: str,
@@ -685,7 +659,6 @@ def send_telegram(
     if not data:
         return None
     return data.get("result", {}).get("message_id")
-
 
 def answer_telegram_callback(
     cfg: dict,
@@ -708,7 +681,6 @@ def answer_telegram_callback(
         queue_summary_log,
     )
 
-
 def clear_telegram_reply_markup(
     cfg: dict,
     chat_id: str,
@@ -728,16 +700,13 @@ def clear_telegram_reply_markup(
         queue_summary_log,
     )
 
-
 def _telegram_action_path(actions_dir: Path, action_id: str) -> Path:
     return actions_dir / f"{action_id}.json"
-
 
 def save_telegram_action(actions_dir: Path, action: dict) -> Path:
     path = _telegram_action_path(actions_dir, action["action_id"])
     path.write_text(json.dumps(action, indent=2, sort_keys=True), encoding="utf-8")
     return path
-
 
 def load_telegram_action(actions_dir: Path, action_id: str) -> dict | None:
     path = _telegram_action_path(actions_dir, action_id)
@@ -745,12 +714,10 @@ def load_telegram_action(actions_dir: Path, action_id: str) -> dict | None:
         return None
     return json.loads(path.read_text(encoding="utf-8"))
 
-
 def telegram_action_expired(action: dict, now: datetime | None = None) -> bool:
     now = now or datetime.now(timezone.utc)
     expires_at = datetime.fromisoformat(action["expires_at"])
     return now >= expires_at
-
 
 def _telegram_lines(title: str, items: list[str], *, fallback: str, limit: int = 6) -> list[str]:
     lines = [title]
@@ -764,7 +731,6 @@ def _telegram_lines(title: str, items: list[str], *, fallback: str, limit: int =
         lines.append(f"- …and {len(cleaned) - limit} more")
     return lines
 
-
 def build_escalation_message(meta: dict, result: dict, esc_path: Path | None = None) -> str:
     lines = [
         "🛑 Escalated",
@@ -777,6 +743,9 @@ def build_escalation_message(meta: dict, result: dict, esc_path: Path | None = N
         result.get("summary", "No summary provided."),
         "",
     ]
+    goal_ancestry = format_goal_ancestry_block(meta)
+    if goal_ancestry:
+        lines.extend(["Goal ancestry:", *goal_ancestry.replace("## Goal Ancestry\n", "").splitlines(), ""])
     lines.extend(_telegram_lines("Blockers:", result.get("blockers", ["- None"]), fallback="None"))
     lines.append("")
     lines.extend(_telegram_lines("Files changed:", result.get("files_changed", ["- None"]), fallback="None"))
@@ -786,7 +755,6 @@ def build_escalation_message(meta: dict, result: dict, esc_path: Path | None = N
     if len(text) <= 4000:
         return text
     return text[:3997] + "..."
-
 
 def create_escalation_action(meta: dict, result: dict, esc_path: Path, chat_id: str) -> dict:
     now = datetime.now(timezone.utc)
@@ -809,8 +777,11 @@ def create_escalation_action(meta: dict, result: dict, esc_path: Path, chat_id: 
         "blockers": result.get("blockers", ["- None"]),
         "files_changed": result.get("files_changed", ["- None"]),
         "escalation_note": esc_path.name,
+        "objective_id": meta.get("objective_id"),
+        "sprint_id": meta.get("sprint_id"),
+        "parent_issue": meta.get("parent_issue"),
+        "parent_goal_summary": meta.get("parent_goal_summary"),
     }
-
 
 def escalation_reply_markup(action_id: str) -> dict:
     return {
@@ -819,7 +790,6 @@ def escalation_reply_markup(action_id: str) -> dict:
             {"text": "Close (won't fix)", "callback_data": f"esc:{action_id}:close"},
         ]]
     }
-
 
 def _append_retry_decision_note(note_path: Path, operation: str) -> str:
     note_text = note_path.read_text(encoding="utf-8") if note_path.exists() else ""
@@ -843,7 +813,6 @@ def _append_retry_decision_note(note_path: Path, operation: str) -> str:
     )
     note_path.write_text(note_text.rstrip() + suffix, encoding="utf-8")
     return human_text
-
 
 def _handle_blocked_task_escalation_callback(
     cfg: dict,
@@ -886,7 +855,6 @@ def _handle_blocked_task_escalation_callback(
     )
     return result_text
 
-
 def planner_reply_markup(action_id: str) -> dict:
     return {
         "inline_keyboard": [[
@@ -894,7 +862,6 @@ def planner_reply_markup(action_id: str) -> dict:
             {"text": "Skip", "callback_data": f"plan:{action_id}:reject"},
         ]]
     }
-
 
 def _load_telegram_offset(offset_path: Path) -> int:
     if not offset_path.exists():
@@ -904,10 +871,8 @@ def _load_telegram_offset(offset_path: Path) -> int:
     except ValueError:
         return 0
 
-
 def _save_telegram_offset(offset_path: Path, update_id: int):
     offset_path.write_text(str(update_id), encoding="utf-8")
-
 
 def _get_telegram_updates(cfg: dict, offset: int, logfile: Path | None = None, queue_summary_log: Path | None = None) -> list[dict]:
     token = str(cfg.get("telegram_bot_token", "")).strip()
@@ -928,13 +893,11 @@ def _get_telegram_updates(cfg: dict, offset: int, logfile: Path | None = None, q
         log(f"Telegram getUpdates exception: {e}", logfile, queue_summary_log=queue_summary_log)
         return []
 
-
 def _project_cfg(cfg: dict, project_key: str) -> dict:
     project_cfg = cfg.get("github_projects", {}).get(project_key)
     if not isinstance(project_cfg, dict):
         raise RuntimeError(f"Project config missing for key: {project_key}")
     return project_cfg
-
 
 def ensure_issue_project_status(cfg: dict, project_key: str, issue_url: str, status_value: str):
     project_cfg = _project_cfg(cfg, project_key)
@@ -954,12 +917,9 @@ def ensure_issue_project_status(cfg: dict, project_key: str, issue_url: str, sta
             return
     raise RuntimeError(f"Issue not found on project board: {issue_url}")
 
-
-
 def _is_dispatcher_only_task(cfg: dict, meta: dict) -> bool:
     github_repo = str(meta.get("github_repo", "")).strip()
     return bool(github_repo) and is_dispatcher_only_repo(cfg, github_repo)
-
 
 def get_issue_title_and_body(repo: str, issue_number: int) -> tuple[str, str]:
     raw = gh([
@@ -968,7 +928,6 @@ def get_issue_title_and_body(repo: str, issue_number: int) -> tuple[str, str]:
     ])
     data = json.loads(raw)
     return data.get("title", ""), data.get("body", "")
-
 
 def build_requeue_issue_body(original_body: str, action: dict) -> str:
     appendix = [
@@ -988,7 +947,6 @@ def build_requeue_issue_body(original_body: str, action: dict) -> str:
         return base + "\n\n" + "\n".join(appendix).strip()
     return "\n".join(appendix).strip()
 
-
 def requeue_escalation(cfg: dict, action: dict, logfile: Path | None = None, queue_summary_log: Path | None = None) -> str:
     repo = action["github_repo"]
     issue_number = int(action["github_issue_number"])
@@ -1001,7 +959,6 @@ def requeue_escalation(cfg: dict, action: dict, logfile: Path | None = None, que
     add_issue_comment(repo, issue_number, f"♻️ Re-queued from Telegram escalation: {new_issue_url}")
     log(f"Telegram re-queue created {new_issue_url} for {repo}#{issue_number}", logfile, queue_summary_log=queue_summary_log)
     return new_issue_url
-
 
 def close_escalation(cfg: dict, action: dict, logfile: Path | None = None, queue_summary_log: Path | None = None):
     repo = action["github_repo"]
@@ -1018,7 +975,6 @@ def close_escalation(cfg: dict, action: dict, logfile: Path | None = None, queue
     add_issue_comment(repo, issue_number, "Closed from Telegram escalation as won't-fix.")
     ensure_issue_project_status(cfg, project_key, issue_url, _project_cfg(cfg, project_key).get("done_value", "Done"))
     log(f"Telegram close completed for {repo}#{issue_number}", logfile, queue_summary_log=queue_summary_log)
-
 
 def handle_telegram_callback(
     cfg: dict,
@@ -1076,10 +1032,8 @@ def handle_telegram_callback(
     save_telegram_action(actions_dir, action)
     return {"text": result_text, "show_alert": False, "remove_keyboard": True}
 
-
 def _kill_switch_path(paths: dict) -> Path:
     return paths["ROOT"] / "runtime" / "state" / "disabled"
-
 
 def _kill_switch_state(paths: dict) -> tuple[bool, str]:
     """Returns (is_disabled, since_or_empty)."""
@@ -1091,7 +1045,6 @@ def _kill_switch_state(paths: dict) -> tuple[bool, str]:
     except Exception:
         since = ""
     return True, since
-
 
 def handle_telegram_command(
     cfg: dict,
@@ -1187,7 +1140,6 @@ def handle_telegram_command(
 
     return None
 
-
 def _handle_repo_subcommand(cfg, cfg_path, root, args, logfile, queue_summary_log) -> str:
     from orchestrator import control_state as cs
 
@@ -1245,7 +1197,6 @@ def _handle_repo_subcommand(cfg, cfg_path, root, args, logfile, queue_summary_lo
 
     return f"Unknown /repo subcommand: {sub}. Try /help."
 
-
 def _handle_job_subcommand(root, args, logfile, queue_summary_log) -> str:
     from orchestrator import control_state as cs
 
@@ -1260,7 +1211,6 @@ def _handle_job_subcommand(root, args, logfile, queue_summary_log) -> str:
     cs.set_job_disabled(root, name, sub == "off")
     log(f"Telegram: /job {sub} {name}", logfile, queue_summary_log=queue_summary_log)
     return f"{'🔴' if sub == 'off' else '🟢'} Job {name} now {sub.upper()}."
-
 
 def _handle_qa_fail_command(cfg: dict, paths: dict, chat_id: str, args: list[str]) -> str:
     if len(args) < 3:
@@ -1300,7 +1250,6 @@ def _handle_qa_fail_command(cfg: dict, paths: dict, chat_id: str, args: list[str
         "<optional context>"
     )
 
-
 def _handle_pending_qa_reply(cfg: dict, paths: dict, message_chat: str, message_text: str) -> str | None:
     action = load_pending_qa_action(paths["TELEGRAM_ACTIONS"], message_chat)
     if not action:
@@ -1338,7 +1287,6 @@ def _handle_pending_qa_reply(cfg: dict, paths: dict, message_chat: str, message_
         except Exception:
             pass
     return f"Stored field-failure fixture at {manifest_path.relative_to(repo_path).as_posix()}."
-
 
 def process_telegram_callbacks(
     cfg: dict,
@@ -1420,7 +1368,6 @@ def process_telegram_callbacks(
             )
     _save_telegram_offset(offset_path, max_update_id)
 
-
 def priority_score(task: Path, cfg: dict) -> float:
     """Compute priority score = priority_weight + age_bonus (1 pt/hr)."""
     weights = cfg.get("priority_weights", {"prio:high": 30, "prio:normal": 10, "prio:low": 0})
@@ -1436,7 +1383,6 @@ def priority_score(task: Path, cfg: dict) -> float:
     age_hours = (datetime.now().timestamp() - task.stat().st_mtime) / 3600
     return weight + age_hours
 
-
 def pick_task(inbox: Path, cfg: dict | None = None):
     tasks = list(inbox.glob("*.md"))
     if not tasks:
@@ -1444,7 +1390,6 @@ def pick_task(inbox: Path, cfg: dict | None = None):
     if cfg is None:
         return sorted(tasks)[0]
     return max(tasks, key=lambda t: priority_score(t, cfg))
-
 
 def parse_task(path: Path):
     text = path.read_text(encoding="utf-8")
@@ -1459,11 +1404,9 @@ def parse_task(path: Path):
         raise ValueError("Missing repo")
     return meta, body
 
-
 def render_task(meta: dict, body: str) -> str:
     frontmatter_text = yaml.safe_dump(meta, sort_keys=False).strip()
     return f"---\n{frontmatter_text}\n---\n\n{body.rstrip()}\n"
-
 
 def split_section(text: str, start_label: str, end_labels: list[str]):
     if end_labels:
@@ -1473,7 +1416,6 @@ def split_section(text: str, start_label: str, end_labels: list[str]):
     m = re.search(pattern, text, flags=re.MULTILINE | re.DOTALL)
     return m.group(1).strip() if m else ""
 
-
 def _extract_markdown_section(text: str, heading: str, end_headings: list[str]) -> str:
     if end_headings:
         pattern = rf"(?ms)^## {re.escape(heading)}\s*\n(.*?)(?=^## (?:{'|'.join(map(re.escape, end_headings))})\s*$|\Z)"
@@ -1481,7 +1423,6 @@ def _extract_markdown_section(text: str, heading: str, end_headings: list[str]) 
         pattern = rf"(?ms)^## {re.escape(heading)}\s*\n(.*)$"
     match = re.search(pattern, text)
     return match.group(1).strip() if match else ""
-
 
 def _prompt_inspection_recovery_request(meta: dict, body: str) -> dict | None:
     trigger = str(
@@ -1509,7 +1450,6 @@ def _prompt_inspection_recovery_request(meta: dict, body: str) -> dict | None:
         "prior_blocker_code": prior_blocker_code,
     }
 
-
 def _find_blocked_task_for_recovery(blocked_dir: Path, task_id: str) -> tuple[Path, dict, str] | tuple[None, None, None]:
     candidates: list[tuple[float, Path, dict, str]] = []
     for task_path in blocked_dir.glob("*.md"):
@@ -1527,7 +1467,6 @@ def _find_blocked_task_for_recovery(blocked_dir: Path, task_id: str) -> tuple[Pa
     candidates.sort(key=lambda item: item[0], reverse=True)
     _mtime, task_path, meta, body = candidates[0]
     return task_path, meta, body
-
 
 def maybe_requeue_prompt_inspection_recovery(
     paths: dict,
@@ -1594,11 +1533,9 @@ def maybe_requeue_prompt_inspection_recovery(
     )
     return rerun_path
 
-
 def parse_bullets(section_text: str):
     lines = [x.strip() for x in section_text.splitlines() if x.strip()]
     return lines or ["- None"]
-
 
 def _parse_unblock_notes(raw: str) -> dict:
     """Parse UNBLOCK_NOTES section into {blocking_cause, next_action}.
@@ -1621,12 +1558,10 @@ def _parse_unblock_notes(raw: str) -> dict:
         return {}
     return {"blocking_cause": cause, "next_action": action}
 
-
 def _format_unblock_notes_for_followup(unblock_notes: dict | None) -> str:
     if not unblock_notes:
         return "- None"
     return f"- blocking_cause: {unblock_notes['blocking_cause']}\n- next_action: {unblock_notes['next_action']}"
-
 
 def write_unblock_notes_artifact(task_id: str, unblock_notes: dict, result: dict) -> Path | None:
     """Write a machine-readable YAML unblock-notes artifact for downstream automation."""
@@ -1645,7 +1580,6 @@ def write_unblock_notes_artifact(task_id: str, unblock_notes: dict, result: dict
     path = artifact_dir / f"{task_id}.yaml"
     path.write_text(yaml.safe_dump(artifact, sort_keys=False), encoding="utf-8")
     return path
-
 
 def _git_fetch_with_retry(repo: Path, logfile: Path, queue_summary_log: Path, max_retries: int = 3):
     """Fetch origin with retries to handle git lock contention from concurrent cron pulls."""
@@ -1669,7 +1603,6 @@ def _git_fetch_with_retry(repo: Path, logfile: Path, queue_summary_log: Path, ma
                 except OSError:
                     pass
 
-
 def _ensure_local_excludes(repo: Path) -> None:
     """Add .agent_result.md to the repo's local exclude file.
 
@@ -1690,7 +1623,6 @@ def _ensure_local_excludes(repo: Path) -> None:
             fh.write(f"{prefix}# agent-os: handoff contract, never commit\n.agent_result.md\n")
     except OSError:
         pass  # best-effort; commit_and_push has a defensive untrack as backstop
-
 
 def ensure_worktree(cfg: dict, repo: Path, base_branch: str, branch: str, task_id: str, logfile: Path, queue_summary_log: Path):
     worktree = Path(cfg["worktrees_dir"]) / repo.name / task_id
@@ -1723,7 +1655,6 @@ def ensure_worktree(cfg: dict, repo: Path, base_branch: str, branch: str, task_i
     )
     return worktree
 
-
 def render_prior_attempt_history(prior_results: list[dict]) -> str:
     if not prior_results:
         return "None"
@@ -1743,7 +1674,6 @@ ATTEMPTED_APPROACHES:
 """
         )
     return "\n".join(chunks)
-
 
 def write_prompt(task_id: str, meta: dict, body: str, current_agent: str, prior_results: list[dict], root: Path, worktree: Path | None = None):
     prompt_file = root / "runtime" / "tmp" / f"{task_id}.txt"
@@ -1901,12 +1831,10 @@ Rules:
     snapshot_path.write_text(prompt, encoding="utf-8")
     return prompt_file
 
-
 def run_agent(agent: str, worktree: Path, prompt_file: Path, logfile: Path, timeout_minutes: int, root: Path, queue_summary_log: Path):
     runner = root / "bin" / "agent_runner.sh"
     timeout_seconds = max(60, int(timeout_minutes) * 60)
     run([runner, agent, worktree, prompt_file], logfile=logfile, timeout=timeout_seconds, queue_summary_log=queue_summary_log)
-
 
 def has_changes(worktree: Path):
     result = subprocess.run(
@@ -1916,7 +1844,6 @@ def has_changes(worktree: Path):
         text=True,
     )
     return bool(result.stdout.strip())
-
 
 def has_unpushed_commits(worktree: Path, branch: str) -> bool:
     """Return True if HEAD has commits that are not reachable from any origin ref.
@@ -1935,7 +1862,6 @@ def has_unpushed_commits(worktree: Path, branch: str) -> bool:
         return int(result.stdout.strip() or "0") > 0
     except ValueError:
         return False
-
 
 def commit_and_push(worktree: Path, branch: str, task_id: str, allow_push: bool, logfile: Path, queue_summary_log: Path):
     uncommitted = has_changes(worktree)
@@ -1969,7 +1895,6 @@ def commit_and_push(worktree: Path, branch: str, task_id: str, allow_push: bool,
 
     return True
 
-
 def should_attempt_git_rescue(result: dict, worktree: Path, branch: str) -> bool:
     if not result:
         return False
@@ -1980,7 +1905,6 @@ def should_attempt_git_rescue(result: dict, worktree: Path, branch: str) -> bool
     if result.get("blocker_code") == "fallback_exhausted":
         return False
     return has_changes(worktree) or has_unpushed_commits(worktree, branch)
-
 
 def rescue_git_progress(
     cfg: dict,
@@ -2029,7 +1953,6 @@ def rescue_git_progress(
     decisions.append("- Queue performed git rescue after the agent left valid changes behind.")
     rescued["decisions"] = decisions
     return rescued, True
-
 
 def parse_agent_result(worktree: Path):
     result_file = worktree / ".agent_result.md"
@@ -2149,7 +2072,6 @@ def parse_agent_result(worktree: Path):
         "raw": text,
     }
 
-
 def _repo_agent_fallbacks(meta: dict, cfg: dict) -> dict:
     project_key = str(meta.get("github_project_key", "")).strip()
     if project_key:
@@ -2160,10 +2082,8 @@ def _repo_agent_fallbacks(meta: dict, cfg: dict) -> dict:
                 return fallbacks
     return {}
 
-
 VALID_ASSIGNABLE_AGENTS = {"auto", "claude", "codex", "gemini", "deepseek"}
 VALID_FALLBACK_AGENTS = VALID_ASSIGNABLE_AGENTS - {"auto"}
-
 
 def get_agent_chain(meta: dict, cfg: dict) -> list[str]:
     task_type = meta.get("task_type", cfg["default_task_type"])
@@ -2228,7 +2148,6 @@ def get_agent_chain(meta: dict, cfg: dict) -> list[str]:
             return available_chain
     return healthy
 
-
 def get_next_agent(meta: dict, cfg: dict, model_attempts: list[str]) -> str | None:
     chain = get_agent_chain(meta, cfg)
     for agent in chain:
@@ -2236,20 +2155,17 @@ def get_next_agent(meta: dict, cfg: dict, model_attempts: list[str]) -> str | No
             return agent
     return None
 
-
 def timeout_for_agent(agent: str, meta: dict, cfg: dict) -> int:
     timeout_map = cfg.get("agent_timeout_minutes", {})
     if agent in timeout_map:
         return int(timeout_map[agent])
     return int(meta.get("max_runtime_minutes", cfg["max_runtime_minutes"]))
 
-
 def should_try_fallback(result: dict) -> bool:
     status = result.get("status", "blocked")
     if status == "blocked":
         return True
     return False
-
 
 # Short, human-readable headlines per blocker_code. Telegram surface beats the
 # old "⏸️ Partial/Blocked" label, which required the user to open the task to
@@ -2271,7 +2187,6 @@ _BLOCKER_HEADLINES = {
     "no_diff_produced": ("🫥", "No code changes produced"),
 }
 
-
 def _first_concrete_blocker(blockers: list[str]) -> str:
     """Return the most informative single-line blocker (for a TG one-liner)."""
     for raw in blockers or []:
@@ -2290,7 +2205,6 @@ def _first_concrete_blocker(blockers: list[str]) -> str:
                 return str(more).lstrip("- ").strip()
         return first
     return ""
-
 
 def build_partial_blocked_message(
     task_id: str,
@@ -2347,7 +2261,6 @@ def build_partial_blocked_message(
         lines.append(extra_line)
 
     return "\n".join(lines)
-
 
 def create_followup_task(
     original_meta: dict,
@@ -2427,11 +2340,16 @@ def create_followup_task(
         "github_issue_url": original_meta.get("github_issue_url"),
         "prompt_snapshot_path": str(Path(original_meta.get("prompt_snapshot_path", inbox.parent.parent / "prompts" / f"{new_task_id}.txt")).parent / f"{new_task_id}.txt"),
     }
+    for key in ("objective_id", "sprint_id", "parent_issue", "parent_goal_summary"):
+        value = str(original_meta.get(key) or "").strip()
+        if value:
+            frontmatter[key] = value
     # Propagate structured failed_checks so CI verification survives follow-up reformatting.
     if original_meta.get("failed_checks"):
         frontmatter["failed_checks"] = original_meta["failed_checks"]
 
     frontmatter_text = yaml.safe_dump(frontmatter, sort_keys=False).strip()
+    goal_ancestry_block = format_goal_ancestry_block(frontmatter)
 
     content = f"""---
 {frontmatter_text}
@@ -2453,6 +2371,8 @@ def create_followup_task(
 - Work only inside the repo
 - Prefer minimal diffs
 - Do not repeat failed approaches from ATTEMPTED_APPROACHES unless there is a clear reason
+
+{goal_ancestry_block}
 
 # Original Task
 
@@ -2509,10 +2429,10 @@ def create_followup_task(
     log(f"Created follow-up task: {followup_path}", logfile, also_summary=True, queue_summary_log=queue_summary_log)
     return followup_path
 
-
 def create_escalation_note(original_meta: dict, original_body: str, result: dict, logfile: Path, model_attempts: list[str], escalated: Path, queue_summary_log: Path):
     parent_task_id = original_meta.get("parent_task_id", original_meta["task_id"])
     esc_path = escalated / f"{parent_task_id}-escalation.md"
+    goal_ancestry_block = format_goal_ancestry_block(original_meta)
 
     content = f"""# Escalation Note
 
@@ -2542,6 +2462,8 @@ def create_escalation_note(original_meta: dict, original_body: str, result: dict
 
 ## Summary
 {result.get("summary", "No summary provided.")}
+
+{goal_ancestry_block}
 
 ## Original Task
 {original_body}
@@ -2577,14 +2499,12 @@ def create_escalation_note(original_meta: dict, original_body: str, result: dict
     log(f"Created escalation note: {esc_path}", logfile, also_summary=True, queue_summary_log=queue_summary_log)
     return esc_path
 
-
 def cleanup_worktree(repo: Path, worktree: Path, logfile: Path, queue_summary_log: Path):
     try:
         run(["git", "-C", repo, "worktree", "remove", "--force", worktree], logfile=logfile, check=False, queue_summary_log=queue_summary_log)
         run(["git", "-C", repo, "worktree", "prune"], logfile=logfile, check=False, queue_summary_log=queue_summary_log)
     except Exception as e:
         log(f"Worktree cleanup warning: {e}", logfile, queue_summary_log=queue_summary_log)
-
 
 def run_tests(cfg: dict, repo: Path, worktree: Path, logfile: Path, queue_summary_log: Path) -> None:
     """Run configured test suite in worktree. Modifies .agent_result.md in-place."""
@@ -2659,7 +2579,6 @@ def run_tests(cfg: dict, repo: Path, worktree: Path, logfile: Path, queue_summar
 
     result_path.write_text(text, encoding="utf-8")
 
-
 def record_metrics(
     cfg: dict,
     meta: dict,
@@ -2692,7 +2611,12 @@ def record_metrics(
         "timestamp": datetime.now().isoformat(),
         "task_id": meta.get("task_id", "unknown"),
         "repo": str(meta.get("repo", "unknown")),
+
         "github_repo": str(meta.get("github_repo", "")).strip(),
+
+        "github_repo": meta.get("github_repo"),
+        "github_issue_number": meta.get("github_issue_number"),
+
         "agent": final_agent or "unknown",
         "status": final_result.get("status", "unknown"),
         "blocker_code": blocker_code,
@@ -2701,6 +2625,10 @@ def record_metrics(
         "task_type": meta.get("task_type", "unknown"),
         "model_attempt_details": list(meta.get("model_attempt_details") or []),
     }
+    for key in ("objective_id", "sprint_id", "parent_issue", "parent_goal_summary"):
+        value = meta.get(key)
+        if value:
+            record[key] = value
     line = json.dumps(record) + "\n"
 
     # Rotate at 10 MB to prevent unbounded growth
@@ -2727,16 +2655,13 @@ def record_metrics(
     except Exception as exc:
         log(f"Cost tracking warning: {exc}", logfile, queue_summary_log=queue_summary_log)
 
-
 FALLBACK_COOLDOWN_MINUTES = 120
 FALLBACK_COOLDOWN_FILE = "fallback_cooldown_until.txt"
-
 
 def _cooldown_path(cfg: dict) -> Path:
     state_dir = Path(cfg.get("root_dir", ".")).expanduser() / "runtime" / "state"
     state_dir.mkdir(parents=True, exist_ok=True)
     return state_dir / FALLBACK_COOLDOWN_FILE
-
 
 def fallback_cooldown_remaining(cfg: dict) -> int:
     """Return seconds remaining in the fallback-exhausted cooldown, or 0."""
@@ -2751,7 +2676,6 @@ def fallback_cooldown_remaining(cfg: dict) -> int:
         until = until.replace(tzinfo=timezone.utc)
     delta = (until - datetime.now(timezone.utc)).total_seconds()
     return max(0, int(delta))
-
 
 def start_fallback_cooldown(cfg: dict, minutes: int = FALLBACK_COOLDOWN_MINUTES) -> datetime:
     """Arm the cooldown if not already active; returns the active expiry timestamp.
@@ -2775,7 +2699,6 @@ def start_fallback_cooldown(cfg: dict, minutes: int = FALLBACK_COOLDOWN_MINUTES)
     until = now + timedelta(minutes=minutes)
     path.write_text(until.isoformat(), encoding="utf-8")
     return until
-
 
 def downgrade_no_diff_complete(meta: dict, final_result: dict, agent: str | None) -> dict:
     """Downgrade status=complete to partial when a diff-required task produced no changes.
@@ -2816,7 +2739,6 @@ def downgrade_no_diff_complete(meta: dict, final_result: dict, agent: str | None
     }
     return downgraded
 
-
 def synthesize_exhausted_result(model_attempts: list[str]) -> dict:
     return {
         "status": "blocked",
@@ -2836,7 +2758,6 @@ def synthesize_exhausted_result(model_attempts: list[str]) -> dict:
         },
         "raw": "",
     }
-
 
 def main():
     cfg = load_config()
@@ -3490,7 +3411,6 @@ def main():
             except Exception:
                 pass
             repo_lock_fh.close()
-
 
 if __name__ == "__main__":
     main()
