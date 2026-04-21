@@ -46,6 +46,20 @@ def load_config():
     cfg.setdefault("config_dir", str(config_dir))
     cfg.setdefault("objectives_dir", str(config_dir / "objectives"))
     cfg.setdefault("evidence_dir", str(Path.home() / ".local" / "share" / "agent-os" / "evidence"))
+    cfg.setdefault(
+        "incident_router",
+        {
+            "business_timezone": "UTC",
+            "business_hours": {"start_hour": 9, "end_hour": 17},
+            "digest_hour": 9,
+            "tiers": {
+                "sev1": {"delivery": "immediate", "dedup_window_minutes": 0, "bypass_kill_switch": True},
+                "sev2": {"delivery": "next_business_hour", "dedup_window_minutes": 60, "bypass_kill_switch": False},
+                "sev3": {"delivery": "regular_digest", "dedup_window_minutes": 240, "bypass_kill_switch": False},
+            },
+            "sources": {},
+        },
+    )
     cfg["_config_path"] = str(config_path)
     cfg["_config_dir"] = str(config_dir)
     return cfg
@@ -68,6 +82,7 @@ def runtime_paths(cfg: dict):
         "ESCALATED": mailbox / "escalated",
         "LOGS": logs,
         "PROMPTS": ROOT / "runtime" / "prompts",
+        "INCIDENTS": ROOT / "runtime" / "incidents",
         "QUEUE_SUMMARY_LOG": logs / "queue-summary.log",
         "TELEGRAM_ACTIONS": ROOT / "runtime" / "telegram_actions",
         "TELEGRAM_OFFSET": ROOT / "runtime" / "telegram_update_offset.txt",
@@ -83,6 +98,7 @@ def runtime_paths(cfg: dict):
         paths["ESCALATED"],
         paths["LOGS"],
         paths["PROMPTS"],
+        paths["INCIDENTS"],
         paths["TELEGRAM_ACTIONS"],
     ]:
         p.mkdir(parents=True, exist_ok=True)

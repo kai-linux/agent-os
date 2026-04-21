@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from orchestrator.objectives import load_repo_objective, objective_metrics, score_objective_snapshots
+from orchestrator.incident_router import classify_severity, escalate as route_incident
 from orchestrator.outcome_attribution import load_outcome_records
 from orchestrator.paths import load_config
 from orchestrator.repo_modes import is_dispatcher_only_repo
@@ -1097,6 +1098,20 @@ def run():
     if not findings:
         print(f"All agents above threshold. Wrote empty findings artifact to {artifact}.")
         return
+
+    for finding in findings:
+        if finding.get("source") != "agent_scorer":
+            continue
+        event = {
+            "source": "agent_scorer",
+            "type": finding.get("kind") or "degradation_finding",
+            "repo": finding.get("repo"),
+            "agent": finding.get("agent"),
+            "summary": finding.get("summary"),
+            "dedup_key": finding.get("id"),
+        }
+        severity = classify_severity(cfg, "agent_scorer", event)
+        route_incident(severity, event, cfg=cfg)
 
     print(f"Wrote {len(findings)} degradation finding(s) to {artifact}.")
     print("Issue creation is owned by orchestrator.log_analyzer.")

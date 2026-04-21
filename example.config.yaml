@@ -38,6 +38,45 @@ automation_mode: full                # full=planner/review/self-healing enabled,
 max_parallel_workers: 1
 test_timeout_minutes: 5             # Timeout for test commands (default: 5)
 
+incident_router:
+  business_timezone: "UTC"          # IANA timezone for next-business-hour and digest routing
+  business_hours:
+    start_hour: 9
+    end_hour: 17
+  digest_hour: 9                    # sev3 digest send hour in business_timezone
+  tiers:
+    sev1:
+      delivery: immediate
+      dedup_window_minutes: 0
+      bypass_kill_switch: true
+    sev2:
+      delivery: next_business_hour
+      dedup_window_minutes: 60
+      bypass_kill_switch: false
+    sev3:
+      delivery: regular_digest
+      dedup_window_minutes: 240
+      bypass_kill_switch: false
+  sources:
+    queue:
+      default_severity: sev3
+      rules:
+        - type: task_failed
+          blocker_code: missing_credentials
+          severity: sev2
+    pr_monitor:
+      default_severity: sev3
+      rules:
+        - type: high_risk_pr
+          risk_level: high
+          severity: sev2
+        - type: quality_harness_block
+          severity: sev2
+    agent_scorer:
+      default_severity: sev3
+    deploy_watchdog:
+      default_severity: sev2
+
 plan_size: 5                         # Number of tasks per sprint plan (default: 5)
 sprint_cadence_days: 7               # Planner cadence + retrospective window in days; supports fractions, 0=dormant; actual run frequency is still capped by cron frequency
 planner_allow_early_refresh: true    # If true, planner may refresh early when the current sprint empties before the next cadence tick

@@ -22,6 +22,7 @@ from orchestrator.github_sync import sync_result
 from orchestrator.gh_project import gh_json as _gh_json
 from orchestrator.codebase_memory import read_codebase_context, update_codebase_memory
 from orchestrator.gh_project import add_issue_comment, gh, gh_json, query_project, set_item_status
+from orchestrator.incident_router import classify_severity, escalate as route_incident, update_incident_status
 from orchestrator.repo_context import build_execution_context, gather_recent_git_state, gather_objective_alignment, read_sprint_directives
 from orchestrator.repo_modes import is_dispatcher_only_repo
 from orchestrator.agent_scorer import filter_healthy_agents, log_gate_decision, ADAPTIVE_HEALTH_WINDOW_DAYS, ADAPTIVE_HEALTH_THRESHOLD
@@ -1196,6 +1197,18 @@ def handle_telegram_command(
             return f"🔴 Agent-OS OFF{since_txt}."
         return "🟢 Agent-OS ON."
 
+    if command in {"ack", "resolve"}:
+        if not args:
+            return f"Usage: /{command} <incident_id>"
+        updated = update_incident_status(args[0], action=command, cfg=cfg)
+        if not updated:
+            return f"Incident not found: {args[0]}"
+        return (
+            f"Incident {args[0]} marked acknowledged."
+            if command == "ack"
+            else f"Incident {args[0]} marked resolved."
+        )
+
     if command == "repos":
         rows = cs.list_repos(cfg)
         if not rows:
@@ -1230,6 +1243,7 @@ def handle_telegram_command(
         return (
             "Agent-OS control:\n"
             "/on /off /status — global kill-switch\n"
+            "/ack <incident_id> /resolve <incident_id> — update an incident in runtime/incidents/incidents.jsonl\n"
             "/repos — list repos\n"
             "/repo on|off <key> — pause/resume a single repo\n"
             "/repo mode <key> full|dispatcher — set parent project's automation_mode\n"
@@ -1313,6 +1327,46 @@ def _handle_job_subcommand(root, args, logfile, queue_summary_log) -> str:
     cs.set_job_disabled(root, name, sub == "off")
     log(f"Telegram: /job {sub} {name}", logfile, queue_summary_log=queue_summary_log)
     return f"{'🔴' if sub == 'off' else '🟢'} Job {name} now {sub.upper()}."
+
+
+def _queue_incident_event(
+    event_type: str,
+    meta: dict,
+    result: dict,
+    *,
+    repo_name: str,
+    branch: str,
+    model_attempts: list[str],
+    note_path: Path | None = None,
+    reply_markup: dict | None = None,
+    extra_line: str | None = None,
+) -> dict:
+    summary = result.get("summary", "No summary provided.")
+    if extra_line:
+        summary = f"{summary} ({extra_line})"
+    event = {
+        "source": "queue",
+        "type": event_type,
+        "repo": repo_name,
+        "github_repo": meta.get("github_repo"),
+        "github_issue_number": meta.get("github_issue_number"),
+        "github_issue_url": meta.get("github_issue_url"),
+        "task_id": meta.get("task_id"),
+        "branch": branch,
+        "agent": meta.get("resolved_agent") or meta.get("agent"),
+        "models_tried": list(model_attempts),
+        "blocker_code": result.get("blocker_code"),
+        "summary": summary,
+        "dedup_key": (
+            f"{event_type}:{meta.get('task_id')}:{result.get('blocker_code') or 'none'}:{extra_line or ''}"
+        ),
+    }
+    if note_path is not None:
+        event["escalation_note"] = note_path.name
+        event["summary"] = f"{summary} (note: {note_path.name})"
+    if reply_markup:
+        event["reply_markup"] = reply_markup
+    return event
 
 def _handle_qa_fail_command(cfg: dict, paths: dict, chat_id: str, args: list[str]) -> str:
     if len(args) < 3:
@@ -3521,16 +3575,17 @@ def main():
                 log("Final queue state: blocked", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
                 shutil.move(str(processing), str(BLOCKED / processing.name))
                 if not suppress_partial_telegram:
-                    send_telegram(
-                        cfg,
-                        build_partial_blocked_message(
-                            task_id, repo.name, branch, final_agent, model_attempts,
-                            final_result, meta,
-                            extra_line=f"Follow-up issue: {github_followup_url}",
-                        ),
-                        logfile,
-                        QUEUE_SUMMARY_LOG,
+                    event = _queue_incident_event(
+                        "task_blocked",
+                        meta,
+                        final_result,
+                        repo_name=repo.name,
+                        branch=branch,
+                        model_attempts=model_attempts,
+                        extra_line=f"Follow-up issue: {github_followup_url}",
                     )
+                    severity = classify_severity(cfg, "queue", event)
+                    route_incident(severity, event, cfg=cfg, logfile=logfile, queue_summary_log=QUEUE_SUMMARY_LOG)
             elif dispatcher_only_mode:
                 log(
                     "Dispatcher-only repo: skipping automated follow-up/escalation for partial/blocked outcome.",
@@ -3541,16 +3596,17 @@ def main():
                 log("Final queue state: blocked", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
                 shutil.move(str(processing), str(BLOCKED / processing.name))
                 if not suppress_partial_telegram:
-                    send_telegram(
-                        cfg,
-                        build_partial_blocked_message(
-                            task_id, repo.name, branch, final_agent, model_attempts,
-                            final_result, meta,
-                            extra_line="Automation: dispatcher_only (manual requeue required)",
-                        ),
-                        logfile,
-                        QUEUE_SUMMARY_LOG,
+                    event = _queue_incident_event(
+                        "task_blocked",
+                        meta,
+                        final_result,
+                        repo_name=repo.name,
+                        branch=branch,
+                        model_attempts=model_attempts,
+                        extra_line="Automation: dispatcher_only (manual requeue required)",
                     )
+                    severity = classify_severity(cfg, "queue", event)
+                    route_incident(severity, event, cfg=cfg, logfile=logfile, queue_summary_log=QUEUE_SUMMARY_LOG)
             else:
                 followup = create_followup_task(
                     meta,
@@ -3566,16 +3622,17 @@ def main():
                     log("Final queue state: blocked", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
                     shutil.move(str(processing), str(BLOCKED / processing.name))
                     if not suppress_partial_telegram:
-                        send_telegram(
-                            cfg,
-                            build_partial_blocked_message(
-                                task_id, repo.name, branch, final_agent, model_attempts,
-                                final_result, meta,
-                                extra_line=f"Retry queued: {followup.name}",
-                            ),
-                            logfile,
-                            QUEUE_SUMMARY_LOG,
+                        event = _queue_incident_event(
+                            "task_blocked",
+                            meta,
+                            final_result,
+                            repo_name=repo.name,
+                            branch=branch,
+                            model_attempts=model_attempts,
+                            extra_line=f"Retry queued: {followup.name}",
                         )
+                        severity = classify_severity(cfg, "queue", event)
+                        route_incident(severity, event, cfg=cfg, logfile=logfile, queue_summary_log=QUEUE_SUMMARY_LOG)
                 else:
                     esc = create_escalation_note(meta, body, final_result, logfile, model_attempts, ESCALATED, QUEUE_SUMMARY_LOG)
                     log("No follow-up created. Final queue state: escalated", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
@@ -3587,25 +3644,40 @@ def main():
                         action = create_escalation_action(meta, final_result, esc, chat_id)
                         save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
                         reply_markup = escalation_reply_markup(action["action_id"])
-                    message_id = send_telegram(
-                        cfg,
-                        build_escalation_message(meta, final_result, esc),
-                        logfile,
-                        QUEUE_SUMMARY_LOG,
+                    event = _queue_incident_event(
+                        "task_escalated",
+                        meta,
+                        final_result,
+                        repo_name=repo.name,
+                        branch=branch,
+                        model_attempts=model_attempts,
+                        note_path=esc,
                         reply_markup=reply_markup,
                     )
+                    severity = classify_severity(cfg, "queue", event)
+                    incident = route_incident(
+                        severity,
+                        event,
+                        cfg=cfg,
+                        logfile=logfile,
+                        queue_summary_log=QUEUE_SUMMARY_LOG,
+                    )
                     if action is not None:
-                        action["message_id"] = message_id
+                        action["message_id"] = incident.get("message_id")
                         save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
         else:
             log("Final queue state: failed", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
             shutil.move(str(processing), str(FAILED / processing.name))
-            send_telegram(
-                cfg,
-                f"❌ Failed\nTask: {task_id}\nRepo: {repo.name}\nBranch: {branch}\nModels tried: {', '.join(model_attempts)}",
-                logfile,
-                QUEUE_SUMMARY_LOG,
+            event = _queue_incident_event(
+                "task_failed",
+                meta,
+                final_result,
+                repo_name=repo.name,
+                branch=branch,
+                model_attempts=model_attempts,
             )
+            severity = classify_severity(cfg, "queue", event)
+            route_incident(severity, event, cfg=cfg, logfile=logfile, queue_summary_log=QUEUE_SUMMARY_LOG)
 
     except Exception as e:
         log(f"ERROR: {e}", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
@@ -3671,7 +3743,16 @@ def main():
             if processing.exists():
                 shutil.move(str(processing), str(FAILED / processing.name))
 
-            send_telegram(cfg, f"❌ Failed (infra)\nTask: {task_id}\nError: {e}\nRetries exhausted.", logfile, QUEUE_SUMMARY_LOG)
+            event = _queue_incident_event(
+                "task_failed",
+                meta,
+                failure_result,
+                repo_name=repo.name if repo is not None else "unknown",
+                branch=branch if "branch" in locals() else "unknown",
+                model_attempts=model_attempts if "model_attempts" in locals() else [],
+            )
+            severity = classify_severity(cfg, "queue", event)
+            route_incident(severity, event, cfg=cfg, logfile=logfile, queue_summary_log=QUEUE_SUMMARY_LOG)
     finally:
         if repo is not None and worktree is not None:
             cleanup_worktree(repo, worktree, logfile, QUEUE_SUMMARY_LOG)
