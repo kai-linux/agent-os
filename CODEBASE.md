@@ -42,6 +42,18 @@
 
 ## Recent Changes
 
+### 2026-04-21 — [task-20260421-130125-create-fork-guide-md-with-customization-patterns] (#208 kai-linux/agent-os)
+Added FORK_GUIDE.md at the repo root covering the high-leverage customization entry points solo builders reach for when forking Agent OS — agent routing and fallback chains, adding a new agent (runner + registration + pricing), task dispatch and task_type extension, prompt assembly and context injection, objectives and scoring files, per-repo overrides, and the pre-commit secret guard. The guide is example-driven with concrete config snippets, file:line references to the real code paths, and a small "what NOT to fork" section to steer users away from invasive changes. Also linked the new guide from README.md's Documentation table so it is discoverable from the front door.
+
+**Files:** `- FORK_GUIDE.md`, `- README.md`, `- .agent_result.md`
+
+**Decisions:**
+  - - Kept the guide at repo root (FORK_GUIDE.md) rather than docs/fork-guide.md because CONTRIBUTING.md / NORTH_STAR.md / README.md already live at root and the fork audience lands on the root listing first
+  - - Focused on the three entry points called out in the task (routing, dispatch, prompts) plus the closely-adjacent ones a forker always needs (objectives, per-repo overrides, pre-commit). Skipped deep-dive topics already covered in docs/configuration.md and docs/execution.md and linked to them instead
+  - - Added a "What NOT to fork" section to protect the .agent_result.md contract, CODEBASE.md format, mailbox layout, and Project status field semantics — changing these cascades through many modules and is a common fork trap
+  - - Verified all referenced file paths, line numbers, and linked docs exist before writing
+
+
 ### 2026-04-21 — [task-20260421-122231-phase-1-authenticated-web-dashboard-auth-layer-tai] (#266 kai-linux/agent-os)
 Implemented a new dashboard auth layer with Tailscale and shared-secret backends, enforced safe bind-address startup validation, allowed unauthenticated reads only on localhost, required authentication for writes, and logged authenticated write actions to the immutable audit trail.
 
