@@ -4,12 +4,22 @@ import json
 
 import pytest
 
+from orchestrator import dashboard
 from orchestrator.dashboard.auth import (
     LOCALHOST_BIND,
     DashboardUnauthorizedError,
     build_dashboard_auth,
     validate_dashboard_auth_config,
 )
+
+
+def test_dashboard_package_exports_auth_helpers():
+    assert dashboard.DashboardAuth.__name__ == "DashboardAuth"
+    assert dashboard.DashboardActor.__name__ == "DashboardActor"
+    assert dashboard.DashboardAuthError.__name__ == "DashboardAuthError"
+    assert dashboard.DashboardUnauthorizedError.__name__ == "DashboardUnauthorizedError"
+    assert dashboard.build_dashboard_auth is build_dashboard_auth
+    assert dashboard.validate_dashboard_auth_config is validate_dashboard_auth_config
 
 
 def test_validate_dashboard_auth_config_defaults_to_local_bind():
