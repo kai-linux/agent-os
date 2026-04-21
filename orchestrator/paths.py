@@ -41,6 +41,7 @@ def load_config():
     cfg.setdefault("default_allow_push", True)
     cfg.setdefault("default_max_attempts", 4)
     cfg.setdefault("automation_mode", "full")
+    cfg.setdefault("dashboard_bind_address", "127.0.0.1")
     cfg.setdefault("github_owner", "")
     cfg.setdefault("github_projects", {})
     cfg.setdefault("config_dir", str(config_dir))
@@ -80,6 +81,10 @@ def load_config():
     )
     cfg["_config_path"] = str(config_path)
     cfg["_config_dir"] = str(config_dir)
+
+    from orchestrator.dashboard.auth import validate_dashboard_auth_config
+
+    cfg.update(validate_dashboard_auth_config(cfg))
     return cfg
 
 

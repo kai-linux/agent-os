@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
 import yaml
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -36,3 +37,15 @@ def test_load_config_sets_repo_objective_defaults(monkeypatch, tmp_path):
 
     assert cfg["config_dir"] == str(repo_root)
     assert cfg["objectives_dir"] == str(repo_root / "objectives")
+
+
+def test_load_config_rejects_non_local_dashboard_bind_without_auth(monkeypatch, tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    config_path = repo_root / "config.yaml"
+    config_path.write_text('dashboard_bind_address: "0.0.0.0"\n', encoding="utf-8")
+
+    monkeypatch.setenv("AGENT_OS_CONFIG", str(config_path))
+
+    with pytest.raises(ValueError, match="dashboard_bind_address must remain 127.0.0.1"):
+        load_config()
