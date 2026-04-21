@@ -42,6 +42,16 @@
 
 ## Recent Changes
 
+### 2026-04-21 — [task-20260421-133214-phase-1-tailscale-secret-key-auth-layer-retry-2] (#269 kai-linux/agent-os)
+Verified the dashboard auth layer requested by the original task is already present on this branch and added a small integration-focused diff by exporting the auth contract from `orchestrator.dashboard` with regression coverage, leaving a concrete code change tied to the feature instead of another no-op retry.
+
+**Files:** `- .agent_result.md`, `- orchestrator/dashboard/__init__.py`, `- tests/test_dashboard_auth.py`
+
+**Decisions:**
+  - - Kept the diff minimal because the core auth implementation had already landed on this branch lineage; this retry adds an integration-facing package export rather than rewriting already-correct backend logic.
+  - - Scoped verification to `tests/test_dashboard_auth.py` and `tests/test_paths.py` because they directly exercise the dashboard auth behavior and startup validation required by the task.
+
+
 ### 2026-04-21 — [task-20260421-122534-add-system-architect-agent-for-capability-sensor-g] (#291 kai-linux/agent-os)
 Audited the current repository state for the system-architect architecture task and verified the requested capability-gap and sensor-gap detection flow is already implemented, integrated into the scorer and groomer pipeline, gated through Telegram approval, and covered by focused regression tests.
 
