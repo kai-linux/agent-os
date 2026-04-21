@@ -41,7 +41,12 @@ _SMALL_DIFF_FILES = 1
 _LARGE_DIFF_LINES = 1200
 _LARGE_DIFF_FILES = 30
 
-_JUDGE_PROMPT = """You are the Agent OS work verifier. Your job is to judge whether a pull request actually fulfills the linked issue.
+# NOTE: kept as a static string (no ``str.format`` templating) because the
+# literal JSON schema below contains ``{``/``}`` characters that ``.format``
+# would parse as placeholders — the past incident (KeyError: '\n  "verdict"')
+# crashed pr_monitor mid-merge and burned PR merge attempts. The two real
+# substitutions (issue body, diff) are appended via f-string below instead.
+_JUDGE_PROMPT_HEADER = """You are the Agent OS work verifier. Your job is to judge whether a pull request actually fulfills the linked issue.
 
 Rules:
 - Extract the concrete acceptance criteria from the issue body. Prefer bullets in Success Criteria / Acceptance Criteria sections, but infer criteria from Goal when necessary.
@@ -71,12 +76,6 @@ Return this JSON object:
   "missing_tests": true,
   "notes": ["short note"]
 }
-
-Issue body:
-{issue_body}
-
-PR diff:
-{diff_text}
 """
 
 
