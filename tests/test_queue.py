@@ -1,5 +1,6 @@
 """Unit tests for pure functions in orchestrator/queue.py"""
 import json
+import os
 import sys
 import textwrap
 import tempfile
@@ -37,6 +38,7 @@ from orchestrator.queue import (
     parse_agent_result,
     parse_bullets,
     record_metrics,
+    recover_stalled_processing_tasks,
     rescue_git_progress,
     run_tests,
     save_telegram_action,
@@ -268,6 +270,169 @@ def test_record_metrics_persists_model_attempt_details(tmp_path):
     assert record["github_repo"] == "acme/repo"
     assert record["model_attempt_details"][0]["model"] == "codex"
     assert record["model_attempt_details"][0]["input_tokens_estimate"] == 100
+
+
+def test_recover_stalled_processing_task_requeues_crashed_worker(tmp_path, monkeypatch):
+    from unittest.mock import ANY
+
+    mailbox = tmp_path / "runtime" / "mailbox"
+    processing = mailbox / "processing"
+    inbox = mailbox / "inbox"
+    blocked = mailbox / "blocked"
+    for path in (processing, inbox, blocked):
+        path.mkdir(parents=True, exist_ok=True)
+
+    task_path = processing / "task-stalled.md"
+    task_path.write_text(
+        """---
+task_id: task-stalled
+repo: /tmp/repo
+agent: codex
+attempt: 1
+max_attempts: 3
+model_attempts:
+  - codex
+---
+
+# Goal
+
+Recover me
+""",
+        encoding="utf-8",
+    )
+    stale_time = datetime.now(timezone.utc) - timedelta(minutes=45)
+    os.utime(task_path, (stale_time.timestamp(), stale_time.timestamp()))
+    lock_path = processing / "task-stalled.md.lock.json"
+    lock_path.write_text(json.dumps({"pid": 999999, "worker_id": "w0", "agent": "codex"}), encoding="utf-8")
+
+    sent = []
+    audits = []
+    monkeypatch.setattr("orchestrator.queue.send_telegram", lambda cfg, text, *args, **kwargs: sent.append(text) or 1)
+    monkeypatch.setattr("orchestrator.queue.append_audit_event", lambda cfg, event_type, payload: audits.append((event_type, payload)) or {})
+
+    recovered = recover_stalled_processing_tasks(
+        {"default_max_attempts": 4, "max_processing_minutes": 30},
+        {"PROCESSING": processing, "INBOX": inbox, "BLOCKED": blocked},
+        now=datetime.now(timezone.utc),
+    )
+
+    assert recovered and recovered[0]["action"] == "requeued"
+    requeued = inbox / "task-stalled.md"
+    assert requeued.exists()
+    updated = requeued.read_text(encoding="utf-8")
+    assert "attempt: 2" in updated
+    assert "model_attempts: []" in updated
+    assert "stalled_recovered_by: processing_stall_watchdog" in updated
+    assert "stalled_duration_minutes:" in updated
+    assert not task_path.exists()
+    assert not lock_path.exists()
+    assert sent and "Task: task-stalled" in sent[0] and "Agent: codex" in sent[0]
+    assert audits == [("stalled_task_requeued", ANY)]
+
+    assert recover_stalled_processing_tasks(
+        {"default_max_attempts": 4, "max_processing_minutes": 30},
+        {"PROCESSING": processing, "INBOX": inbox, "BLOCKED": blocked},
+        now=datetime.now(timezone.utc),
+    ) == []
+
+
+def test_recover_stalled_processing_task_blocks_when_attempts_exhausted(tmp_path, monkeypatch):
+    from unittest.mock import ANY
+
+    mailbox = tmp_path / "runtime" / "mailbox"
+    processing = mailbox / "processing"
+    inbox = mailbox / "inbox"
+    blocked = mailbox / "blocked"
+    for path in (processing, inbox, blocked):
+        path.mkdir(parents=True, exist_ok=True)
+
+    task_path = processing / "task-exhausted.md"
+    task_path.write_text(
+        """---
+task_id: task-exhausted
+repo: /tmp/repo
+agent: claude
+attempt: 3
+max_attempts: 3
+---
+
+# Goal
+
+Recover me
+""",
+        encoding="utf-8",
+    )
+    stale_time = datetime.now(timezone.utc) - timedelta(minutes=50)
+    os.utime(task_path, (stale_time.timestamp(), stale_time.timestamp()))
+    lock_path = processing / "task-exhausted.md.lock.json"
+    lock_path.write_text(json.dumps({"pid": 999999, "worker_id": "w9", "agent": "claude"}), encoding="utf-8")
+
+    sent = []
+    audits = []
+    monkeypatch.setattr("orchestrator.queue.send_telegram", lambda cfg, text, *args, **kwargs: sent.append(text) or 1)
+    monkeypatch.setattr("orchestrator.queue.append_audit_event", lambda cfg, event_type, payload: audits.append((event_type, payload)) or {})
+
+    recovered = recover_stalled_processing_tasks(
+        {"default_max_attempts": 4, "max_processing_minutes": 30},
+        {"PROCESSING": processing, "INBOX": inbox, "BLOCKED": blocked},
+        now=datetime.now(timezone.utc),
+    )
+
+    assert recovered and recovered[0]["action"] == "blocked"
+    blocked_task = blocked / "task-exhausted.md"
+    assert blocked_task.exists()
+    blocked_text = blocked_task.read_text(encoding="utf-8")
+    assert "blocker_code: worker_crash" in blocked_text
+    assert "stalled_recovered_by: processing_stall_watchdog" in blocked_text
+    assert not (inbox / "task-exhausted.md").exists()
+    assert not lock_path.exists()
+    assert sent and "worker_crash" in sent[0]
+    assert audits == [("stalled_task_blocked", ANY)]
+
+
+def test_recover_stalled_processing_task_skips_live_pid_lock(tmp_path, monkeypatch):
+    mailbox = tmp_path / "runtime" / "mailbox"
+    processing = mailbox / "processing"
+    inbox = mailbox / "inbox"
+    blocked = mailbox / "blocked"
+    for path in (processing, inbox, blocked):
+        path.mkdir(parents=True, exist_ok=True)
+
+    task_path = processing / "task-live.md"
+    task_path.write_text(
+        """---
+task_id: task-live
+repo: /tmp/repo
+agent: codex
+attempt: 1
+max_attempts: 3
+---
+
+# Goal
+
+Do not touch me
+""",
+        encoding="utf-8",
+    )
+    stale_time = datetime.now(timezone.utc) - timedelta(minutes=60)
+    os.utime(task_path, (stale_time.timestamp(), stale_time.timestamp()))
+    lock_path = processing / "task-live.md.lock.json"
+    lock_path.write_text(json.dumps({"pid": os.getpid(), "worker_id": "w1", "agent": "codex"}), encoding="utf-8")
+
+    monkeypatch.setattr("orchestrator.queue.send_telegram", lambda *args, **kwargs: pytest.fail("should not alert"))
+    monkeypatch.setattr("orchestrator.queue.append_audit_event", lambda *args, **kwargs: pytest.fail("should not audit"))
+
+    recovered = recover_stalled_processing_tasks(
+        {"default_max_attempts": 4, "max_processing_minutes": 30},
+        {"PROCESSING": processing, "INBOX": inbox, "BLOCKED": blocked},
+        now=datetime.now(timezone.utc),
+    )
+
+    assert recovered == []
+    assert task_path.exists()
+    assert lock_path.exists()
+    assert not any(inbox.glob("*.md"))
+    assert not any(blocked.glob("*.md"))
 
 
 def test_get_agent_chain_skips_agents_below_adaptive_health_threshold(tmp_path):

@@ -34,6 +34,8 @@ max_runtime_minutes: 40
 default_base_branch: main
 default_allow_push: true
 default_max_attempts: 4
+max_processing_minutes: 30         # Treat processing tasks older than this as stalled when no live worker PID holds the task lock
+stall_watchdog_interval_minutes: 5 # Supervisor/queue watchdog cadence for stale processing recovery; set 0 to disable
 automation_mode: full                # full=planner/review/self-healing enabled, dispatcher_only=manual Ready -> dispatch -> PR only
 max_parallel_workers: 1
 test_timeout_minutes: 5             # Timeout for test commands (default: 5)
