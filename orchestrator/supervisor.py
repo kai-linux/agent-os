@@ -14,7 +14,7 @@ import sys
 import time
 
 from orchestrator.paths import load_config, runtime_paths
-from orchestrator.queue import process_telegram_callbacks
+from orchestrator.queue import maybe_run_stall_watchdog, process_telegram_callbacks
 
 
 def main():
@@ -36,6 +36,7 @@ def main():
         if now - last_callback_poll >= 15:
             process_telegram_callbacks(cfg, paths)
             last_callback_poll = now
+        maybe_run_stall_watchdog(cfg, paths, worker_id="supervisor", queue_summary_log=paths["QUEUE_SUMMARY_LOG"])
 
         # Reap finished workers
         procs = [(wid, p) for wid, p in procs if p.poll() is None]

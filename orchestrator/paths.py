@@ -40,6 +40,8 @@ def load_config():
     cfg.setdefault("default_base_branch", "main")
     cfg.setdefault("default_allow_push", True)
     cfg.setdefault("default_max_attempts", 4)
+    cfg.setdefault("max_processing_minutes", 30)
+    cfg.setdefault("stall_watchdog_interval_minutes", 5)
     cfg.setdefault("automation_mode", "full")
     cfg.setdefault("dashboard_bind_address", "127.0.0.1")
     cfg.setdefault("github_owner", "")

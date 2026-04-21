@@ -16,6 +16,7 @@ from uuid import uuid4
 
 import yaml
 
+from orchestrator.audit_log import append_audit_event
 from orchestrator.git_branches import detect_default_branch, remote_branch_exists
 from orchestrator.paths import load_config, runtime_paths
 from orchestrator.github_sync import sync_result
@@ -26,6 +27,7 @@ from orchestrator.incident_router import classify_severity, escalate as route_in
 from orchestrator.repo_context import build_execution_context, gather_recent_git_state, gather_objective_alignment, read_sprint_directives
 from orchestrator.repo_modes import is_dispatcher_only_repo
 from orchestrator.agent_scorer import filter_healthy_agents, log_gate_decision, ADAPTIVE_HEALTH_WINDOW_DAYS, ADAPTIVE_HEALTH_THRESHOLD
+from orchestrator.scheduler_state import is_due, job_lock, record_run
 
 from orchestrator.cost_tracker import rebuild_cost_records, resolve_attempt_model, resolve_attempt_provider, estimate_text_tokens
 
@@ -92,6 +94,9 @@ DIFF_REQUIRED_TASK_TYPES = frozenset({
     "browser_automation",
 })
 PROMPT_INSPECTION_BLOCKER_CODES = {"invalid_result_contract"}
+STALL_WATCHDOG_JOB_NAME = "processing_stall_watchdog"
+STALL_WATCHDOG_SCOPE = "__global__"
+PROCESSING_LOCK_SUFFIX = ".lock.json"
 
 # Web-implementation task detection. "Build homepage / landing page" tasks
 # repeatedly shipped markdown copy-specs (BVT_HOMEPAGE.md, etc.) instead of
@@ -1632,6 +1637,202 @@ def render_task(meta: dict, body: str) -> str:
     frontmatter_text = yaml.safe_dump(meta, sort_keys=False).strip()
     return f"---\n{frontmatter_text}\n---\n\n{body.rstrip()}\n"
 
+
+def _processing_lock_path(task_path: Path) -> Path:
+    return task_path.with_name(f"{task_path.name}{PROCESSING_LOCK_SUFFIX}")
+
+
+def _write_processing_lock(task_path: Path, meta: dict, worker_id: str) -> Path:
+    lock_path = _processing_lock_path(task_path)
+    payload = {
+        "task_id": meta.get("task_id"),
+        "worker_id": worker_id,
+        "pid": os.getpid(),
+        "agent": meta.get("resolved_agent") or meta.get("agent"),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    lock_path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
+    return lock_path
+
+
+def _clear_processing_lock(task_path: Path) -> None:
+    try:
+        _processing_lock_path(task_path).unlink()
+    except FileNotFoundError:
+        return
+
+
+def _read_processing_lock(task_path: Path) -> dict:
+    lock_path = _processing_lock_path(task_path)
+    if not lock_path.exists():
+        return {}
+    try:
+        data = json.loads(lock_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _pid_is_live(pid: object) -> bool:
+    try:
+        value = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if value <= 0:
+        return False
+    try:
+        os.kill(value, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _processing_age_minutes(task_path: Path, now: datetime | None = None) -> float:
+    current = now or datetime.now(timezone.utc)
+    return max(0.0, (current.timestamp() - task_path.stat().st_mtime) / 60.0)
+
+
+def recover_stalled_processing_tasks(
+    cfg: dict,
+    paths: dict,
+    *,
+    now: datetime | None = None,
+    logfile: Path | None = None,
+    queue_summary_log: Path | None = None,
+) -> list[dict]:
+    current = now or datetime.now(timezone.utc)
+    max_processing_minutes = float(cfg.get("max_processing_minutes", 30) or 30)
+    recovered: list[dict] = []
+
+    for task_path in sorted(paths["PROCESSING"].glob("*.md")):
+        try:
+            age_minutes = _processing_age_minutes(task_path, current)
+        except FileNotFoundError:
+            continue
+        if age_minutes < max_processing_minutes:
+            continue
+
+        lock_data = _read_processing_lock(task_path)
+        if _pid_is_live(lock_data.get("pid")):
+            continue
+
+        try:
+            meta, body = parse_task(task_path)
+        except Exception as exc:
+            log(
+                f"Stall watchdog skipped unreadable task {task_path.name}: {exc}",
+                logfile,
+                queue_summary_log=queue_summary_log,
+            )
+            continue
+
+        current_attempt = int(meta.get("attempt", 1) or 1)
+        max_attempts = int(meta.get("max_attempts", cfg.get("default_max_attempts", 4)) or cfg.get("default_max_attempts", 4))
+        last_agent = str(meta.get("resolved_agent") or meta.get("agent") or "unknown").strip() or "unknown"
+        stale_pid = lock_data.get("pid")
+        payload = {
+            "task_id": meta.get("task_id"),
+            "task_file": task_path.name,
+            "agent": last_agent,
+            "duration_minutes": round(age_minutes, 1),
+            "attempt": current_attempt,
+            "max_attempts": max_attempts,
+            "stale_pid": stale_pid,
+        }
+
+        meta["stalled_recovered_at"] = current.isoformat()
+        meta["stalled_recovered_by"] = STALL_WATCHDOG_JOB_NAME
+        meta["stalled_duration_minutes"] = round(age_minutes, 1)
+        if stale_pid is not None:
+            meta["stalled_worker_pid"] = stale_pid
+
+        if current_attempt >= max_attempts:
+            meta["blocker_code"] = "worker_crash"
+            task_path.write_text(render_task(meta, body), encoding="utf-8")
+            destination = paths["BLOCKED"] / task_path.name
+            shutil.move(str(task_path), str(destination))
+            _clear_processing_lock(task_path)
+            send_telegram(
+                cfg,
+                f"🚧 Worker crash escalated\nTask: {meta.get('task_id')}\nAgent: {last_agent}\nStuck: {round(age_minutes, 1)} min\nAction: moved to blocked (worker_crash)",
+                logfile,
+                queue_summary_log,
+            )
+            append_audit_event(
+                cfg,
+                "stalled_task_blocked",
+                {**payload, "action": "blocked", "blocker_code": "worker_crash"},
+            )
+            recovered.append({"task_id": meta.get("task_id"), "action": "blocked", "path": destination})
+            continue
+
+        meta["attempt"] = current_attempt + 1
+        meta["model_attempts"] = []
+        task_path.write_text(render_task(meta, body), encoding="utf-8")
+        destination = paths["INBOX"] / task_path.name
+        shutil.move(str(task_path), str(destination))
+        _clear_processing_lock(task_path)
+        send_telegram(
+            cfg,
+            f"♻️ Recovered stalled task\nTask: {meta.get('task_id')}\nAgent: {last_agent}\nStuck: {round(age_minutes, 1)} min\nAction: returned to inbox (attempt {meta['attempt']}/{max_attempts})",
+            logfile,
+            queue_summary_log,
+        )
+        append_audit_event(
+            cfg,
+            "stalled_task_requeued",
+            {**payload, "action": "requeued", "new_attempt": meta["attempt"]},
+        )
+        recovered.append({"task_id": meta.get("task_id"), "action": "requeued", "path": destination})
+
+    return recovered
+
+
+def maybe_run_stall_watchdog(
+    cfg: dict,
+    paths: dict,
+    *,
+    worker_id: str = "watchdog",
+    now: datetime | None = None,
+    logfile: Path | None = None,
+    queue_summary_log: Path | None = None,
+) -> list[dict]:
+    current = now or datetime.now(timezone.utc)
+    interval_minutes = float(cfg.get("stall_watchdog_interval_minutes", 5) or 5)
+    if interval_minutes <= 0:
+        return []
+
+    with job_lock(cfg, STALL_WATCHDOG_JOB_NAME) as acquired:
+        if not acquired:
+            return []
+        due, _reason = is_due(
+            cfg,
+            STALL_WATCHDOG_JOB_NAME,
+            STALL_WATCHDOG_SCOPE,
+            cadence_hours=interval_minutes / 60.0,
+            now=current,
+        )
+        if not due:
+            return []
+        recovered = recover_stalled_processing_tasks(
+            cfg,
+            paths,
+            now=current,
+            logfile=logfile,
+            queue_summary_log=queue_summary_log,
+        )
+        record_run(cfg, STALL_WATCHDOG_JOB_NAME, STALL_WATCHDOG_SCOPE, now=current)
+        if recovered:
+            log(
+                f"[{worker_id}] Stall watchdog recovered {len(recovered)} task(s).",
+                logfile,
+                also_summary=True,
+                queue_summary_log=queue_summary_log,
+            )
+        return recovered
+
 def split_section(text: str, start_label: str, end_labels: list[str]):
     if end_labels:
         pattern = rf"^{re.escape(start_label)}:\s*(.*?)(?=^(?:{'|'.join(map(re.escape, end_labels))}):|\Z)"
@@ -3105,6 +3306,7 @@ def main():
     QUEUE_SUMMARY_LOG = paths["QUEUE_SUMMARY_LOG"]
 
     worker_id = os.environ.get("QUEUE_WORKER_ID", "w0")
+    maybe_run_stall_watchdog(cfg, paths, worker_id=worker_id, queue_summary_log=QUEUE_SUMMARY_LOG)
 
     cooldown_left = fallback_cooldown_remaining(cfg)
     if cooldown_left > 0:
@@ -3120,6 +3322,7 @@ def main():
     processing = PROCESSING / task.name
     try:
         shutil.move(str(task), str(processing))
+        os.utime(processing, None)
     except FileNotFoundError:
         print(f"[{worker_id}] Task picked by another worker. Exiting.")
         return
@@ -3140,6 +3343,7 @@ def main():
 
         task_id = meta["task_id"]
         logfile = LOGS / f"{task_id}.log"
+        _write_processing_lock(processing, meta, worker_id)
 
         repo = Path(meta["repo"])
         base_branch = meta.get("base_branch", cfg["default_base_branch"])
@@ -3822,6 +4026,7 @@ def main():
             severity = classify_severity(cfg, "queue", event)
             route_incident(severity, event, cfg=cfg, logfile=logfile, queue_summary_log=QUEUE_SUMMARY_LOG)
     finally:
+        _clear_processing_lock(processing)
         if repo is not None and worktree is not None:
             cleanup_worktree(repo, worktree, logfile, QUEUE_SUMMARY_LOG)
         if repo_lock_fh is not None:
