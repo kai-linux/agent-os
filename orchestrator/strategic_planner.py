@@ -3829,9 +3829,27 @@ def run():
             repos = _order_repos_by_dependencies(repos, dependencies)
             print("Planning order: " + " -> ".join(github_slug for github_slug, _ in repos))
 
+        from orchestrator.control_state import is_repo_disabled
+        root = paths.get("ROOT")
+        # Build repo_slug → repo_key lookup for the /repo off check.
+        slug_to_key: dict[str, str] = {}
+        for _pcfg in cfg.get("github_projects", {}).values():
+            if isinstance(_pcfg, dict):
+                for _rc in _pcfg.get("repos", []):
+                    slug = _rc.get("github_repo", "")
+                    if slug:
+                        slug_to_key[slug] = _rc.get("key", "")
+
         for github_slug, repo_path in repos:
             if is_dispatcher_only_repo(cfg, github_slug):
                 print(f"  Skipping {github_slug}: automation_mode=dispatcher_only")
+                continue
+            # Honor /repo off — sprint planning for a paused repo just spams
+            # the operator with plans they can't act on without toggling it
+            # back on first.
+            repo_key = slug_to_key.get(github_slug, "")
+            if root and repo_key and is_repo_disabled(root, repo_key):
+                print(f"  Skipping {github_slug}: repo disabled via /repo off")
                 continue
             _, sprint_cadence_days = _repo_planner_config(cfg, github_slug)
             pending_action = _repo_pending_plan_action(paths["TELEGRAM_ACTIONS"], github_slug)
