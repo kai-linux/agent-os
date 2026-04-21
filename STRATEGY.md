@@ -38,13 +38,55 @@ Sprint selection should balance:
 
 
 
+
 <!-- auto-focus-areas -->
-- Optimize GitHub visitor-to-adopter conversion funnel through README, quickstart, and deployment guides
-- Wire external outcome metrics infrastructure for evidence-driven adoption decisions
-- Eliminate missing_context as the top task failure mode through intake validation
-- Stabilize core reliability through CI cascade prevention and agent health gates
+- GitHub adoption funnel: README improvements, quickstart/deployment guides, case studies, and discoverability
+- Agent reliability and task processing: Codex degradation fixes, missing_context blocker resolution, CI cascade prevention
+- Observability infrastructure: SLO/cost tracking, outcome metrics, dashboards, and goal ancestry
+- Execution resilience: Auto-recovery of stalled tasks, work verification, and adaptive routing
 
 ## Sprint History
+
+### Sprint 2026-04-21
+
+**Retrospective:**
+Issues completed:
+- #260: Build SLO state tracker module [prio:normal, done] — COMPLETED
+- #253: Implement cost tracking infrastructure [prio:normal, done] — COMPLETED
+- #251: Add authenticated web control plane with meta-info panels (Tailscale-ready) [enhancement, task:architecture, prio:normal] — COMPLETED
+- #250: Add quality-harness architect with modality detection and field-failure fixture loop [enhancement, task:architecture, prio:high, done] — COMPLETED
+- #245: Add deploy-watchdog agent that auto-reverts post-merge regressions [enhancement, task:architecture, prio:normal, done] — COMPLETED
+- #244: Add SLO / error-budget tracker so planner can modulate risk tolerance [enhancement, task:architecture, prio:normal, done] — COMPLETED
+- #243: Add dependency / CVE watcher with auto-bump PRs and high-risk escalation [enhancement, task:architecture, prio:normal, done] — COMPLETED
+- #242: Add external-signal ingester for production telemetry, support, and mentions [enhancement, task:architecture, prio:normal, done] — COMPLETED
+- #241: Add cost-tracking agent with per-repo budgets and burn-rate detector [enhancement, task:architecture, prio:normal, done] — COMPLETED
+- #240: Attach goal ancestry (objective→sprint→issue) to every dispatched task [enhancement, task:architecture, prio:normal, done] — COMPLETED
+
+PRs merged:
+- PR #277: Agent: task-20260421-094629-add-deploy-watchdog-agent-that-auto-reverts-post-m (branch: agent/task-20260421-094629-add-deploy-watchdog-agent-that-auto-reverts-post-m)
+- PR #276: Agent: task-20260421-094524-build-slo-state-tracker-module (branch: agent/task-20260421-094524-build-slo-state-tracker-module)
+- PR #275: Agent: task-20260421-094340-add-dependency-cve-watcher-with-auto-bump-prs-and- (branch: agent/task-20260421-094340-add-dependency-cve-watcher-with-auto-bump-prs-and-)
+- PR #274: Agent: task-20260421-094236-add-external-signal-ingester-for-production-teleme (branch: agent/task-20260421-094236-add-external-signal-ingester-for-production-teleme)
+- PR #273: Agent: task-20260421-094128-implement-cost-tracking-infrastructure (branch: agent/task-20260421-094128-implement-cost-tracking-infrastructure)
+- PR #272: Agent: task-20260421-093931-attach-goal-ancestry-objective-sprint-issue-to-eve (branch: agent/task-20260421-093931-attach-goal-ancestry-objective-sprint-issue-to-eve)
+- PR #265: Agent: task-20260421-093841-add-quality-harness-architect-with-modality-detect (branch: agent/task-20260421-093841-add-quality-harness-architect-with-modality-detect)
+
+Outcome evidence:
+- #250 / PR #265: merged, outcome snapshot pending (9 configured checks).
+- #253 / PR #273: merged, outcome snapshot pending (7 configured checks).
+- #242 / PR #274: merged, outcome snapshot pending (9 configured checks).
+- #240 / PR #272: merged, outcome snapshot pending (9 configured checks).
+- #243 / PR #275: merged, outcome snapshot pending (9 configured checks).
+- #260 / PR #276: merged, outcome snapshot pending (7 configured checks).
+- #245 / PR #277: merged, outcome snapshot pending (9 configured checks).
+
+**Plan:**
+- [prio:high] Auto-recover stalled tasks left in runtime/mailbox/processing/: Recent task metrics show blocked/partial debug tasks piling up (11 blocked, 25 partial) and stalled processing tasks are a repeated operational failure mode; auto-recovery is human-filed, targets two objective metrics directly, and advances the Execution Reliability rubric dimension. Production signals: Repeat-Recovery Signals (improved=4, inconclusive=8, unchanged=1).
+- [prio:high] Add work-verifier agent blocking stubs, mocks, and scope-mismatch before merge: Every recent outcome is 'inconclusive' and product inspection flagged credibility skepticism risk; a pre-merge work-verifier closes a trust gap that undermines both the task success rate metric and the Operator Trust rubric dimension, and is a human-filed structural fix rather than self-improvement churn. Production signals: Repeat-Recovery Signals (improved=4, inconclusive=8, unchanged=1).
+- [prio:high] Fix README rendering truncation in workflow diagram: The README is the single highest-traffic adoption surface and product inspection explicitly flagged truncation as a live rendering concern; a broken first impression directly undermines the 29%-weighted stars metric and every other adoption task depends on a complete README. Production signals: Repeat-Recovery Signals (improved=4, inconclusive=8, unchanged=1).
+- [prio:high] Create FORK_GUIDE.md with customization patterns: Forks are stalled at 0 with 14% objective weight and the strategy explicitly targets solo builders; a fork/customization guide is the operator-validated missing activation artifact that directly addresses the stalled adoption funnel flagged in last sprint's directives.
+- [prio:high] Document and test local development setup end-to-end: Product inspection flags low adoption despite sophisticated features, and the operator directive names activation friction as a blocking constraint; a tested local setup directly compounds with the FORK_GUIDE to convert visitors into retained users and is the highest-leverage remaining adoption-facing doc.
+
 
 ### Sprint 2026-04-15
 
