@@ -4,7 +4,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from orchestrator.agent_scorer import build_degradation_findings, compute_success_rates
+import json
+
+from orchestrator.agent_scorer import (
+    build_degradation_findings,
+    build_pipeline_anomaly_findings,
+    compute_success_rates,
+)
 
 
 def _ts(hours_ago: int) -> str:
@@ -170,3 +176,91 @@ def test_codex_degradation_finding_scoped_to_task_type():
 
     findings = build_degradation_findings(records, preferred_task_type="debugging")
     assert findings == [], "No finding when preferred task_type slice is above threshold"
+
+
+def _write_outcome_log(tmp_path: Path, records: list[dict]) -> dict:
+    """Materialize a minimal cfg + outcome_attribution.jsonl for scorer tests."""
+    metrics_dir = tmp_path / "runtime" / "metrics"
+    metrics_dir.mkdir(parents=True, exist_ok=True)
+    log = metrics_dir / "outcome_attribution.jsonl"
+    log.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
+    return {
+        "root_dir": str(tmp_path),
+        "github_projects": {
+            "demo": {
+                "repos": [
+                    {
+                        "key": "api",
+                        "github_repo": "acme/api",
+                        "local_repo": str(tmp_path),
+                    }
+                ]
+            }
+        },
+    }
+
+
+def test_pipeline_anomaly_detects_empty_outcome_check_ids(tmp_path):
+    """When most merged PRs carry empty outcome_check_ids, emit a pipeline_anomaly
+    finding so the groomer can file a debug ticket instead of another
+    'configure more metrics' task."""
+    records = [
+        {
+            "record_type": "attribution",
+            "event": "merged",
+            "repo": "acme/api",
+            "pr_number": n,
+            "outcome_check_ids": [],
+            "timestamp": _ts(hours_ago),
+            "merged_at": _ts(hours_ago),
+        }
+        for n, hours_ago in [(101, 10), (102, 20), (103, 30), (104, 40)]
+    ]
+    cfg = _write_outcome_log(tmp_path, records)
+
+    findings = build_pipeline_anomaly_findings(cfg)
+    assert len(findings) == 1
+    f = findings[0]
+    assert f["kind"] == "pipeline_anomaly"
+    assert f["repo"] == "acme/api"
+    assert f["metrics"]["merges_with_empty_ids"] == 4
+    assert f["metrics"]["empty_ratio"] == 1.0
+    assert "debug" in f["title_hint"].lower()
+    assert any("pr_opened" in str(ev).lower() or "plumbing" in str(ev).lower()
+               for ev in f["evidence"])
+
+
+def test_pipeline_anomaly_quiet_when_ids_populated(tmp_path):
+    """When outcome_check_ids are populated, no anomaly — plumbing is healthy."""
+    records = [
+        {
+            "record_type": "attribution",
+            "event": "merged",
+            "repo": "acme/api",
+            "pr_number": n,
+            "outcome_check_ids": ["agent_success_rate", "github_stars"],
+            "timestamp": _ts(hours_ago),
+            "merged_at": _ts(hours_ago),
+        }
+        for n, hours_ago in [(201, 10), (202, 20), (203, 30), (204, 40)]
+    ]
+    cfg = _write_outcome_log(tmp_path, records)
+    assert build_pipeline_anomaly_findings(cfg) == []
+
+
+def test_pipeline_anomaly_quiet_below_min_merges(tmp_path):
+    """Detector needs at least PIPELINE_ANOMALY_MIN_MERGES merges to fire — one
+    empty PR is noise, not a pattern."""
+    records = [
+        {
+            "record_type": "attribution",
+            "event": "merged",
+            "repo": "acme/api",
+            "pr_number": 301,
+            "outcome_check_ids": [],
+            "timestamp": _ts(5),
+            "merged_at": _ts(5),
+        }
+    ]
+    cfg = _write_outcome_log(tmp_path, records)
+    assert build_pipeline_anomaly_findings(cfg) == []

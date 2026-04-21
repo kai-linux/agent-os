@@ -561,6 +561,93 @@ def build_business_objective_findings(cfg: dict) -> list[dict]:
     return findings
 
 
+PIPELINE_ANOMALY_WINDOW_DAYS = 14
+PIPELINE_ANOMALY_MIN_MERGES = 3
+
+
+def build_pipeline_anomaly_findings(cfg: dict) -> list[dict]:
+    """Scan outcome_attribution.jsonl for structural data-flow anomalies.
+
+    The sprint retrospective already surfaces symptoms like "every PR was
+    inconclusive", but it has no way to distinguish "we need more metrics"
+    from "the plumbing that records metrics is broken". This detector reads
+    the raw attribution log and emits a finding the groomer can convert into
+    a debugging issue — so the planner/groomer stop asking for more config
+    when the actual fault is in the data path.
+
+    Currently detects:
+      - Runs of merged attribution records with empty ``outcome_check_ids``
+        (signals check-ID plumbing is dropped somewhere between issue body
+        and merge-time attribution).
+      - Runs of snapshot records with source="none" / "no measurable
+        external metric" (symptom of the same gap, viewed from the other side).
+    """
+    findings: list[dict] = []
+    for github_slug, _repo_path in configured_repos(cfg):
+        records = load_outcome_records(
+            cfg, repo=github_slug, window_days=PIPELINE_ANOMALY_WINDOW_DAYS
+        )
+        if not records:
+            continue
+
+        merges = [
+            r for r in records
+            if r.get("record_type") == "attribution" and r.get("event") == "merged"
+        ]
+        if len(merges) < PIPELINE_ANOMALY_MIN_MERGES:
+            continue
+        empty_merges = [m for m in merges if not (m.get("outcome_check_ids") or [])]
+        empty_ratio = len(empty_merges) / len(merges)
+
+        snapshots = [r for r in records if r.get("record_type") == "snapshot"]
+        unmeasured_snapshots = [
+            s for s in snapshots
+            if str(s.get("source") or "").lower() == "none"
+        ]
+
+        if empty_ratio < 0.7 or len(empty_merges) < PIPELINE_ANOMALY_MIN_MERGES:
+            continue
+
+        sample_prs = [m.get("pr_number") for m in empty_merges[-5:] if m.get("pr_number")]
+        findings.append({
+            "id": f"pipeline_anomaly:outcome_check_ids:{github_slug}",
+            "source": "agent_scorer",
+            "kind": "pipeline_anomaly",
+            "repo": github_slug,
+            "title_hint": (
+                f"Debug: outcome_check_ids dropped on merged PRs in "
+                f"{github_slug.rsplit('/', 1)[-1]}"
+            ),
+            "summary": (
+                f"{len(empty_merges)}/{len(merges)} merged PRs in the last "
+                f"{PIPELINE_ANOMALY_WINDOW_DAYS} days were recorded with empty "
+                f"outcome_check_ids. This is a data-flow defect, not a missing-"
+                f"metric configuration — the checks are configured but are not "
+                f"reaching the attribution log. The sprint retrospective will "
+                f"keep reporting 'inconclusive' until this plumbing is fixed."
+            ),
+            "metrics": {
+                "merges_total": len(merges),
+                "merges_with_empty_ids": len(empty_merges),
+                "empty_ratio": round(empty_ratio, 3),
+                "unmeasured_snapshots": len(unmeasured_snapshots),
+                "window_days": PIPELINE_ANOMALY_WINDOW_DAYS,
+            },
+            "evidence": [
+                f"attribution log: runtime/metrics/outcome_attribution.jsonl",
+                f"recent affected PRs: {sample_prs or '(none captured)'}",
+                "flow: issue body (## Outcome Checks) → "
+                "github_dispatcher.build_mailbox_task → task meta → "
+                "github_sync.sync_result (writes pr_opened attribution) → "
+                "pr_monitor._cleanup_merged_pr_issues (reads it back)",
+                "likely break point: pr_opened record is never written when the "
+                "agent opens PRs directly via `gh pr create` (skipping github_sync)",
+            ],
+        })
+
+    return findings
+
+
 def write_findings(path: Path, findings: list[dict]):
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -772,6 +859,7 @@ def run():
 
     findings = build_degradation_findings(records)
     findings.extend(build_business_objective_findings(cfg))
+    findings.extend(build_pipeline_anomaly_findings(cfg))
     artifact = findings_path(root)
     write_findings(artifact, findings)
 

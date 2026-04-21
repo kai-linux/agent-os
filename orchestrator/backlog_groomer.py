@@ -887,6 +887,18 @@ Focus on:
 6. Recent blocked or partial task outcomes — create unblock or hardening follow-ups
 7. Repository foundation gaps (missing planning/research/ops scaffolding) — create enabling tasks
 8. Backlog pressure or blocked-work patterns visible in open issues — create high-leverage backlog items
+9. Pipeline / data-flow anomalies surfaced by the scorer — create DEBUGGING issues, not configuration tickets
+
+Pipeline-anomaly handling (CRITICAL):
+When a scorer finding is prefixed with `[pipeline_anomaly]`, the system has
+detected a STRUCTURAL data-flow defect — the metrics/signals are already
+configured but are being dropped somewhere in the pipeline. Do NOT respond
+by creating "configure more metrics" tickets. Instead, create a single
+atomic DEBUGGING issue (task_type: debugging, priority: prio:high) whose
+Goal quotes the specific summary + evidence from the finding and whose
+Success Criteria name the exact subsystem/functions to inspect. Treat the
+evidence bullets as investigation starting points, not boilerplate — the
+finding already contains the likely break point.
 
 Balance rule: At least {adoption_min} of the {num_issues} issues you generate
 this run (≥40%) MUST target adoption, credibility, activation, demos,
@@ -1301,17 +1313,41 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
 
     completions_text = _recent_completions_summary(records)
 
-    # Load agent scorer findings for richer remediation signals
+    # Load agent scorer findings for richer remediation signals. Different
+    # finding kinds have different shapes — render each so the LLM gets enough
+    # context to file the RIGHT kind of issue (agent remediation vs. pipeline
+    # debug vs. business-objective feature work).
     scorer_text = "(none)"
     try:
         artifact = scorer_findings_path(root)
         if artifact.exists():
             payload = json.loads(artifact.read_text(encoding="utf-8"))
             findings = payload.get("findings", [])
-            scorer_text = "\n".join(
-                f"- {f.get('title_hint', '?')} (agent={f.get('agent', '?')}, cause={f.get('degradation_cause', '?')}, rate={f.get('metrics', {}).get('rate', '?')})"
-                for f in findings[:10]
-            ) or "(none)"
+            lines: list[str] = []
+            for f in findings[:10]:
+                kind = str(f.get("kind") or "").strip()
+                metrics = f.get("metrics") or {}
+                if kind == "pipeline_anomaly":
+                    evidence = f.get("evidence") or []
+                    ev_text = "; ".join(str(e) for e in evidence[:3])
+                    lines.append(
+                        f"- [pipeline_anomaly] {f.get('title_hint', '?')} — "
+                        f"{f.get('summary', '')[:300]} | evidence: {ev_text}"
+                    )
+                elif kind == "business_objective_regressed":
+                    lines.append(
+                        f"- [business_objective] {f.get('title_hint', '?')} "
+                        f"(score={metrics.get('score', '?')}, "
+                        f"window={metrics.get('window_days', '?')}d)"
+                    )
+                else:
+                    lines.append(
+                        f"- {f.get('title_hint', '?')} "
+                        f"(agent={f.get('agent', '?')}, "
+                        f"cause={f.get('degradation_cause', '?')}, "
+                        f"rate={metrics.get('rate', '?')})"
+                    )
+            scorer_text = "\n".join(lines) or "(none)"
     except Exception:
         pass
 
