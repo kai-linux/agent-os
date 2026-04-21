@@ -42,6 +42,18 @@
 
 ## Recent Changes
 
+### 2026-04-21 — [task-20260421-121937-replace-telegram-actions-log-with-hash-chained-imm] (#247 kai-linux/agent-os)
+Implemented a hash-chained immutable audit log with rotation and verification, routed the requested mutating Telegram/GitHub flows through it, added daily digest chain-status reporting plus tamper alerts, and covered the new behavior with focused regression tests.
+
+**Files:** `- .agent_result.md`, `- bin/audit_verify`, `- orchestrator/audit_log.py`, `- orchestrator/backlog_groomer.py`, `- orchestrator/daily_digest.py`, `- orchestrator/deploy_watchdog.py`, `- orchestrator/log_analyzer.py`, `- orchestrator/pr_monitor.py`
+
+**Decisions:**
+  - - Hashed the full immutable event body (`ts`, `event_type`, `payload`) rather than payload alone so timestamp and event type are also integrity-protected while keeping the required stored fields.
+  - - Used file rewrite via temp file plus `os.replace` for both the audit log and manifest so appends stay atomic and partial writes do not leave half-written JSONL.
+  - - Kept rotation state in `runtime/audit/manifest.json` with ordered `(file, last_hash)` entries so verification can detect truncated tails after rotation as well as in the active file.
+  - - Made `bin/audit_verify` fall back to `python3` when `.venv/bin/python3` is absent because this worktree does not carry a repo-local virtualenv.
+
+
 ### 2026-04-21 — [task-20260421-121837-add-adr-curator-extracting-architecture-decisions-] (#246 kai-linux/agent-os)
 Implemented an append-only ADR curator that captures qualifying merged PRs into per-repo `docs/adrs/`, updates the planner prompt with recent ADR context, hooks ADR capture into the merge path, and adds focused regression coverage.
 
