@@ -1638,6 +1638,15 @@ def run():
                         f"issue(s) on {github_slug} ({triage_stats['considered']} considered)."
                     )
                     notify = True
+                    # Label changes from triage need to be reflected on the
+                    # project board immediately, even when the per-repo cadence
+                    # gate would otherwise skip groom_repo this tick. Without
+                    # this, the kanban keeps showing "Blocked" for issues that
+                    # have already been moved to `ready`.
+                    try:
+                        _reconcile_board_state(cfg, github_slug)
+                    except Exception as inner:
+                        print(f"  Post-triage reconcile failed on {github_slug}: {inner}")
             except Exception as e:
                 print(f"  Blocker triage failed on {github_slug}: {e}")
                 triage_totals["errors"] = triage_totals.get("errors", 0) + 1

@@ -59,6 +59,70 @@ FIXED_BY_COMMIT_BLOCKERS: dict[str, tuple[str, str]] = {
 
 _BLOCKER_CODE_RE = re.compile(r"###\s+Blocker code\s*\n+`([^`]+)`", re.IGNORECASE)
 _ORCH_UPDATE_MARKER = "## Orchestrator update"
+_TASK_ID_RE = re.compile(r"`(task-\d{8}-\d{6}-[A-Za-z0-9._\-]+)`")
+
+# Signatures that refine a generic `runner_failure` classification into a more
+# specific code. The original block was filed before the queue's classifier
+# recognized these patterns, so we re-inspect the comment text at triage time
+# and upgrade the code to the correct fixed-by-commit or transient bucket.
+_BLOCKER_CODE_REFINEMENTS: tuple[tuple[re.Pattern, str], ...] = (
+    (re.compile(r"argument list too long", re.IGNORECASE), "prompt_too_large"),
+    (re.compile(r"\be2big\b", re.IGNORECASE), "prompt_too_large"),
+)
+
+
+def _extract_task_id(comment_body: str) -> Optional[str]:
+    m = _TASK_ID_RE.search(comment_body or "")
+    return m.group(1) if m else None
+
+
+def _read_task_log_tail(agent_os_root: Path, task_id: str, max_bytes: int = 16_000) -> str:
+    """Return up to ``max_bytes`` from the end of the task log, or "" if missing.
+
+    The GitHub comment surfaces only a short summary; the raw stderr that
+    actually names the failure (e.g. "Argument list too long" for E2BIG) lives
+    in the per-task log file. Reading the tail lets us refine a generic
+    runner_failure classification into the specific blocker that best matches.
+    """
+    log_path = agent_os_root / "runtime" / "logs" / f"{task_id}.log"
+    try:
+        if not log_path.exists():
+            return ""
+        with log_path.open("rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - max_bytes))
+            data = f.read()
+        return data.decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+
+
+def _refine_blocker_code(
+    original_code: str,
+    comment_body: str,
+    agent_os_root: Optional[Path] = None,
+) -> str:
+    """If the blocker text matches a more specific signature, return the refined
+    code; otherwise return the original. Only refines the generic
+    ``runner_failure`` / ``unknown`` codes to avoid clobbering explicit
+    classifications.
+
+    Looks first at the comment body, then falls back to the task-log tail when
+    the comment only carries a shortened summary (the common case for
+    exit-126 / E2BIG, where the full stderr never makes it into the comment)."""
+    if original_code not in {"runner_failure", "unknown"}:
+        return original_code
+    haystacks = [comment_body or ""]
+    if agent_os_root is not None:
+        task_id = _extract_task_id(comment_body or "")
+        if task_id:
+            haystacks.append(_read_task_log_tail(agent_os_root, task_id))
+    for text in haystacks:
+        for pattern, refined_code in _BLOCKER_CODE_REFINEMENTS:
+            if pattern.search(text):
+                return refined_code
+    return original_code
 
 
 @dataclass
@@ -99,10 +163,13 @@ def _parse_blocker_code(comment_body: str) -> Optional[str]:
 
 def _latest_orchestrator_blocker(
     comments: list[dict],
+    agent_os_root: Optional[Path] = None,
 ) -> tuple[Optional[str], Optional[str]]:
     """Return (blocker_code, createdAt) from the most recent orchestrator-update
     comment that reported ``Status: blocked``. Returns (None, None) if no such
-    comment is present."""
+    comment is present. When ``agent_os_root`` is supplied, the task log tail
+    is consulted to refine a generic ``runner_failure`` into a more specific
+    code (e.g. ``prompt_too_large`` for the E2BIG signature)."""
     for comment in reversed(comments or []):
         body = comment.get("body") or ""
         if _ORCH_UPDATE_MARKER not in body:
@@ -112,7 +179,8 @@ def _latest_orchestrator_blocker(
         code = _parse_blocker_code(body)
         if not code:
             return None, comment.get("createdAt")
-        return code, comment.get("createdAt")
+        refined = _refine_blocker_code(code, body, agent_os_root=agent_os_root)
+        return refined, comment.get("createdAt")
     return None, None
 
 
@@ -215,7 +283,9 @@ def triage_repo(cfg: dict, github_slug: str, agent_os_root: Path) -> dict:
         retry_count = int(record.get("retries", 0))
 
         comments = issue.get("comments", []) or []
-        blocker_code, block_time = _latest_orchestrator_blocker(comments)
+        blocker_code, block_time = _latest_orchestrator_blocker(
+            comments, agent_os_root=agent_os_root,
+        )
         decision = decide(blocker_code, block_time, retry_count, agent_os_root)
 
         if decision.action != "unblock":

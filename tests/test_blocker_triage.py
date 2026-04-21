@@ -71,6 +71,43 @@ def test_latest_orchestrator_blocker_returns_none_when_no_blocked_update():
     assert ts is None
 
 
+def test_latest_orchestrator_blocker_refines_runner_failure_from_log_tail(tmp_path):
+    task_id = "task-20260421-095133-add-system-architect-agent-for-capability-sensor-g"
+    log_dir = tmp_path / "runtime" / "logs"
+    log_dir.mkdir(parents=True)
+    (log_dir / f"{task_id}.log").write_text(
+        "Current agent: claude\n"
+        f"$ /home/kai/agent-os/bin/agent_runner.sh claude ...\n"
+        "/home/kai/agent-os/bin/agent_runner.sh: line 24: "
+        "/home/kai/.nvm/versions/node/v24.13.0/bin/claude: Argument list too long\n",
+        encoding="utf-8",
+    )
+    body = (
+        "## Orchestrator update\n\n"
+        f"**Task:** `{task_id}`\n"
+        "**Status:** `blocked`\n\n"
+        "### Summary\nclaude failed before producing a valid result file. "
+        "Runner exited with code 126 while executing ...\n\n"
+        "### Blocker code\n`runner_failure`\n"
+    )
+    comments = [_comment(body, "2026-04-21T08:28:30Z")]
+    code, ts = _latest_orchestrator_blocker(comments, agent_os_root=tmp_path)
+    assert code == "prompt_too_large", code
+    assert ts == "2026-04-21T08:28:30Z"
+
+
+def test_latest_orchestrator_blocker_keeps_runner_failure_when_log_missing(tmp_path):
+    body = (
+        "## Orchestrator update\n\n"
+        "**Task:** `task-20260101-000000-unknown`\n"
+        "**Status:** `blocked`\n\n"
+        "### Blocker code\n`runner_failure`\n"
+    )
+    comments = [_comment(body, "2026-04-21T08:28:30Z")]
+    code, _ = _latest_orchestrator_blocker(comments, agent_os_root=tmp_path)
+    assert code == "runner_failure"
+
+
 # ---------------------------------------------------------------------------
 # decide — retry cap
 # ---------------------------------------------------------------------------
