@@ -2575,7 +2575,10 @@ def record_metrics(
     health gates don't wrongly starve the chain after infra incidents.
     """
     blocker_code = final_result.get("blocker_code", "")
-    if final_agent in (None, "", "none") or blocker_code in ("fallback_exhausted", "runner_failure"):
+    # Keep in sync with agent_scorer._TRANSIENT_BLOCKER_CODES — transient
+    # provider/infra failures don't reflect agent quality and must not gate
+    # the fallback chain.
+    if final_agent in (None, "", "none") or blocker_code in ("fallback_exhausted", "runner_failure", "quota_limited"):
         return
 
     metrics_dir = Path(cfg.get("root_dir", ".")).expanduser() / "runtime" / "metrics"

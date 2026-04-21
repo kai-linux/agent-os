@@ -92,9 +92,12 @@ def test_parse_bullets_strips_whitespace():
 # ---------------------------------------------------------------------------
 
 def _cfg(fallbacks=None):
+    # Isolate from the real runtime/metrics/agent_stats.jsonl so the health
+    # gates don't strip agents based on whatever happened in production today.
     return {
         "default_agent": "auto",
         "default_task_type": "implementation",
+        "root_dir": "/tmp/nonexistent-agent-os-test-root",
         "agent_fallbacks": fallbacks or {
             "implementation": ["codex", "claude", "gemini", "deepseek"],
         },

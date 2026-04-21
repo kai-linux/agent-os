@@ -23,6 +23,12 @@ WINDOW_DAYS = 7
 # Sentinel agent names that represent exhausted fallback chains, not real agents.
 # These must be excluded from degradation analysis to avoid spurious remediation tasks.
 _SENTINEL_AGENTS = frozenset({"none", "unknown"})
+# Blocker codes that describe transient provider-side or infra problems, not
+# agent quality. These must not count against an agent's success rate — a model
+# that hit its own rate limit today is still capable tomorrow. Excluding them
+# here also retroactively heals the gate: if the same model is still the only
+# fallback left after a peer rate-limited, the chain stays intact.
+_TRANSIENT_BLOCKER_CODES = frozenset({"quota_limited", "runner_failure", "fallback_exhausted"})
 HEALTH_CHECK_WINDOW_DAYS = 1
 HEALTHY_SUCCESS_RATE_THRESHOLD = 0.80
 ADAPTIVE_HEALTH_WINDOW_DAYS = 7
@@ -72,12 +78,23 @@ def load_recent_metrics(metrics_file: Path, window_days: int = WINDOW_DAYS) -> l
     return records
 
 
-def compute_success_rates(records: list[dict], *, task_type: str | None = None) -> dict[str, dict]:
+def compute_success_rates(
+    records: list[dict],
+    *,
+    task_type: str | None = None,
+    exclude_transient: bool = False,
+) -> dict[str, dict]:
     """Return {agent: {total, successes, rate}} for agents with >= 1 task.
 
     Sentinel agent names (e.g. ``"none"``, ``"unknown"``) that represent
     exhausted fallback chains rather than real agents are excluded from the
     result so they cannot trigger spurious degradation findings.
+
+    ``exclude_transient=True`` drops records whose ``blocker_code`` is in
+    ``_TRANSIENT_BLOCKER_CODES`` (quota/runner/fallback-exhausted). This is what
+    the fallback-chain health gate should use — a rate-limited model isn't an
+    unhealthy model. Leave it False for operator-facing degradation findings so
+    the analyst can still see "codex is being rate-limited a lot in repo X".
     """
     selected_task_type = _normalize_task_type(task_type)
     counts: dict[str, dict] = defaultdict(lambda: {"total": 0, "successes": 0})
@@ -86,6 +103,8 @@ def compute_success_rates(records: list[dict], *, task_type: str | None = None) 
             continue
         agent = rec.get("agent", "unknown")
         if agent in _SENTINEL_AGENTS:
+            continue
+        if exclude_transient and str(rec.get("blocker_code", "")).strip() in _TRANSIENT_BLOCKER_CODES:
             continue
         counts[agent]["total"] += 1
         if rec.get("status") == "complete":
@@ -116,6 +135,9 @@ def recent_success_rates(
     rates = compute_success_rates(
         load_recent_metrics(metrics_file, window_days=window_days),
         task_type=normalized_task_type or None,
+        # The health gate must not punish transient provider failures (rate
+        # limits, runner crashes). Degradation findings still count them.
+        exclude_transient=True,
     )
     _RECENT_RATE_CACHE.clear()
     _RECENT_RATE_CACHE[cache_key] = rates
