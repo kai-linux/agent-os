@@ -36,6 +36,10 @@ def build_config(intake: dict[str, str], github: dict[str, Any], charter: dict[s
     local_repo = str(Path(github["local_clone_path"]).expanduser())
     repo_name = github["repo_name"]
     root = str(ROOT)
+    status_values = github.get(
+        "status_value_names",
+        {"Ready": "Ready", "In Progress": "In Progress", "Blocked": "Blocked", "Done": "Done"},
+    )
     return {
         "root_dir": root,
         "mailbox_dir": str(ROOT / "runtime" / "mailbox"),
@@ -79,14 +83,18 @@ def build_config(intake: dict[str, str], github: dict[str, Any], charter: dict[s
         "agent_timeout_minutes": {"claude": 45},
         "github_owner": github["owner"],
         "github_project_status_field": "Status",
-        "github_project_ready_value": "Ready",
-        "github_project_in_progress_value": "In Progress",
-        "github_project_blocked_value": "Blocked",
-        "github_project_done_value": "Done",
+        "github_project_ready_value": status_values["Ready"],
+        "github_project_in_progress_value": status_values["In Progress"],
+        "github_project_blocked_value": status_values["Blocked"],
+        "github_project_done_value": status_values["Done"],
         "github_repos": {repo_name: github["repo_full_name"]},
         "github_projects": {
             repo_name: {
                 "project_number": github["project_number"],
+                "ready_value": status_values["Ready"],
+                "in_progress_value": status_values["In Progress"],
+                "blocked_value": status_values["Blocked"],
+                "done_value": status_values["Done"],
                 "repos": [
                     {
                         "github_repo": github["repo_full_name"],
@@ -126,4 +134,3 @@ def run(state, intake: dict[str, str], github: dict[str, Any], charter: dict[str
         os.environ["AGENT_OS_CONFIG"] = str(config_path)
         load_config()
     return config_path
-

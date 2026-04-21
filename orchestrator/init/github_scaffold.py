@@ -127,21 +127,32 @@ def _create_or_clone_repo(inputs: dict[str, str]) -> tuple[str, Path]:
     repo_full_name = f"{inputs['owner']}/{inputs['repo_name']}"
     local_path = Path(inputs["local_clone_path"]).expanduser()
     if inputs["mode"] == "create":
-        local_path.parent.mkdir(parents=True, exist_ok=True)
-        gh_run(
-            [
-                "repo",
-                "create",
-                repo_full_name,
-                f"--{inputs['visibility']}",
-                "--clone",
-            ],
-            cwd=local_path.parent,
-            timeout=120,
-        )
-        cloned_path = local_path.parent / inputs["repo_name"]
-        if cloned_path != local_path and cloned_path.exists() and not local_path.exists():
-            cloned_path.rename(local_path)
+        exists = subprocess.run(
+            ["gh", "api", f"repos/{repo_full_name}"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        ).returncode == 0
+        if not exists:
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            gh_run(
+                [
+                    "repo",
+                    "create",
+                    repo_full_name,
+                    f"--{inputs['visibility']}",
+                    "--clone",
+                ],
+                cwd=local_path.parent,
+                timeout=120,
+            )
+            cloned_path = local_path.parent / inputs["repo_name"]
+            if cloned_path != local_path and cloned_path.exists() and not local_path.exists():
+                cloned_path.rename(local_path)
+        elif not local_path.exists():
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            gh_run(["repo", "clone", repo_full_name, str(local_path)], cwd=local_path.parent, timeout=120)
     else:
         gh_run(["api", f"repos/{repo_full_name}"])
         if not local_path.exists():
@@ -175,14 +186,29 @@ def _ensure_project(owner: str, repo_name: str) -> dict[str, str | int]:
     }
 
 
-def _ensure_status_field(owner: str, project_number: int) -> tuple[str, dict[str, str]]:
+def _normalize_status_options(options: dict[str, str]) -> tuple[dict[str, str], dict[str, str]]:
+    ready_name = "Ready" if "Ready" in options else "Todo" if "Todo" in options else next(iter(options))
+    in_progress_name = "In Progress" if "In Progress" in options else ready_name
+    done_name = "Done" if "Done" in options else in_progress_name
+    blocked_name = "Blocked" if "Blocked" in options else ready_name
+    canonical_to_actual = {
+        "Ready": ready_name,
+        "In Progress": in_progress_name,
+        "Blocked": blocked_name,
+        "Done": done_name,
+    }
+    canonical_ids = {canonical: options[actual] for canonical, actual in canonical_to_actual.items()}
+    return canonical_ids, canonical_to_actual
+
+
+def _ensure_status_field(owner: str, project_number: int) -> tuple[str, dict[str, str], dict[str, str]]:
     fields = gh_json(["project", "field-list", str(project_number), "--owner", owner, "--format", "json"], timeout=60)
     for field in fields.get("fields", fields) if isinstance(fields, dict) else fields:
-        if field.get("name") == "Status" and field.get("dataType") == "SINGLE_SELECT":
+        if field.get("name") == "Status" and field.get("type") == "ProjectV2SingleSelectField":
             options = {opt["name"]: opt["id"] for opt in field.get("options", [])}
-            required = ["Ready", "In Progress", "Blocked", "Done"]
-            if all(name in options for name in required):
-                return field["id"], {name: options[name] for name in required}
+            if options:
+                canonical_ids, canonical_to_actual = _normalize_status_options(options)
+                return field["id"], canonical_ids, canonical_to_actual
     created = gh_json(
         [
             "project",
@@ -202,7 +228,8 @@ def _ensure_status_field(owner: str, project_number: int) -> tuple[str, dict[str
         timeout=60,
     )
     options = {opt["name"]: opt["id"] for opt in created.get("options", [])}
-    return created["id"], {name: options[name] for name in ["Ready", "In Progress", "Blocked", "Done"]}
+    canonical_ids, canonical_to_actual = _normalize_status_options(options)
+    return created["id"], canonical_ids, canonical_to_actual
 
 
 def _ensure_label(repo_full_name: str, label: str, description: str, color: str) -> None:
@@ -235,11 +262,12 @@ def run(state: State, intake: dict[str, str] | None = None, *, dry_run: bool = F
         project = {"project_id": "PVT_DRYRUN", "project_number": 1, "project_url": f"https://github.com/users/{prompt_inputs['owner']}/projects/1"}
         status_field_id = "PVTSSF_DRYRUN"
         option_ids = {"Ready": "opt_ready", "In Progress": "opt_progress", "Blocked": "opt_blocked", "Done": "opt_done"}
+        status_value_names = {"Ready": "Ready", "In Progress": "In Progress", "Blocked": "Blocked", "Done": "Done"}
     else:
         repo_full_name, local_path = _create_or_clone_repo(prompt_inputs)
         _ensure_repo_initialized(local_path, prompt_inputs["repo_name"])
         project = _ensure_project(prompt_inputs["owner"], prompt_inputs["repo_name"])
-        status_field_id, option_ids = _ensure_status_field(prompt_inputs["owner"], int(project["project_number"]))
+        status_field_id, option_ids, status_value_names = _ensure_status_field(prompt_inputs["owner"], int(project["project_number"]))
         gh_run(["project", "link", str(project["project_number"]), "--owner", prompt_inputs["owner"], "--repo", repo_full_name], timeout=60)
         _ensure_label(repo_full_name, "ready", "Dispatch-ready", "0E8A16")
 
@@ -255,6 +283,7 @@ def run(state: State, intake: dict[str, str] | None = None, *, dry_run: bool = F
         "project_url": project["project_url"],
         "status_field_id": status_field_id,
         "status_option_ids": option_ids,
+        "status_value_names": status_value_names,
         "inputs": prompt_inputs,
     }
     state.mark("github", github_block)
