@@ -42,6 +42,17 @@
 
 ## Recent Changes
 
+### 2026-04-21 — [task-20260421-122140-add-system-architect-agent-for-capability-sensor-g] (#249 kai-linux/agent-os)
+Implemented a new deterministic system architect loop that compares current agent-os capabilities and sensors against a required operator-curated `target_operating_model.yaml`, emits `capability_gap` and `sensor_gap` findings through the existing scorer artifact, gates architect-generated backlog issues behind the existing Telegram approval flow, and surfaces the latest architect state in the daily digest.
+
+**Files:** `- .agent_result.md`, `- example.config.yaml`, `- orchestrator/agent_scorer.py`, `- orchestrator/backlog_groomer.py`, `- orchestrator/daily_digest.py`, `- orchestrator/system_architect.py`, `- target_operating_model.yaml`, `- tests/test_backlog_groomer.py`
+
+**Decisions:**
+  - - Reused the existing scorer artifact and `plan:*` Telegram callback path instead of inventing a second approval or findings transport, so architect gaps flow through the same control-plane evidence surface and approval semantics as the planner.
+  - - Stored accepted omissions in the operator-curated `target_operating_model.yaml` rather than a hidden runtime suppression list, keeping omissions explicit, reviewable, and versioned alongside the target operating model itself.
+  - - Made the architect cadence default monthly in module logic while still allowing scorer runs in between to reuse the latest persisted architect report, so findings stay visible without recomputing topology every week.
+
+
 ### 2026-04-21 — [task-20260421-122034-add-severity-tiered-incident-response-escalation-l] (#248 kai-linux/agent-os)
 Implemented explicit per-tier incident handler configuration on top of the existing severity router, keeping sev1 immediate paging and sev2/sev3 dedup behavior while allowing Telegram routing to be configured per severity tier.
 
