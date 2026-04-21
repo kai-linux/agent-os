@@ -47,6 +47,7 @@ from orchestrator.quality_harness import (
     resolve_repo_local_path,
 )
 from orchestrator.review_signals import record_review_signal, generate_followup_issues
+from orchestrator.adr_curator import curate_pr
 
 MAX_MERGE_ATTEMPTS = 3
 STATE_FILE_NAME = "pr_monitor_state.json"
@@ -772,6 +773,13 @@ def _cleanup_merged_pr_issues(cfg: dict, repo: str, pr: dict):
         )
     except Exception as e:
         print(f"Warning: failed to record review signal for PR #{pr_number}: {e}")
+
+    try:
+        repo_path = resolve_repo_local_path(cfg, repo)
+        if repo_path and repo_path.exists():
+            curate_pr(cfg, repo, repo_path, pr_number=pr_number, pr=pr)
+    except Exception as e:
+        print(f"Warning: failed to curate ADR for PR #{pr_number}: {e}")
 
     if issue_number:
         _mark_issue_done(

@@ -74,6 +74,7 @@ from orchestrator.sprint_history import (
     load_sprint_history,
 )
 from orchestrator.product_inspector import inspect_product
+from orchestrator.adr_curator import DEFAULT_RECENT_ADR_LIMIT, read_recent_adrs
 from orchestrator.skip_signals import (
     load_skip_signals,
     plan_diff_line as _plan_diff_line,
@@ -3088,6 +3089,9 @@ Context about this repository:
 --- Codebase Context (CODEBASE.md) ---
 {codebase_context}
 
+--- Recent Architectural Decisions ---
+{recent_architectural_decisions}
+
 --- Pre-Planning Research (PLANNING_RESEARCH.md) ---
 {research_context}
 
@@ -3249,6 +3253,7 @@ def _build_plan_prompt(
     planning_principles: str,
     evaluation_rubric: str,
     codebase_context: str,
+    recent_architectural_decisions: str = "(no architectural decision records)",
     production_feedback_context: str,
     product_inspection_context: str,
     outcome_context: str,
@@ -3278,6 +3283,7 @@ def _build_plan_prompt(
         product_inspection_context=product_inspection_context,
         outcome_context=outcome_context,
         codebase_context=codebase_context,
+        recent_architectural_decisions=recent_architectural_decisions,
         research_context=research_context,
         retrospective=retrospective,
         sprint_directives=sprint_directives,
@@ -3711,6 +3717,11 @@ def plan_repo(
     outcome_context = _recent_outcome_summary(cfg, github_slug, repo_path, days=sprint_cadence_days)
     print(f"  Outcome context: {len(outcome_context)} chars")
 
+    # 7b. Recent architectural decisions
+    recent_adr_limit = int(cfg.get("recent_adr_limit", DEFAULT_RECENT_ADR_LIMIT) or DEFAULT_RECENT_ADR_LIMIT)
+    recent_architectural_decisions = read_recent_adrs(repo_path, limit=recent_adr_limit, max_chars=1800)
+    print(f"  Recent ADRs: {len(recent_architectural_decisions)} chars")
+
     # 8. Pre-planning research
     research_context = _planning_research_context(cfg, github_slug, repo_path)
     print(f"  Research context: {len(research_context)} chars")
@@ -3792,6 +3803,7 @@ def plan_repo(
         production_feedback_context=production_feedback_context,
         product_inspection_context=product_inspection_context,
         outcome_context=outcome_context,
+        recent_architectural_decisions=recent_architectural_decisions,
         research_context=research_context,
         retrospective=retrospective,
         sprint_directives=sprint_directives,
