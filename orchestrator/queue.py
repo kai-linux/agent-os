@@ -25,6 +25,7 @@ from orchestrator.gh_project import add_issue_comment, gh, gh_json, query_projec
 from orchestrator.repo_context import build_execution_context, gather_recent_git_state, gather_objective_alignment, read_sprint_directives
 from orchestrator.repo_modes import is_dispatcher_only_repo
 from orchestrator.agent_scorer import filter_healthy_agents, log_gate_decision, ADAPTIVE_HEALTH_WINDOW_DAYS, ADAPTIVE_HEALTH_THRESHOLD
+from orchestrator.cost_tracker import rebuild_cost_records, resolve_attempt_model, resolve_attempt_provider, estimate_text_tokens
 from orchestrator.quality_harness import (
     FIXED_SUITE_TAXONOMY,
     clear_pending_qa_action,
@@ -2691,12 +2692,14 @@ def record_metrics(
         "timestamp": datetime.now().isoformat(),
         "task_id": meta.get("task_id", "unknown"),
         "repo": str(meta.get("repo", "unknown")),
+        "github_repo": str(meta.get("github_repo", "")).strip(),
         "agent": final_agent or "unknown",
         "status": final_result.get("status", "unknown"),
         "blocker_code": blocker_code,
         "attempt_count": len(model_attempts),
         "duration_seconds": round(duration, 1),
         "task_type": meta.get("task_type", "unknown"),
+        "model_attempt_details": list(meta.get("model_attempt_details") or []),
     }
     line = json.dumps(record) + "\n"
 
@@ -2719,6 +2722,10 @@ def record_metrics(
         raise
 
     log(f"Metrics recorded for {record['task_id']}: status={record['status']}, agent={record['agent']}", logfile, queue_summary_log=queue_summary_log)
+    try:
+        rebuild_cost_records(cfg)
+    except Exception as exc:
+        log(f"Cost tracking warning: {exc}", logfile, queue_summary_log=queue_summary_log)
 
 
 FALLBACK_COOLDOWN_MINUTES = 120
@@ -2888,6 +2895,7 @@ def main():
         allow_push = bool(meta.get("allow_push", cfg["default_allow_push"]))
         task_type = meta.get("task_type", cfg["default_task_type"])
         model_attempts = list(meta.get("model_attempts", []))
+        model_attempt_details = []
         prior_results = []
         dispatcher_only_mode = _is_dispatcher_only_task(cfg, meta)
 
@@ -2982,6 +2990,16 @@ def main():
             meta_for_prompt["resolved_agent"] = current_agent
             meta_for_prompt["model_attempts"] = model_attempts
             prompt_file = write_prompt(task_id, meta_for_prompt, body, current_agent, prior_results, ROOT, worktree=worktree)
+            prompt_text = prompt_file.read_text(encoding="utf-8")
+            attempt_number = len(model_attempts) + 1
+            attempt_base = {
+                "attempt": attempt_number,
+                "agent": current_agent,
+                "provider": resolve_attempt_provider(current_agent, cfg),
+                "model": resolve_attempt_model(current_agent, cfg),
+                "input_chars": len(prompt_text),
+                "input_tokens_estimate": estimate_text_tokens(prompt_text),
+            }
 
             if not model_attempts:
                 send_telegram(
@@ -3025,6 +3043,13 @@ def main():
                     "raw": "",
                 }
                 model_attempts.append(current_agent)
+                model_attempt_details.append({
+                    **attempt_base,
+                    "status": timeout_result["status"],
+                    "blocker_code": timeout_result["blocker_code"],
+                    "output_chars": 0,
+                    "output_tokens_estimate": 0,
+                })
                 prior_results.append(timeout_result)
                 log(f"{current_agent} timed out.", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
 
@@ -3056,6 +3081,13 @@ def main():
                     "raw": "",
                 }
                 model_attempts.append(current_agent)
+                model_attempt_details.append({
+                    **attempt_base,
+                    "status": runner_result["status"],
+                    "blocker_code": runner_result["blocker_code"],
+                    "output_chars": 0,
+                    "output_tokens_estimate": 0,
+                })
                 prior_results.append(runner_result)
                 log(f"{current_agent} runner failure: {e}", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
                 for blocker in failure_blockers:
@@ -3081,6 +3113,14 @@ def main():
             result = parse_agent_result(worktree)
             result["agent"] = current_agent
             model_attempts.append(current_agent)
+            output_text = result.get("raw", "") or ""
+            model_attempt_details.append({
+                **attempt_base,
+                "status": result.get("status", "unknown"),
+                "blocker_code": result.get("blocker_code", "none") or "none",
+                "output_chars": len(output_text),
+                "output_tokens_estimate": estimate_text_tokens(output_text),
+            })
             prior_results.append(result)
 
             log(f"Worker status from {current_agent}: {result['status']}", logfile, queue_summary_log=QUEUE_SUMMARY_LOG)
@@ -3113,6 +3153,7 @@ def main():
                 break
 
         meta["model_attempts"] = model_attempts
+        meta["model_attempt_details"] = model_attempt_details
         if final_agent and final_agent != "none":
             meta["resolved_agent"] = final_agent
 

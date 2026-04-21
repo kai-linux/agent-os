@@ -34,6 +34,7 @@ from orchestrator.queue import (
     maybe_requeue_prompt_inspection_recovery,
     parse_agent_result,
     parse_bullets,
+    record_metrics,
     rescue_git_progress,
     run_tests,
     save_telegram_action,
@@ -216,6 +217,50 @@ def test_get_agent_chain_allows_agents_without_recent_metrics(tmp_path):
         )
 
     assert chain == ["gemini", "claude"]
+
+
+def test_record_metrics_persists_model_attempt_details(tmp_path):
+    logfile = tmp_path / "queue.log"
+    summary_log = tmp_path / "summary.log"
+    meta = {
+        "task_id": "task-123",
+        "repo": "/tmp/repo",
+        "github_repo": "acme/repo",
+        "task_type": "implementation",
+        "model_attempt_details": [
+            {
+                "attempt": 1,
+                "agent": "codex",
+                "provider": "openai",
+                "model": "codex",
+                "input_chars": 400,
+                "input_tokens_estimate": 100,
+                "output_chars": 120,
+                "output_tokens_estimate": 30,
+                "status": "complete",
+                "blocker_code": "none",
+            }
+        ],
+    }
+
+    record_metrics(
+        {"root_dir": str(tmp_path)},
+        meta,
+        {"status": "complete", "blocker_code": "none"},
+        "codex",
+        ["codex"],
+        datetime.now(timezone.utc) - timedelta(seconds=3),
+        logfile,
+        summary_log,
+    )
+
+    metrics_path = tmp_path / "runtime" / "metrics" / "agent_stats.jsonl"
+    lines = metrics_path.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 1
+    record = json.loads(lines[0])
+    assert record["github_repo"] == "acme/repo"
+    assert record["model_attempt_details"][0]["model"] == "codex"
+    assert record["model_attempt_details"][0]["input_tokens_estimate"] == 100
 
 
 def test_get_agent_chain_skips_agents_below_adaptive_health_threshold(tmp_path):
