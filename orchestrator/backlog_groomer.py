@@ -30,6 +30,7 @@ from pathlib import Path
 
 from orchestrator.paths import load_config
 from orchestrator.agent_scorer import load_recent_metrics, findings_path as scorer_findings_path
+from orchestrator.blocker_triage import triage_repo as triage_blocked_issues
 from orchestrator.external_ingester import format_external_signals_for_prompt, load_external_signals, run_external_ingester
 from orchestrator.gh_project import (
     add_issue_comment,
@@ -1617,6 +1618,8 @@ def run():
         status_counts = {"created": 0, "skipped": 0, "no-data": 0, "error": 0, "dormant": 0}
         summaries = []
         notify = False
+        agent_os_root = Path(cfg.get("root_dir", ".")).expanduser()
+        triage_totals = {"considered": 0, "unblocked": 0, "left": 0, "errors": 0}
 
         for github_slug, repo_path in repos:
             if is_dispatcher_only_repo(cfg, github_slug):
@@ -1624,6 +1627,21 @@ def run():
                 status_counts["skipped"] = status_counts.get("skipped", 0) + 1
                 summaries.append(f"{github_slug}: skipped (automation_mode=dispatcher_only)")
                 continue
+
+            try:
+                triage_stats = triage_blocked_issues(cfg, github_slug, agent_os_root)
+                for key, value in triage_stats.items():
+                    triage_totals[key] = triage_totals.get(key, 0) + value
+                if triage_stats.get("unblocked", 0):
+                    print(
+                        f"  Blocker triage: unblocked {triage_stats['unblocked']} "
+                        f"issue(s) on {github_slug} ({triage_stats['considered']} considered)."
+                    )
+                    notify = True
+            except Exception as e:
+                print(f"  Blocker triage failed on {github_slug}: {e}")
+                triage_totals["errors"] = triage_totals.get("errors", 0) + 1
+
             cadence_days = _repo_groomer_cadence_days(cfg, github_slug)
             due, reason = is_due(
                 cfg,
@@ -1661,6 +1679,9 @@ def run():
         summary = (
             f"Backlog Groomer complete\n"
             f"Issues created: {all_created} | Skipped: {all_skipped} | Cleaned: {all_cleaned}\n"
+            f"Blocker triage: {triage_totals.get('unblocked', 0)} unblocked / "
+            f"{triage_totals.get('considered', 0)} considered "
+            f"(errors={triage_totals.get('errors', 0)})\n"
             f"Repo statuses: created={status_counts['created']} skipped={status_counts['skipped']} "
             f"no-data={status_counts['no-data']} error={status_counts['error']} dormant={status_counts['dormant']}\n"
             + "\n".join(summaries)
