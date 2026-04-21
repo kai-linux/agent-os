@@ -42,6 +42,16 @@
 
 ## Recent Changes
 
+### 2026-04-21 — [task-20260421-094236-add-external-signal-ingester-for-production-teleme] (#242 kai-linux/agent-os)
+Added a pluggable external-signal ingester with opt-in source adapters, normalized JSONL persistence, and prompt integration so recent production/support/public signals now flow into both backlog grooming and planner evidence.
+
+**Files:** `- .agent_result.md`, `- example.config.yaml`, `- orchestrator/backlog_groomer.py`, `- orchestrator/external_ingester.py`, `- orchestrator/strategic_planner.py`, `- tests/test_backlog_groomer.py`, `- tests/test_external_ingester.py`, `- tests/test_strategic_planner.py`
+
+**Decisions:**
+  - - Reused the existing `PRODUCTION_FEEDBACK.md` artifact as the shared planner/groomer evidence surface and added external-signal sections instead of introducing a second prompt artifact
+  - - Kept all adapters opt-in and rate-limited via repo runtime state so planner and groomer can safely call the ingester without burning API quota
+
+
 ### 2026-04-21 — [task-20260421-094128-implement-cost-tracking-infrastructure] (#253 kai-linux/agent-os)
 Implemented foundational cost tracking by persisting per-attempt model metadata into `agent_stats.jsonl`, rebuilding `runtime/metrics/cost_records.jsonl` from a new `orchestrator/cost_tracker.py` module, and documenting/configuring the pricing assumptions and override knobs.
 
