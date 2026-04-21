@@ -42,6 +42,16 @@
 
 ## Recent Changes
 
+### 2026-04-21 — [task-20260421-122034-add-severity-tiered-incident-response-escalation-l] (#248 kai-linux/agent-os)
+Implemented explicit per-tier incident handler configuration on top of the existing severity router, keeping sev1 immediate paging and sev2/sev3 dedup behavior while allowing Telegram routing to be configured per severity tier.
+
+**Files:** `- .agent_result.md`, `- example.config.yaml`, `- orchestrator/incident_router.py`, `- orchestrator/paths.py`, `- orchestrator/queue.py`, `- tests/test_incident_router.py`
+
+**Decisions:**
+  - - Kept the existing `delivery` and `dedup_window_minutes` fields for backwards compatibility and layered the requested `handlers`/`snooze_minutes` config on top instead of rewriting routing semantics.
+  - - Extended `queue.send_telegram()` with optional `chat_id` and `bypass_kill_switch` parameters so incident routing can target per-tier handlers without changing older call sites.
+
+
 ### 2026-04-21 — [task-20260421-121937-replace-telegram-actions-log-with-hash-chained-imm] (#247 kai-linux/agent-os)
 Implemented a hash-chained immutable audit log with rotation and verification, routed the requested mutating Telegram/GitHub flows through it, added daily digest chain-status reporting plus tamper alerts, and covered the new behavior with focused regression tests.
 
