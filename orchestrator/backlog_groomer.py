@@ -54,6 +54,14 @@ from orchestrator.repo_context import (
     read_strategy_context,
     visibility_prompt_note,
 )
+from orchestrator.quality_harness import (
+    build_harness_plan,
+    format_harness_plan_for_prompt,
+    issue_targets_quality_harness,
+    quality_harness_enabled,
+    resolve_quality_harness_config,
+    write_harness_plan_finding,
+)
 from orchestrator.scheduler_state import is_due, record_run, job_lock
 from orchestrator.repo_modes import is_dispatcher_only_repo
 from orchestrator.skip_signals import load_skip_signals, skip_penalty_for_issue as _skip_penalty_for_issue
@@ -1009,6 +1017,9 @@ call for.
 --- Domain evaluation rubric (repo-specific quality criteria — use to shape issue goals and success criteria) ---
 {evaluation_rubric}
 
+--- Quality harness architect finding (repo modality + eval-suite gaps) ---
+{quality_harness_plan}
+
 --- Agent performance degradation findings (from weekly scorer) ---
 {scorer_findings}
 
@@ -1250,6 +1261,12 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
     adoption_signals = _gather_adoption_signals(github_slug, repo_path)
     evaluation_rubric = read_evaluation_rubric(repo_path, max_chars=1600)
     sprint_directives = read_sprint_directives(repo_path, max_chars=1800)
+    quality_harness_plan = "(quality harness disabled)"
+    quality_harness_cfg = resolve_quality_harness_config(cfg, github_slug)
+    if quality_harness_enabled(cfg, github_slug):
+        finding = build_harness_plan(cfg, github_slug, repo_path)
+        write_harness_plan_finding(cfg, finding)
+        quality_harness_plan = format_harness_plan_for_prompt(finding)
     print(f"  Blocked/partial task outcomes: {len(blocked_tasks)}")
     print(f"  Repo gaps: {len(repo_gaps)}, blocked issues: {len(blocked_issues)}")
     print(f"  Bootstrap doc issues: {len(bootstrap_issues)}")
@@ -1426,6 +1443,7 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
         research_context=research_context,
         adoption_signals=adoption_signals,
         evaluation_rubric=evaluation_rubric or "(no domain rubric defined — using generic evaluation criteria)",
+        quality_harness_plan=quality_harness_plan,
         scorer_findings=scorer_text,
         completions=completions_text,
         open_issues=open_text,
@@ -1465,6 +1483,15 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
                         return {"status": "error", "created": 0, "skipped": 0, "error": "unexpected LLM response format"}
                 else:
                     proposed.extend(llm_proposed[:remaining_slots])
+
+    if quality_harness_enabled(cfg, github_slug) and not bool(quality_harness_cfg.get("operator_approved")):
+        filtered = []
+        for issue in proposed:
+            if issue.get("task_type") == "implementation" and issue_targets_quality_harness(issue):
+                print(f"  Skip (quality harness awaiting operator approval): {(issue.get('title') or '').strip()!r}")
+                continue
+            filtered.append(issue)
+        proposed = filtered
 
     # 8. Dedup and create issues
     created_urls: list[str] = []

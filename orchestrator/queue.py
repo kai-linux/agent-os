@@ -25,6 +25,15 @@ from orchestrator.gh_project import add_issue_comment, gh, gh_json, query_projec
 from orchestrator.repo_context import build_execution_context, gather_recent_git_state, gather_objective_alignment, read_sprint_directives
 from orchestrator.repo_modes import is_dispatcher_only_repo
 from orchestrator.agent_scorer import filter_healthy_agents, log_gate_decision, ADAPTIVE_HEALTH_WINDOW_DAYS, ADAPTIVE_HEALTH_THRESHOLD
+from orchestrator.quality_harness import (
+    FIXED_SUITE_TAXONOMY,
+    clear_pending_qa_action,
+    create_pending_qa_action,
+    load_pending_qa_action,
+    parse_qa_failure_response,
+    resolve_repo_local_path,
+    write_field_failure_fixture,
+)
 
 
 TELEGRAM_ACTION_TTL_HOURS = 48
@@ -1147,6 +1156,9 @@ def handle_telegram_command(
     if command == "repo":
         return _handle_repo_subcommand(cfg, cfg_path, root, args, logfile, queue_summary_log)
 
+    if command == "qa-fail":
+        return _handle_qa_fail_command(cfg, paths, chat_id=str(cfg.get("telegram_chat_id", "")).strip(), args=args)
+
     if command == "jobs":
         lines = ["Cron jobs:"]
         for job in cs.KNOWN_JOBS:
@@ -1166,6 +1178,7 @@ def handle_telegram_command(
             "/repo on|off <key> — pause/resume a single repo\n"
             "/repo mode <key> full|dispatcher — set parent project's automation_mode\n"
             "/repo cadence <key> <days> — set sprint+groomer cadence in days\n"
+            "/qa-fail <repo> <suite> <fixture_id> [issue_number] — capture a regression fixture\n"
             "/jobs — list cron jobs\n"
             "/job on|off <name> — pause/resume a single cron entrypoint\n"
             "/help — this message"
@@ -1248,6 +1261,84 @@ def _handle_job_subcommand(root, args, logfile, queue_summary_log) -> str:
     return f"{'🔴' if sub == 'off' else '🟢'} Job {name} now {sub.upper()}."
 
 
+def _handle_qa_fail_command(cfg: dict, paths: dict, chat_id: str, args: list[str]) -> str:
+    if len(args) < 3:
+        suites = ", ".join(FIXED_SUITE_TAXONOMY)
+        return f"Usage: /qa-fail <repo> <suite> <fixture_id> [issue_number]\nSuites: {suites}"
+    github_repo = str(args[0]).strip()
+    suite = str(args[1]).strip().lower()
+    fixture_id = sanitize_slug(str(args[2]).strip(), max_len=64)
+    if suite not in FIXED_SUITE_TAXONOMY:
+        return f"Invalid suite {suite!r}. Use one of: {', '.join(FIXED_SUITE_TAXONOMY)}"
+    repo_path = resolve_repo_local_path(cfg, github_repo)
+    if repo_path is None:
+        return f"Unknown repo {github_repo!r}."
+    issue_number = None
+    if len(args) >= 4:
+        try:
+            issue_number = int(args[3])
+        except ValueError:
+            return f"issue_number must be an integer, got {args[3]!r}."
+    create_pending_qa_action(
+        paths["TELEGRAM_ACTIONS"],
+        chat_id=chat_id,
+        github_repo=github_repo,
+        suite=suite,
+        fixture_id=fixture_id,
+        issue_number=issue_number,
+    )
+    return (
+        f"Capture ready for {github_repo} → tests/fixtures/{suite}/{fixture_id}/\n"
+        "Reply with:\n"
+        "INPUT:\n"
+        "<bad output input>\n"
+        "EXPECTED_OUTPUT:\n"
+        "<correct expected output>\n"
+        "VERIFIED: yes\n"
+        "NOTES:\n"
+        "<optional context>"
+    )
+
+
+def _handle_pending_qa_reply(cfg: dict, paths: dict, message_chat: str, message_text: str) -> str | None:
+    action = load_pending_qa_action(paths["TELEGRAM_ACTIONS"], message_chat)
+    if not action:
+        return None
+    payload = parse_qa_failure_response(message_text)
+    if not payload.get("input"):
+        return "Pending /qa-fail capture needs an INPUT section."
+
+    github_repo = str(action.get("github_repo", "")).strip()
+    repo_path = resolve_repo_local_path(cfg, github_repo)
+    if repo_path is None or not repo_path.exists():
+        return f"Failed to resolve local repo for {github_repo}."
+
+    manifest_path = write_field_failure_fixture(
+        repo_path,
+        suite=str(action.get("suite", "")),
+        fixture_id=str(action.get("fixture_id", "")),
+        payload=payload,
+        github_repo=github_repo,
+        issue_number=action.get("issue_number"),
+    )
+    clear_pending_qa_action(paths["TELEGRAM_ACTIONS"], message_chat)
+    issue_number = action.get("issue_number")
+    if issue_number:
+        try:
+            add_issue_comment(
+                github_repo,
+                int(issue_number),
+                (
+                    "## Quality harness field failure fixture captured\n"
+                    f"Stored at `{manifest_path.relative_to(repo_path).as_posix()}`.\n"
+                    f"Verified: `{bool(payload.get('verified') and payload.get('expected_output'))}`"
+                ),
+            )
+        except Exception:
+            pass
+    return f"Stored field-failure fixture at {manifest_path.relative_to(repo_path).as_posix()}."
+
+
 def process_telegram_callbacks(
     cfg: dict,
     paths: dict,
@@ -1283,6 +1374,16 @@ def process_telegram_callbacks(
                 log(f"Telegram command handling failed: {e}", logfile, queue_summary_log=queue_summary_log)
                 send_telegram(cfg, f"Command failed: {e}", logfile, queue_summary_log)
             continue
+        if message_text and message_chat == chat_id:
+            try:
+                reply = _handle_pending_qa_reply(cfg, paths, message_chat, message_text)
+                if reply is not None:
+                    send_telegram(cfg, reply, logfile, queue_summary_log)
+                    continue
+            except Exception as e:
+                log(f"Telegram qa-fail handling failed: {e}", logfile, queue_summary_log=queue_summary_log)
+                send_telegram(cfg, f"/qa-fail capture failed: {e}", logfile, queue_summary_log)
+                continue
 
         callback = update.get("callback_query") or {}
         if not callback:

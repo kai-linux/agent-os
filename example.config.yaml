@@ -198,6 +198,14 @@ outcome_attribution:
       measurement_window_days: 3
       comparison_window: "Compare the post-release comment volume against the prior 3 days"
 
+quality_harness:
+  enabled: false                       # Opt-in per repo; repos without explicit suites keep pytest-only gating
+  operator_approved: false             # Architect can propose plans immediately; implementation issues wait for approval
+  score_threshold: 0.9                 # PRs must meet this eval score before auto-merge
+  suites: []                           # Fixed taxonomy only: unit, api_contract, browser_e2e, visual_regression,
+                                       # multimodal_eval, llm_judge_eval, bot_conversation_eval
+  suite_commands: {}                   # Optional per-suite command; may print JSON {"score": 0.95, "failing_fixtures": [...]}
+
 agent_timeout_minutes:
   codex: 40
   claude: 45
@@ -246,6 +254,14 @@ github_projects:
             - name: "Repo1 app"
               url: "https://app.example.com/repo1"
               description: "Main product surface for repo1"
+        quality_harness:
+          enabled: true
+          operator_approved: false
+          score_threshold: 0.9
+          suites: [unit, multimodal_eval]
+          suite_commands:
+            unit: "pytest -q"
+            multimodal_eval: "python3 -m repo1.eval --json"
         production_feedback:
           enabled: true
           stale_after_hours: 48
