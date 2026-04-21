@@ -42,6 +42,17 @@
 
 ## Recent Changes
 
+### 2026-04-21 — [task-20260421-121730-add-adr-curator-extracting-architecture-decisions-] (#288 kai-linux/agent-os)
+Implemented an ADR curator that extracts architectural decisions from qualifying merged PRs into per-repo `docs/adrs/`, maintains `docs/adrs/INDEX.md`, hooks the curator into the post-merge PR monitor flow, and injects recent ADR context into the strategic planner prompt.
+
+**Files:** `- .agent_result.md`, `- orchestrator/adr_curator.py`, `- orchestrator/pr_monitor.py`, `- orchestrator/strategic_planner.py`, `- tests/test_adr_curator.py`, `- tests/test_strategic_planner.py`
+
+**Decisions:**
+  - - Kept ADR generation deterministic and file-based from PR metadata and changed-file heuristics instead of adding an LLM summarization dependency to a recurring control-plane path.
+  - - Used an inline post-merge hook in `pr_monitor` plus a standalone daily CLI entrypoint in `orchestrator/adr_curator.py` to satisfy both immediate capture and scheduled backfill with minimal integration churn.
+  - - Deduplicated ADRs by embedding a stable `<!-- adr-source: owner/repo#PR -->` marker so reruns stay append-only and never rewrite existing ADR entries.
+
+
 ### 2026-04-21 — [task-20260421-121633-add-severity-tiered-incident-response-escalation-l] (#285 kai-linux/agent-os)
 Implemented a shared severity-tiered incident router with configurable source rules, persistent incident tracking, `/ack` and `/resolve` commands, and routing integrations for queue, pr_monitor, agent_scorer, and deploy_watchdog while preserving existing Telegram button workflows.
 
