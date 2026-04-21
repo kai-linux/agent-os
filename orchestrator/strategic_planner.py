@@ -49,6 +49,11 @@ from orchestrator.queue import (
 )
 from orchestrator.scheduler_state import is_due, record_run, job_lock, load_scheduler_state, save_scheduler_state
 from orchestrator.backlog_groomer import groom_repo, _repo_groomer_cadence_days
+from orchestrator.external_ingester import (
+    format_external_signal_concerns,
+    load_external_signals,
+    run_external_ingester,
+)
 from orchestrator.outcome_attribution import (
     OUTCOME_INTERPRETATIONS,
     append_outcome_record,
@@ -1619,6 +1624,7 @@ def _build_substrate_production_feedback_sections(
     repo_path: Path,
     window_days: int,
 ) -> list[dict]:
+    external_records = load_external_signals(cfg, repo=github_slug, window_days=window_days)
     root = Path(cfg.get("root_dir", ".")).expanduser()
     metrics_file = root / "runtime" / "metrics" / "agent_stats.jsonl"
     metric_records = [
@@ -1720,6 +1726,34 @@ def _build_substrate_production_feedback_sections(
         )
         recovery_implications = ["The current sprint window does not show evidence of repeated recovery loops."]
 
+    severity_counts: dict[str, int] = defaultdict(int)
+    external_highlights: list[str] = []
+    latest_external: datetime | None = None
+    for rec in external_records:
+        severity = str(rec.get("severity") or "low").strip().lower() or "low"
+        severity_counts[severity] += 1
+        parsed = rec.get("_ts")
+        if isinstance(parsed, datetime) and (latest_external is None or parsed > latest_external):
+            latest_external = parsed
+        if len(external_highlights) < 4:
+            title = str(rec.get("title") or "(untitled signal)").strip()
+            source = str(rec.get("source") or "external").strip()
+            external_highlights.append(f"[{severity}] {title} ({source})")
+
+    external_freshness = _format_freshness_hours(latest_external)
+    external_observed_at = _format_feedback_observed_at(latest_external)
+    if external_records:
+        external_summary = (
+            f"{len(external_records)} external production signal(s) were ingested for {github_slug} in the {cadence_label}, "
+            f"including {severity_counts.get('high', 0)} high-severity item(s)."
+        )
+        external_implications = [
+            "Treat recent high-severity external signals as strong backlog candidates when they point to user-visible failures, support pain, or public credibility risk.",
+        ]
+    else:
+        external_summary = f"No recent external production signals were ingested for {github_slug} in the {cadence_label}."
+        external_implications = ["No external-signal-driven intervention is required from the current sprint window."]
+
     return [
         {
             "name": "Recent Failures",
@@ -1786,6 +1820,27 @@ def _build_substrate_production_feedback_sections(
             "guardrail_note": "included in planning context",
         },
         _build_adoption_signals_section(cfg, github_slug),
+        {
+            "name": "External Signals",
+            "signal_class": "external_signal",
+            "location": "runtime/metrics/external_signals.jsonl",
+            "observed_at": external_observed_at,
+            "freshness": external_freshness,
+            "freshness_policy": f"refresh each planning or grooming cycle with a per-source minimum fetch interval of 30m",
+            "provenance": "normalized external ingester substrate from configured production, support, and mention feeds",
+            "trust_note": "Configured external sources; advisory until corroborated by repo-local evidence",
+            "privacy_note": "Normalized summaries only; raw external payloads are not persisted",
+            "trust_level": "medium",
+            "privacy_level": "public",
+            "planning_use": "included",
+            "summary": external_summary,
+            "key_evidence": external_highlights or [
+                "No recent external signals were available.",
+                *_format_count_items(severity_counts, empty="No external severity counts recorded."),
+            ],
+            "planning_implications": external_implications,
+            "guardrail_note": "included in planning context",
+        },
     ]
 
 
@@ -1814,6 +1869,7 @@ def _production_feedback_context(cfg: dict, github_slug: str, repo_path: Path) -
             content = artifact_path.read_text(encoding="utf-8", errors="replace").strip()
             return content[:FEEDBACK_CONTEXT_MAX_CHARS] if content else "(empty production feedback artifact)"
 
+    run_external_ingester(cfg, github_slug, repo_path)
     _, sprint_cadence_days = _repo_planner_config(cfg, github_slug)
     objective = load_repo_objective(cfg, github_slug, repo_path)
     sections = _build_substrate_production_feedback_sections(
@@ -3639,7 +3695,8 @@ def plan_repo(
     codebase_context = _read_codebase_md(repo_path)
     print(f"  CODEBASE.md: {len(codebase_context)} chars")
 
-    # 6. Production feedback
+    # 6. External signals + production feedback
+    run_external_ingester(cfg, github_slug, repo_path)
     production_feedback_context = _production_feedback_context(cfg, github_slug, repo_path)
     print(f"  Production feedback: {len(production_feedback_context)} chars")
 
@@ -3709,6 +3766,16 @@ def plan_repo(
     recent_sprint_reports = load_sprint_history(cfg, github_slug, limit=10)
     recurring = find_recurring_concerns(recent_sprint_reports, min_repeats=3)
     recurring_concerns_context = format_recurring_concerns_for_prompt(recurring, max_items=5)
+    external_concerns = format_external_signal_concerns(
+        load_external_signals(cfg, repo=github_slug, window_days=max(7, int(round(sprint_cadence_days)) * 4)),
+        max_items=5,
+    )
+    if external_concerns:
+        recurring_concerns_context = (
+            f"{recurring_concerns_context}\n{external_concerns}".strip()
+            if recurring_concerns_context
+            else external_concerns
+        )
     if recurring:
         print(f"  Recurring concerns: {len(recurring)} across {len(recent_sprint_reports)} recent sprints")
 

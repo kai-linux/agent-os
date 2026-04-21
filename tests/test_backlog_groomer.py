@@ -330,6 +330,21 @@ def test_groom_repo_prompt_includes_repo_documents(tmp_path, monkeypatch):
     monkeypatch.setattr(bg, "load_recent_metrics", lambda *args, **kwargs: [{"task_id": "t1", "repo": "owner/repo"}])
     monkeypatch.setattr(bg, "_parse_known_issues", lambda repo_path: [])
     monkeypatch.setattr(bg, "_find_risk_flags", lambda cfg: [])
+    monkeypatch.setattr(bg, "run_external_ingester", lambda cfg, github_slug, repo_path: [])
+    monkeypatch.setattr(
+        bg,
+        "load_external_signals",
+        lambda cfg, repo=None, window_days=14: [
+            {
+                "source": "sentry",
+                "kind": "error",
+                "severity": "high",
+                "title": "Checkout crashes on submit",
+                "body": "Unhandled exception in payment flow.",
+                "ts": "2026-04-21T09:00:00+00:00",
+            }
+        ],
+    )
     captured = {}
     def fake_call(prompt):
         captured["prompt"] = prompt
@@ -346,6 +361,8 @@ def test_groom_repo_prompt_includes_repo_documents(tmp_path, monkeypatch):
     assert "Build an autonomous agent OS." in prompt
     assert "Prefer autonomy gains." in prompt
     assert "Fresh evidence." in prompt
+    assert "--- External Signals ---" in prompt
+    assert "Checkout crashes on submit" in prompt
     assert "Evidence." in prompt
 
 
