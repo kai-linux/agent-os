@@ -4,6 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from orchestrator import log_analyzer as la
 from orchestrator.log_analyzer import (
     build_blocker_findings,
     build_issue_body,
@@ -169,3 +170,54 @@ def test_blocker_regression_alert_ignores_pre_fix_data():
     # Only 2 records are post-fix (hours 0 and 1), so no alert
     alerts = check_blocker_regression_alerts(records, {}, fix_timestamp=fix_ts)
     assert len(alerts) == 0
+
+
+def test_run_audits_created_issue(monkeypatch, tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    cfg = {
+        "root_dir": str(tmp_path),
+        "github_repo": "owner/repo",
+        "github_projects": {
+            "proj": {
+                "repos": [{"github_repo": "owner/repo", "local_repo": str(repo)}],
+            }
+        },
+    }
+
+    monkeypatch.setattr(la, "load_config", lambda: cfg)
+    monkeypatch.setattr(la, "runtime_paths", lambda cfg: {"QUEUE_SUMMARY_LOG": tmp_path / "runtime" / "logs" / "queue-summary.log"})
+    monkeypatch.setattr(la, "load_recent_metrics", lambda path: [{"timestamp": _ts(1), "repo": "owner/repo", "status": "blocked"}])
+    monkeypatch.setattr(la, "_read_log_tail", lambda path: "recent log")
+    monkeypatch.setattr(la, "collect_structured_findings", lambda root, records, default_repo: [])
+    monkeypatch.setattr(
+        la,
+        "synthesize_issues",
+        lambda **kwargs: [
+            {
+                "title": "Stabilize audit coverage",
+                "repo": "owner/repo",
+                "labels": ["bug"],
+                "goal": "Improve audit coverage.",
+                "success_criteria": ["Record autonomous issue creation"],
+                "constraints": ["Prefer minimal diffs"],
+                "next_steps": ["Add coverage"],
+                "reasoning": "Needed for trust.",
+                "evidence_ids": ["metrics_window"],
+            }
+        ],
+    )
+    monkeypatch.setattr(la, "_open_issue_exists", lambda repo, title: False)
+    monkeypatch.setattr(la, "resolve_goal_ancestry", lambda **kwargs: {})
+    monkeypatch.setattr(la, "build_issue_body", lambda issue, evidence_lookup: "body")
+    monkeypatch.setattr(la, "format_outcome_checks_section", lambda *args, **kwargs: "")
+    monkeypatch.setattr(la, "get_repo_outcome_check_ids", lambda *args, **kwargs: [])
+    monkeypatch.setattr(la, "_create_issue", lambda repo, title, body, labels: "https://github.com/owner/repo/issues/55")
+    monkeypatch.setattr(la, "_add_issue_to_board", lambda *args, **kwargs: None)
+    monkeypatch.setattr(la, "_send_telegram", lambda *args, **kwargs: None)
+    audit_calls = []
+    monkeypatch.setattr(la, "append_audit_event", lambda cfg, event_type, payload: audit_calls.append((event_type, payload)))
+
+    la.run()
+
+    assert audit_calls and audit_calls[0][0] == "autonomous_issue_created"

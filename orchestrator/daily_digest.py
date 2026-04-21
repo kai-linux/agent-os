@@ -10,6 +10,7 @@ from pathlib import Path
 
 import yaml
 
+from orchestrator.audit_log import send_tamper_alert, verify_audit_chain
 from orchestrator.paths import load_config, runtime_paths
 
 WINDOW_HOURS = 24
@@ -288,6 +289,7 @@ def format_digest_message(
     agent_rates: dict[str, dict],
     pr_activity: dict[str, int],
     now: datetime,
+    audit_status: str = "OK",
 ) -> str:
     total_activity = len(completed) + len(blocked) + len(escalated) + pr_activity["created"] + pr_activity["merged"]
     if total_activity == 0:
@@ -331,6 +333,7 @@ def format_digest_message(
     lines.append("🔀 PR Activity")
     lines.append(f"- Created: {pr_activity['created']}")
     lines.append(f"- Merged: {pr_activity['merged']}")
+    lines.append(f"audit chain status: {audit_status}")
 
     return "\n".join(lines[:39])
 
@@ -380,8 +383,20 @@ def run():
         completed_raw + blocked_raw + escalated_raw, queue_details
     )
     pr_activity = collect_pr_activity(cfg, cutoff)
+    audit_report = verify_audit_chain(cfg)
+    audit_status = "OK" if audit_report.get("ok") else "TAMPERED"
+    if not audit_report.get("ok"):
+        send_tamper_alert(cfg, audit_report, source="daily_digest")
 
-    message = format_digest_message(completed, blocked, escalated, agent_rates, pr_activity, now)
+    message = format_digest_message(
+        completed,
+        blocked,
+        escalated,
+        agent_rates,
+        pr_activity,
+        now,
+        audit_status=audit_status,
+    )
     print(message)
     _send_telegram(cfg, message)
 

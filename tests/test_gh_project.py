@@ -392,6 +392,38 @@ def test_create_pr_for_branch_recovers_when_pr_already_exists(monkeypatch):
     ])
 
 
+def test_create_prs_for_orphan_branches_audits_opened_pr(monkeypatch):
+    audit_calls = []
+
+    monkeypatch.setattr(pm, "_list_agent_branches", lambda repo: ["agent/task-123"])
+    monkeypatch.setattr(pm, "_open_pr_branches", lambda repo: [])
+    monkeypatch.setattr(pm, "_branch_has_commits_ahead_of_main", lambda repo, branch: True)
+    monkeypatch.setattr(pm, "_find_merged_pr_for_task", lambda repo, task_id: None)
+    monkeypatch.setattr(pm, "_find_issue_for_task", lambda repo, task_id: 42)
+    monkeypatch.setattr(pm, "create_pr_for_branch", lambda repo, branch, title, body: "https://github.com/owner/repo/pull/7")
+    monkeypatch.setattr(pm, "append_audit_event", lambda cfg, event_type, payload: audit_calls.append((event_type, payload)))
+
+    pm._create_prs_for_orphan_branches({"root_dir": "/tmp/test-root"}, {"owner/repo"})
+
+    assert audit_calls and audit_calls[0][0] == "autonomous_pr_opened"
+    assert audit_calls[0][1]["issue_number"] == 42
+
+
+def test_try_merge_audits_successful_merge(monkeypatch):
+    audit_calls = []
+
+    monkeypatch.setattr(pm, "gh", lambda cmd, check=True: "")
+    monkeypatch.setattr(pm, "append_audit_event", lambda cfg, event_type, payload: audit_calls.append((event_type, payload)))
+
+    assert pm._try_merge({"root_dir": "/tmp/test-root"}, "owner/repo", 55) is True
+    assert audit_calls == [
+        (
+            "autonomous_pr_merged",
+            {"source": "pr_monitor", "repo": "owner/repo", "pr_number": 55, "merge_method": "squash"},
+        )
+    ]
+
+
 def test_get_issue_does_not_fetch_comments_by_default(monkeypatch):
     calls = []
 

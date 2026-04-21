@@ -30,6 +30,7 @@ from pathlib import Path
 
 from orchestrator.paths import load_config
 from orchestrator.agent_scorer import load_recent_metrics, findings_path as scorer_findings_path
+from orchestrator.audit_log import append_audit_event
 from orchestrator.blocker_triage import triage_repo as triage_blocked_issues
 from orchestrator.external_ingester import format_external_signals_for_prompt, load_external_signals, run_external_ingester
 from orchestrator.gh_project import (
@@ -1563,6 +1564,17 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
         try:
             url = _create_issue(github_slug, title, body, labels)
             _set_issue_backlog(cfg, github_slug, url)
+            append_audit_event(
+                cfg,
+                "autonomous_issue_created",
+                {
+                    "source": "backlog_groomer",
+                    "repo": github_slug,
+                    "title": title,
+                    "labels": labels,
+                    "issue_url": url,
+                },
+            )
             print(f"  Created: {url}")
             created_urls.append(url)
             open_titles.append(title)  # Prevent self-duplication within batch

@@ -1072,6 +1072,8 @@ def handle_telegram_callback(
     logfile: Path | None = None,
     queue_summary_log: Path | None = None,
 ) -> dict:
+    from orchestrator.audit_log import append_audit_event
+
     m = re.fullmatch(r"(esc|plan|rvt):([a-f0-9]{12}):(requeue|retry|close|skip|approve|reject|cancel)", callback_data or "")
     if not m:
         return {"text": "Unknown action.", "show_alert": True, "remove_keyboard": False}
@@ -1103,6 +1105,18 @@ def handle_telegram_callback(
             else f"Skipped sprint plan for {action.get('repo', 'repo')}."
         )
         save_telegram_action(actions_dir, action)
+        append_audit_event(
+            cfg,
+            "telegram_callback",
+            {
+                "action_type": action_type,
+                "action_id": action_id,
+                "operation": operation,
+                "repo": action.get("repo"),
+                "approval": action.get("approval"),
+                "result_text": action.get("result_text"),
+            },
+        )
         return {"text": action["result_text"], "show_alert": False, "remove_keyboard": True}
 
     if action_type == "rvt":
@@ -1117,6 +1131,19 @@ def handle_telegram_callback(
         action["approval"] = "approved" if operation == "approve" else "canceled"
         action["result_text"] = result_text
         save_telegram_action(actions_dir, action)
+        append_audit_event(
+            cfg,
+            "telegram_callback",
+            {
+                "action_type": action_type,
+                "action_id": action_id,
+                "operation": operation,
+                "repo": action.get("repo"),
+                "approval": action.get("approval"),
+                "result_text": result_text,
+                "revert_pr_number": action.get("revert_pr_number"),
+            },
+        )
         return {"text": result_text, "show_alert": False, "remove_keyboard": True}
 
     if action.get("type") == "blocked_task_escalation":
@@ -1133,6 +1160,19 @@ def handle_telegram_callback(
     action["handled_at"] = datetime.now(timezone.utc).isoformat()
     action["result_text"] = result_text
     save_telegram_action(actions_dir, action)
+    append_audit_event(
+        cfg,
+        "telegram_callback",
+        {
+            "action_type": action_type,
+            "action_id": action_id,
+            "operation": operation,
+            "repo": action.get("github_repo"),
+            "issue_number": action.get("github_issue_number"),
+            "escalation_type": action.get("type"),
+            "result_text": result_text,
+        },
+    )
     return {"text": result_text, "show_alert": False, "remove_keyboard": True}
 
 def _kill_switch_path(paths: dict) -> Path:
@@ -1157,6 +1197,7 @@ def handle_telegram_command(
     queue_summary_log: Path | None = None,
 ) -> str | None:
     """Handle a Telegram text command. Returns a reply string, or None to ignore."""
+    from orchestrator.audit_log import append_audit_event
     from orchestrator import control_state as cs
 
     raw = (text or "").strip()
@@ -1180,6 +1221,7 @@ def handle_telegram_command(
             encoding="utf-8",
         )
         log("Telegram command: kill-switch engaged (off)", logfile, queue_summary_log=queue_summary_log)
+        append_audit_event(cfg, "kill_switch_toggle", {"command": command, "state": "off", "scope": "global"})
         return "🔴 Agent-OS OFF — cron entrypoints will exit early until /on."
 
     if command in {"on", "enable", "start"}:
@@ -1187,6 +1229,7 @@ def handle_telegram_command(
         if switch.exists():
             switch.unlink()
             log("Telegram command: kill-switch cleared (on)", logfile, queue_summary_log=queue_summary_log)
+            append_audit_event(cfg, "kill_switch_toggle", {"command": command, "state": "on", "scope": "global"})
             return "🟢 Agent-OS ON — cron will resume on next tick."
         return "🟢 Agent-OS already ON."
 
@@ -1257,6 +1300,7 @@ def handle_telegram_command(
     return None
 
 def _handle_repo_subcommand(cfg, cfg_path, root, args, logfile, queue_summary_log) -> str:
+    from orchestrator.audit_log import append_audit_event
     from orchestrator import control_state as cs
 
     if not args:
@@ -1271,6 +1315,11 @@ def _handle_repo_subcommand(cfg, cfg_path, root, args, logfile, queue_summary_lo
             return f"Unknown repo key: {key}. Try /repos."
         cs.set_repo_disabled(root, key, sub == "off")
         log(f"Telegram: /repo {sub} {key}", logfile, queue_summary_log=queue_summary_log)
+        append_audit_event(
+            cfg,
+            "repo_toggle",
+            {"repo_key": key, "state": sub, "project_key": cs.find_repo(cfg, key).get("project_key")},
+        )
         return f"{'🔴' if sub == 'off' else '🟢'} Repo {key} now {sub.upper()}."
 
     if sub == "mode":
@@ -1288,6 +1337,16 @@ def _handle_repo_subcommand(cfg, cfg_path, root, args, logfile, queue_summary_lo
         except Exception as exc:
             return f"Failed to update config.yaml: {exc}"
         log(f"Telegram: /repo mode {key} {normalized}", logfile, queue_summary_log=queue_summary_log)
+        append_audit_event(
+            cfg,
+            "mode_change",
+            {
+                "repo_key": key,
+                "project_key": repo["project_key"],
+                "automation_mode": normalized,
+                "scope": "project",
+            },
+        )
         return (
             f"✅ Project {repo['project_key']} (containing {key}) → automation_mode={normalized}.\n"
             "Note: this affects every repo in that project."
@@ -1309,6 +1368,11 @@ def _handle_repo_subcommand(cfg, cfg_path, root, args, logfile, queue_summary_lo
         except Exception as exc:
             return f"Failed to update config.yaml: {exc}"
         log(f"Telegram: /repo cadence {key} {days}", logfile, queue_summary_log=queue_summary_log)
+        append_audit_event(
+            cfg,
+            "repo_cadence_change",
+            {"repo_key": key, "project_key": repo["project_key"], "days": days},
+        )
         return f"✅ Repo {key} → sprint_cadence_days={days}, groomer_cadence_days={days}."
 
     return f"Unknown /repo subcommand: {sub}. Try /help."

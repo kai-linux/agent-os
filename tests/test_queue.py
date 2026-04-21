@@ -31,6 +31,7 @@ from orchestrator.queue import (
     fallback_cooldown_remaining,
     get_agent_chain,
     handle_telegram_callback,
+    handle_telegram_command,
     has_unpushed_commits,
     maybe_requeue_prompt_inspection_recovery,
     parse_agent_result,
@@ -1435,10 +1436,12 @@ def test_handle_telegram_callback_plan_approve():
         }
         save_telegram_action(actions_dir, action)
 
-        outcome = handle_telegram_callback({}, actions_dir, "plan:abcdef123456:approve")
+        outcome = handle_telegram_callback({"root_dir": d}, actions_dir, "plan:abcdef123456:approve")
         assert "Approved sprint plan" in outcome["text"]
         stored = actions_dir.joinpath("abcdef123456.json").read_text(encoding="utf-8")
         assert '"approval": "approved"' in stored
+        audit_lines = (Path(d) / "runtime" / "audit" / "audit.jsonl").read_text(encoding="utf-8").splitlines()
+        assert any('"event_type":"telegram_callback"' in line for line in audit_lines)
 
 
 def test_handle_telegram_callback_revert_approve(tmp_path, monkeypatch):
@@ -1468,6 +1471,38 @@ def test_handle_telegram_callback_revert_approve(tmp_path, monkeypatch):
     assert outcome["text"] == "approve:88"
     stored = actions_dir.joinpath("abcdef123456.json").read_text(encoding="utf-8")
     assert '"approval": "approved"' in stored
+
+
+def test_handle_telegram_command_repo_mode_writes_audit_record(tmp_path):
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        textwrap.dedent(
+            """\
+            github_projects:
+              proj:
+                automation_mode: full
+                repos:
+                  - key: demo
+                    github_repo: owner/repo
+            """
+        ),
+        encoding="utf-8",
+    )
+    cfg = {
+        "root_dir": str(tmp_path),
+        "github_projects": {
+            "proj": {
+                "automation_mode": "full",
+                "repos": [{"key": "demo", "github_repo": "owner/repo"}],
+            }
+        },
+    }
+
+    reply = handle_telegram_command(cfg, {"ROOT": tmp_path, "CONFIG": cfg_path}, "/repo mode demo dispatcher")
+
+    assert "automation_mode=dispatcher_only" in reply
+    audit_lines = (tmp_path / "runtime" / "audit" / "audit.jsonl").read_text(encoding="utf-8").splitlines()
+    assert any('"event_type":"mode_change"' in line for line in audit_lines)
 
 
 def test_handle_telegram_callback_blocked_task_retry(tmp_path, monkeypatch):

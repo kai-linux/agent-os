@@ -28,6 +28,7 @@ from orchestrator.gh_project import (
     gh,
     gh_json,
 )
+from orchestrator.audit_log import append_audit_event
 from orchestrator.ci_artifact_validator import (
     validate_ci_artifacts,
     format_validation_log,
@@ -332,7 +333,7 @@ def _find_merged_pr_for_task(repo: str, task_id: str) -> dict | None:
     return None
 
 
-def _create_prs_for_orphan_branches(repos: set[str]):
+def _create_prs_for_orphan_branches(cfg: dict, repos: set[str]):
     """Open PRs for agent branches that have commits but no open PR yet."""
     for repo in sorted(repos):
         try:
@@ -377,6 +378,19 @@ def _create_prs_for_orphan_branches(repos: set[str]):
                 body = f"Automated changes from agent branch `{branch}`."
             pr_url = create_pr_for_branch(repo, branch, title, body)
             if pr_url:
+                append_audit_event(
+                    cfg,
+                    "autonomous_pr_opened",
+                    {
+                        "source": "pr_monitor",
+                        "repo": repo,
+                        "branch": branch,
+                        "title": title,
+                        "pr_url": pr_url,
+                        "task_id": task_id,
+                        "issue_number": issue_number,
+                    },
+                )
                 print(f"  Opened PR for orphan branch {branch}: {pr_url}")
             else:
                 print(f"  Warning: failed to open PR for {branch}")
@@ -1166,10 +1180,15 @@ def _handle_ci_failure(cfg: dict, repo: str, pr: dict, checks: list[dict], attem
             print(f"Warning: failed to send CI failure telegram for PR #{pr_number}: {e}")
 
 
-def _try_merge(repo: str, pr_number: int) -> bool:
+def _try_merge(cfg: dict, repo: str, pr_number: int) -> bool:
     """Attempt squash merge. Returns True on success."""
     try:
         gh(["pr", "merge", str(pr_number), "-R", repo, "--squash", "--delete-branch"])
+        append_audit_event(
+            cfg,
+            "autonomous_pr_merged",
+            {"source": "pr_monitor", "repo": repo, "pr_number": pr_number, "merge_method": "squash"},
+        )
         return True
     except Exception as e:
         print(f"Warning: merge failed for PR #{pr_number} in {repo}: {e}")
@@ -1378,7 +1397,7 @@ def monitor_prs():
             stale_prs_closed = True
 
     # Open PRs for agent branches that completed but have no PR yet
-    _create_prs_for_orphan_branches(repos)
+    _create_prs_for_orphan_branches(cfg, repos)
 
     # Housekeeping: resolve CI remediation issues for PRs that already merged/closed.
     state_changed = False
@@ -1529,7 +1548,7 @@ def monitor_prs():
                     print(f"Warning: failed to post quality harness comment on PR #{pr_number}: {e}")
                 continue
 
-            if _try_merge(repo, pr_number):
+            if _try_merge(cfg, repo, pr_number):
                 print(f"  PR #{pr_number}: merged successfully")
                 state.pop(pr_url, None)
                 _save_state(paths, state)
