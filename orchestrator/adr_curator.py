@@ -13,7 +13,6 @@ from pathlib import Path
 
 from orchestrator.gh_project import gh_json
 
-
 ADR_DIR = Path("docs/adrs")
 ADR_INDEX = ADR_DIR / "INDEX.md"
 DEFAULT_RECENT_ADR_LIMIT = 10
@@ -48,7 +47,6 @@ _ARCHITECTURAL_PATH_PATTERNS = (
     re.compile(r"(^|/)requirements[^/]*\.txt$", re.IGNORECASE),
 )
 
-
 def _normalize_labels(labels: list[dict] | None) -> set[str]:
     names: set[str] = set()
     for label in labels or []:
@@ -57,19 +55,15 @@ def _normalize_labels(labels: list[dict] | None) -> set[str]:
             names.add(name)
     return names
 
-
 def _slugify(text: str, *, fallback: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", str(text or "").lower()).strip("-")
     return slug[:60].strip("-") or fallback
 
-
 def _adr_dir(repo_path: Path) -> Path:
     return repo_path / ADR_DIR
 
-
 def _adr_index_path(repo_path: Path) -> Path:
     return repo_path / ADR_INDEX
-
 
 def _existing_adr_for_pr(repo_path: Path, github_slug: str, pr_number: int) -> Path | None:
     adrs_dir = _adr_dir(repo_path)
@@ -84,7 +78,6 @@ def _existing_adr_for_pr(repo_path: Path, github_slug: str, pr_number: int) -> P
             continue
     return None
 
-
 def _next_adr_number(repo_path: Path) -> int:
     adrs_dir = _adr_dir(repo_path)
     highest = 0
@@ -95,7 +88,6 @@ def _next_adr_number(repo_path: Path) -> int:
         except ValueError:
             continue
     return highest + 1
-
 
 def _fetch_pr_details(github_slug: str, pr_number: int) -> dict:
     pr = gh_json(
@@ -113,7 +105,6 @@ def _fetch_pr_details(github_slug: str, pr_number: int) -> dict:
     pr["files"] = [str(entry.get("filename") or "").strip() for entry in files if entry.get("filename")]
     return pr
 
-
 def _architectural_hits(files: list[str]) -> list[str]:
     hits: list[str] = []
     for filename in files:
@@ -121,11 +112,9 @@ def _architectural_hits(files: list[str]) -> list[str]:
             hits.append(filename)
     return hits
 
-
 def _is_bot_author(pr: dict) -> bool:
     login = str((pr.get("author") or {}).get("login") or "").strip().lower()
     return login.endswith("[bot]") or login.endswith("-bot") or login == "dependabot"
-
 
 def _should_skip_pr(pr: dict) -> bool:
     title = str(pr.get("title") or "").strip()
@@ -136,7 +125,6 @@ def _should_skip_pr(pr: dict) -> bool:
         return True
     return any(pattern.search(title) for pattern in _SKIP_TITLE_PATTERNS)
 
-
 def _qualifying_reason(pr: dict) -> tuple[str | None, list[str]]:
     labels = _normalize_labels(pr.get("labels"))
     files = [str(item) for item in pr.get("files") or [] if str(item).strip()]
@@ -146,7 +134,6 @@ def _qualifying_reason(pr: dict) -> tuple[str | None, list[str]]:
     if hits:
         return f"PR touched architectural-surface files: {', '.join(f'`{p}`' for p in hits[:6])}.", hits
     return None, []
-
 
 def _merged_date(pr: dict) -> str:
     raw = str(pr.get("mergedAt") or "").strip()
@@ -160,7 +147,6 @@ def _merged_date(pr: dict) -> str:
     except ValueError:
         return raw[:10]
 
-
 def _decision_summary(pr: dict, arch_hits: list[str]) -> str:
     title = str(pr.get("title") or "Merged architectural change").strip()
     if arch_hits:
@@ -169,7 +155,6 @@ def _decision_summary(pr: dict, arch_hits: list[str]) -> str:
             f"{title}. The merged diff updated {', '.join(f'`{path}`' for path in arch_hits[:4])}."
         )
     return f"The repository accepted the architectural change in PR #{pr.get('number')}: {title}."
-
 
 def _consequence_bullets(files: list[str]) -> list[str]:
     lowered = [path.lower() for path in files]
@@ -198,7 +183,6 @@ def _consequence_bullets(files: list[str]) -> list[str]:
         bullets.append("API contract surface changed; integrations and generated clients may need to track the new schema.")
     bullets.append("This record is append-only; any later reversal or refinement should be captured in a new ADR that supersedes this one.")
     return bullets[:4]
-
 
 def _render_adr(number: int, github_slug: str, pr: dict, reason: str, arch_hits: list[str]) -> str:
     pr_number = int(pr["number"])
@@ -250,7 +234,6 @@ def _render_adr(number: int, github_slug: str, pr: dict, reason: str, arch_hits:
     )
     return "\n".join(lines)
 
-
 def _parse_adr(path: Path) -> dict | None:
     try:
         content = path.read_text(encoding="utf-8", errors="replace")
@@ -276,7 +259,6 @@ def _parse_adr(path: Path) -> dict | None:
         "pr_label": pr_match.group(1).strip() if pr_match else "",
         "pr_url": pr_match.group(2).strip() if pr_match else "",
     }
-
 
 def _write_index(repo_path: Path) -> Path:
     adrs_dir = _adr_dir(repo_path)
@@ -305,7 +287,6 @@ def _write_index(repo_path: Path) -> Path:
     index_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return index_path
 
-
 def curate_pr(
     cfg: dict,
     github_slug: str,
@@ -315,7 +296,11 @@ def curate_pr(
     pr: dict | None = None,
 ) -> Path | None:
     """Write an ADR for one merged PR when it qualifies."""
+
     _ = cfg  # Reserved for future per-repo overrides.
+
+    _ = cfg
+
     repo_path = Path(repo_path).expanduser()
     existing = _existing_adr_for_pr(repo_path, github_slug, pr_number)
     if existing:
@@ -342,7 +327,6 @@ def curate_pr(
     path.write_text(_render_adr(number, github_slug, payload, reason, arch_hits), encoding="utf-8")
     _write_index(repo_path)
     return path
-
 
 def _list_recent_merged_prs(github_slug: str, *, days: int, limit: int) -> list[dict]:
     prs = gh_json(
@@ -378,7 +362,6 @@ def _list_recent_merged_prs(github_slug: str, *, days: int, limit: int) -> list[
     recent.sort(key=lambda item: str(item.get("mergedAt") or ""))
     return recent
 
-
 def _resolve_repos(cfg: dict) -> list[tuple[str, Path]]:
     repos: list[tuple[str, Path]] = []
     for project_cfg in (cfg.get("github_projects") or {}).values():
@@ -390,7 +373,6 @@ def _resolve_repos(cfg: dict) -> list[tuple[str, Path]]:
             if github_slug and local_repo:
                 repos.append((github_slug, Path(local_repo).expanduser()))
     return repos
-
 
 def curate_recent_prs(
     cfg: dict,
@@ -408,7 +390,6 @@ def curate_recent_prs(
         if path is not None:
             created.append(path)
     return created
-
 
 def read_recent_adrs(
     repo_path: Path,
@@ -432,7 +413,6 @@ def read_recent_adrs(
     text = "\n".join(lines)
     return text[:max_chars]
 
-
 def main(argv: list[str] | None = None) -> int:
     from orchestrator.paths import load_config
 
@@ -453,7 +433,6 @@ def main(argv: list[str] | None = None) -> int:
         created = curate_recent_prs(cfg, github_slug, repo_path, days=args.days, limit=args.limit)
         print(f"{github_slug}: {len(created)} ADR(s) curated")
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())
