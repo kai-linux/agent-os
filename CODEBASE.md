@@ -42,6 +42,16 @@
 
 ## Recent Changes
 
+### 2026-04-21 — [task-20260421-122430-phase-1-tailscale-secret-key-auth-layer] (#289 kai-linux/agent-os)
+Implemented the dashboard auth-layer fallback contract so invalid remote/auth configs still fail closed by default but can optionally downgrade into localhost read-only mode, while preserving the existing Tailscale/shared-secret auth checks and audit-write schema.
+
+**Files:** `- .agent_result.md`, `- example.config.yaml`, `- orchestrator/dashboard/auth.py`, `- tests/test_dashboard_auth.py`, `- tests/test_paths.py`
+
+**Decisions:**
+  - - Kept fail-closed startup as the default path and made read-only fallback explicit via `dashboard_readonly_fallback` to satisfy both safety requirements without broadening exposure
+  - - Implemented fallback by coercing invalid configs to `127.0.0.1` with no auth backend, because existing read/write authorization already makes that state read-only
+
+
 ### 2026-04-21 — [task-20260421-130544-add-work-verifier-agent-blocking-stubs-mocks-and-s] (#257 kai-linux/agent-os)
 Implemented a pre-merge work verifier that blocks suspicious agent PRs on deterministic stub/mock/scope checks, runs an independent fixed-family LLM judge for issue-criteria validation, supports audited Telegram overrides, and integrates the gate into `pr_monitor` before auto-merge.
 
