@@ -42,6 +42,7 @@ from orchestrator.gh_project import (
 from orchestrator.objectives import load_repo_objective, format_objective_for_prompt
 from orchestrator.outcome_attribution import get_repo_outcome_check_ids, format_outcome_checks_section
 from orchestrator.repo_context import (
+    get_repo_visibility,
     read_evaluation_rubric,
     read_product_inspection_artifact,
     read_production_feedback_artifact,
@@ -51,6 +52,7 @@ from orchestrator.repo_context import (
     read_readme_goal,
     read_sprint_directives,
     read_strategy_context,
+    visibility_prompt_note,
 )
 from orchestrator.scheduler_state import is_due, record_run, job_lock
 from orchestrator.repo_modes import is_dispatcher_only_repo
@@ -861,6 +863,9 @@ def _open_issue_exists(repo: str, title: str) -> bool:
 ANALYSIS_PROMPT = """You are an AI agent system analyst performing backlog grooming.
 Review the data below and create exactly {num_issues} targeted, atomic improvement tasks.
 
+--- Repository Visibility ---
+{visibility_context}
+
 Backlog state: {current_backlog} open backlog issues vs target depth {target_depth}.
 You are refilling the backlog so the next sprint planner has at least 2x the
 sprint plan size to choose from. Quality over volume — do not pad with
@@ -891,6 +896,13 @@ external metrics (stars, forks, user growth), the floor applies regardless of
 how many internal signals are present in the data below. Use the
 "Adoption and credibility signals" section to ground these issues in concrete
 gaps (low star/fork counts, missing demo, weak README, friction in quickstart).
+
+Visibility override: If Repository Visibility above declares this repo PRIVATE
+or INTERNAL, the adoption balance rule DOES NOT APPLY ({adoption_min} will be
+zero in that case) — the repo has no external audience, so do NOT propose
+README polish, star badges, SEO, public demos, quickstart marketing, or
+adoption/credibility work. Focus entirely on internal capability, correctness,
+reliability, and the repo's stated internal objectives.
 
 Rules:
 - Each task must be atomic and clearly scoped (one specific thing to fix/improve)
@@ -1252,8 +1264,16 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
         print(f"  Backlog already at target depth ({current_backlog} ≥ {target_depth}); skipping generation.")
         return {"status": "skipped", "created": 0, "skipped": 0, "cleaned": len(cleaned)}
 
-    # Reserve at least 40% of generated slots for adoption-facing work.
-    adoption_min = math.ceil(num_issues * ADOPTION_BALANCE_FRACTION) if num_issues > 0 else 0
+    # Reserve at least 40% of generated slots for adoption-facing work —
+    # but only for public repos. Private/internal repos have no external
+    # audience, so the adoption floor is disabled.
+    visibility = get_repo_visibility(cfg, github_slug)
+    visibility_context = visibility_prompt_note(visibility) or f"(visibility: {visibility})"
+    print(f"  Visibility: {visibility}")
+    if visibility in {"private", "internal"} or num_issues == 0:
+        adoption_min = 0
+    else:
+        adoption_min = math.ceil(num_issues * ADOPTION_BALANCE_FRACTION)
 
     # 6. Build prompt
     stale_text = "\n".join(
@@ -1328,6 +1348,7 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
     prompt = ANALYSIS_PROMPT.format(
         num_issues=num_issues,
         adoption_min=adoption_min,
+        visibility_context=visibility_context,
         current_backlog=current_backlog,
         target_depth=target_depth,
         stale_issues=stale_text,

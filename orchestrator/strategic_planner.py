@@ -56,9 +56,11 @@ from orchestrator.outcome_attribution import (
 )
 from orchestrator.repo_modes import is_dispatcher_only_repo
 from orchestrator.repo_context import (
+    get_repo_visibility,
     read_evaluation_rubric,
     read_north_star,
     read_sprint_directives,
+    visibility_prompt_note,
 )
 from orchestrator.product_inspector import inspect_product
 from orchestrator.skip_signals import (
@@ -2951,6 +2953,9 @@ to choose which existing backlog issues should move to Ready next.
 
 Context about this repository:
 
+--- Repository Visibility ---
+{visibility_context}
+
 --- Product Vision & Strategy ---
 {strategy_context}
 
@@ -3025,6 +3030,7 @@ Rules:
 - Build on last sprint's outcomes — continue momentum, fix regressions, advance strategy
 - CRITICAL: Read the Repo Objectives section. If the objective includes external metrics (e.g. GitHub stars, adoption, user growth), you MUST select work that moves those metrics. Do NOT fill the entire sprint with internal infrastructure if the objective says to grow adoption. A sprint that ignores the stated objective is a failed sprint.
 - Balance rule: At least 40%% of sprint capacity should target the primary objective metric. If the objective is adoption/stars, at least 2 of 5 tasks must be adoption-facing (demos, README, quickstart, public proof, credibility).
+- Visibility override: If the Repository Visibility section declares this repo PRIVATE or INTERNAL, the adoption/stars/public-credibility rules above DO NOT APPLY — external audience metrics are not a goal here. Do not select README polish, star badges, SEO, public demos, quickstart marketing, or adoption-funnel work. Prioritize internal capability, reliability, and correctness instead.
 - Treat the planning principles as the stable north-star rubric when strategy and backlog quality are ambiguous
 - When a domain evaluation rubric is present, use its quality criteria and skill dimensions to evaluate backlog candidates — prefer work that closes gaps against the rubric over work that does not address any rubric dimension
 - When production feedback is present, prioritize measurable analytics, user feedback, product inspection, and incident/SLO outcomes over narrative summaries alone
@@ -3150,11 +3156,13 @@ def _build_plan_prompt(
     open_issues: str,
     cross_repo_context: str,
     skip_context: str = "",
+    visibility_context: str = "",
 ) -> str:
     return PLAN_PROMPT.format(
         plan_size=plan_size,
         strategy_context=strategy_context,
         readme_goal=readme_goal,
+        visibility_context=visibility_context or "(no explicit visibility — treating as public)",
         objectives_context=objectives_context,
         north_star=north_star,
         planning_principles=planning_principles,
@@ -3636,6 +3644,11 @@ def plan_repo(
     if skip_context:
         print(f"  Skip context: {len(skip_signals or [])} recent skip signals")
 
+    # 15c. Repo visibility — private/internal repos skip adoption-funnel work
+    visibility = get_repo_visibility(cfg, github_slug)
+    visibility_context = visibility_prompt_note(visibility) or f"(visibility: {visibility})"
+    print(f"  Visibility: {visibility}")
+
     # 16. Build prompt with all context
     prompt = _build_plan_prompt(
         plan_size=plan_size,
@@ -3659,6 +3672,7 @@ def plan_repo(
         open_issues=open_issues,
         cross_repo_context=cross_repo_context,
         skip_context=skip_context,
+        visibility_context=visibility_context,
     )
 
     # 16. Call Sonnet

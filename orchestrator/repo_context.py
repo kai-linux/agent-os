@@ -23,6 +23,44 @@ EXECUTION_RESEARCH_HINTS = {
 }
 
 
+_VISIBILITY_VALUES = {"public", "private", "internal"}
+
+
+def get_repo_visibility(cfg: dict, github_slug: str) -> str:
+    """Return declared repo visibility ("public"/"private"/"internal"). Defaults to "public"."""
+    for project_cfg in (cfg.get("github_projects") or {}).values():
+        if not isinstance(project_cfg, dict):
+            continue
+        for rc in project_cfg.get("repos", []) or []:
+            if rc.get("github_repo") == github_slug:
+                raw = str(rc.get("visibility", "")).strip().lower()
+                if raw in _VISIBILITY_VALUES:
+                    return raw
+                return "public"
+    return "public"
+
+
+def visibility_prompt_note(visibility: str) -> str:
+    """Return a prompt snippet describing planning implications of the repo's visibility."""
+    if visibility == "private":
+        return (
+            "REPO VISIBILITY: PRIVATE. This repository has no external audience — "
+            "README polish, star badges, SEO, public demos, adoption funnels, "
+            "and other external-facing credibility work do NOT move any metric "
+            "that matters here. Treat adoption/visibility/credibility goals as "
+            "non-applicable and do not select or propose that kind of work. "
+            "Prioritize internal capability, correctness, reliability, and the "
+            "repo's stated internal objectives instead."
+        )
+    if visibility == "internal":
+        return (
+            "REPO VISIBILITY: INTERNAL. Audience is limited to internal users — "
+            "avoid external-facing adoption work (star badges, SEO, public "
+            "credibility). README clarity for internal operators is still useful."
+        )
+    return ""
+
+
 def read_readme_goal(repo_path: Path, max_chars: int = 1200) -> str:
     readme = repo_path / "README.md"
     if not readme.exists():
