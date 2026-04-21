@@ -49,3 +49,21 @@ def test_load_config_rejects_non_local_dashboard_bind_without_auth(monkeypatch, 
 
     with pytest.raises(ValueError, match="dashboard_bind_address must remain 127.0.0.1"):
         load_config()
+
+
+def test_load_config_can_fallback_to_local_readonly_dashboard(monkeypatch, tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    config_path = repo_root / "config.yaml"
+    config_path.write_text(
+        'dashboard_bind_address: "0.0.0.0"\n'
+        "dashboard_readonly_fallback: true\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("AGENT_OS_CONFIG", str(config_path))
+
+    cfg = load_config()
+
+    assert cfg["dashboard_bind_address"] == "127.0.0.1"
+    assert cfg["dashboard_readonly_mode"] is True

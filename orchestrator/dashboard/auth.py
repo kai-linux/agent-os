@@ -12,6 +12,7 @@ SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 TAILSCALE_BACKEND = "tailscale"
 SHARED_SECRET_BACKEND = "shared_secret"
 SUPPORTED_BACKENDS = frozenset({TAILSCALE_BACKEND, SHARED_SECRET_BACKEND})
+READONLY_FALLBACK = "dashboard_readonly_fallback"
 
 
 class DashboardAuthError(ValueError):
@@ -48,25 +49,48 @@ def _shared_secret(cfg: Mapping[str, Any]) -> str:
     return str(cfg.get("dashboard_shared_secret") or "").strip()
 
 
+def _readonly_fallback_enabled(cfg: Mapping[str, Any]) -> bool:
+    return bool(cfg.get(READONLY_FALLBACK, False))
+
+
+def _readonly_fallback_config() -> dict[str, Any]:
+    return {
+        "dashboard_bind_address": LOCALHOST_BIND,
+        "dashboard_auth_backend": None,
+        "dashboard_allowed_users": [],
+        "dashboard_shared_secret": "",
+        "dashboard_readonly_mode": True,
+    }
+
+
 def validate_dashboard_auth_config(cfg: Mapping[str, Any]) -> dict[str, Any]:
     bind_address = dashboard_bind_address(cfg)
     backend = dashboard_auth_backend(cfg)
     allowed_users = sorted(_allowed_users(cfg))
     shared_secret = _shared_secret(cfg)
+    readonly_fallback = _readonly_fallback_enabled(cfg)
 
     if backend and backend not in SUPPORTED_BACKENDS:
+        if readonly_fallback:
+            return _readonly_fallback_config()
         raise DashboardAuthError(
             f"unsupported dashboard_auth_backend {backend!r}; expected one of {sorted(SUPPORTED_BACKENDS)}"
         )
     if backend == TAILSCALE_BACKEND and not allowed_users:
+        if readonly_fallback:
+            return _readonly_fallback_config()
         raise DashboardAuthError(
             "dashboard_auth_backend='tailscale' requires dashboard_allowed_users to contain at least one login"
         )
     if backend == SHARED_SECRET_BACKEND and not shared_secret:
+        if readonly_fallback:
+            return _readonly_fallback_config()
         raise DashboardAuthError(
             "dashboard_auth_backend='shared_secret' requires dashboard_shared_secret to be configured"
         )
     if bind_address != LOCALHOST_BIND and backend is None:
+        if readonly_fallback:
+            return _readonly_fallback_config()
         raise DashboardAuthError(
             "dashboard_bind_address must remain 127.0.0.1 unless dashboard_auth_backend is configured"
         )
@@ -76,6 +100,7 @@ def validate_dashboard_auth_config(cfg: Mapping[str, Any]) -> dict[str, Any]:
         "dashboard_auth_backend": backend,
         "dashboard_allowed_users": allowed_users,
         "dashboard_shared_secret": shared_secret,
+        "dashboard_readonly_mode": False,
     }
 
 
@@ -86,6 +111,7 @@ class DashboardAuth:
         self.backend = self.cfg["dashboard_auth_backend"]
         self.allowed_users = set(self.cfg["dashboard_allowed_users"])
         self.shared_secret = self.cfg["dashboard_shared_secret"]
+        self.readonly_mode = bool(self.cfg.get("dashboard_readonly_mode", False))
 
     @property
     def local_reads_allowed_without_auth(self) -> bool:
