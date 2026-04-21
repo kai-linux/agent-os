@@ -7,6 +7,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from orchestrator.commit_signature import with_agent_os_trailer
 from orchestrator.init import ui
 from orchestrator.init.github_scaffold import gh_json, gh_run
 from orchestrator.init.state import State
@@ -194,7 +195,11 @@ def _commit_charter(local_path: Path, markdown_body: str, *, dry_run: bool) -> s
     if dry_run:
         return "DRYRUN"
     subprocess.run(["git", "add", "NORTH_STAR.md"], cwd=local_path, check=True)
-    subprocess.run(["git", "commit", "-m", "NORTH_STAR: scaffold charter and seed backlog"], cwd=local_path, check=True)
+    subprocess.run(
+        ["git", "commit", "-m",
+         with_agent_os_trailer("NORTH_STAR: scaffold charter and seed backlog")],
+        cwd=local_path, check=True,
+    )
     subprocess.run(["git", "push"], cwd=local_path, check=True)
     result = subprocess.run(["git", "rev-parse", "HEAD"], cwd=local_path, capture_output=True, text=True, check=True)
     return result.stdout.strip()

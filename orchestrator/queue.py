@@ -22,6 +22,7 @@ from orchestrator.paths import load_config, runtime_paths
 from orchestrator.github_sync import sync_result
 from orchestrator.gh_project import gh_json as _gh_json
 from orchestrator.codebase_memory import read_codebase_context, update_codebase_memory
+from orchestrator.commit_signature import with_agent_os_trailer
 from orchestrator.gh_project import add_issue_comment, gh, gh_json, query_project, set_item_status
 from orchestrator.incident_router import classify_severity, escalate as route_incident, update_incident_status
 from orchestrator.repo_context import build_execution_context, gather_recent_git_state, gather_objective_alignment, read_sprint_directives
@@ -2398,7 +2399,8 @@ def commit_and_push(worktree: Path, branch: str, task_id: str, allow_push: bool,
             logfile=logfile,
             queue_summary_log=queue_summary_log,
         )
-        run(["git", "commit", "-m", f"agent {task_id}"], cwd=worktree, logfile=logfile, queue_summary_log=queue_summary_log)
+        commit_msg = with_agent_os_trailer(f"Agent OS: {task_id}")
+        run(["git", "commit", "-m", commit_msg], cwd=worktree, logfile=logfile, queue_summary_log=queue_summary_log)
     else:
         log("Agent already committed changes; pushing unpushed commits.", logfile, queue_summary_log=queue_summary_log)
 

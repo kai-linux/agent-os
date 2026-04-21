@@ -11,6 +11,8 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
+from orchestrator.commit_signature import with_agent_os_trailer
+
 
 # The on-disk CODEBASE.md grows unbounded as an audit trail, but prompts must
 # stay well under the 100 KB argv ceiling. When injecting into a prompt we keep
@@ -140,7 +142,7 @@ def update_codebase_memory(repo: Path, task_id: str, result: dict, meta: dict):
                     return
                 subprocess.run(
                     ["git", "-C", str(repo), "commit", "-m",
-                     f"chore: update CODEBASE.md after {task_id}"],
+                     with_agent_os_trailer(f"chore: update CODEBASE.md after {task_id}")],
                     check=True, capture_output=True,
                 )
                 subprocess.run(

@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from orchestrator.commit_signature import with_agent_os_trailer
 from orchestrator.gh_project import create_pr_for_branch, ensure_labels, gh, gh_json
 from orchestrator.paths import load_config
 from orchestrator.repo_modes import is_dispatcher_only_repo
@@ -596,7 +597,11 @@ def _create_dependency_pr(repo: str, repo_path: Path, finding: Finding) -> str |
             _git(["checkout", original_branch], repo_path)
             return None
         _git(["add", *changed_files], repo_path)
-        _git(["commit", "-m", f"chore(deps): bump {finding.dependency} to {finding.target_version}"], repo_path)
+        _git(
+            ["commit", "-m",
+             with_agent_os_trailer(f"chore(deps): bump {finding.dependency} to {finding.target_version}")],
+            repo_path,
+        )
         _git(["push", "origin", branch, "--force-with-lease"], repo_path)
         pr_body = (
             f"Automated low-risk dependency bump.\n\n"

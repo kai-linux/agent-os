@@ -5,6 +5,7 @@ import re
 import subprocess
 from pathlib import Path
 
+from orchestrator.commit_signature import with_agent_os_trailer
 from orchestrator.init import ui
 from orchestrator.init.state import State, slugify_repo_name
 
@@ -85,7 +86,11 @@ def _ensure_repo_initialized(local_path: Path, repo_name: str) -> None:
     if not status.stdout.strip():
         return
     run_cmd(["git", "add", "README.md", ".gitignore"], cwd=local_path)
-    run_cmd(["git", "commit", "-m", "initial commit"], cwd=local_path)
+    run_cmd(
+        ["git", "commit", "-m",
+         with_agent_os_trailer("initial commit")],
+        cwd=local_path,
+    )
     run_cmd(["git", "push", "-u", "origin", "main"], cwd=local_path)
 
 

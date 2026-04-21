@@ -30,6 +30,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 from uuid import uuid4
 
+from orchestrator.commit_signature import with_agent_os_trailer
 from orchestrator.paths import load_config, runtime_paths
 from orchestrator.objectives import (
     build_objective_scorecard_section,
@@ -2659,7 +2660,8 @@ def _commit_repo_markdown_with_retry(
                 return
 
             subprocess.run(
-                ["git", "-C", str(repo_path), "commit", "-m", commit_message],
+                ["git", "-C", str(repo_path), "commit", "-m",
+                 with_agent_os_trailer(commit_message)],
                 check=True, capture_output=True, text=True,
             )
             subprocess.run(
