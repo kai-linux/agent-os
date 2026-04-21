@@ -42,6 +42,26 @@
 
 ## Recent Changes
 
+### 2026-04-21 — [task-20260421-130226-document-and-test-local-development-setup-end-to-e] (#209 kai-linux/agent-os)
+Added `docs/local-development.md` — a concise, example-driven end-to-end local
+development setup guide (prerequisites, venv + install, running the test suite,
+pre-commit hook, module import smoke test, what-not-to-run warnings, repo
+layout, troubleshooting). Verified the documented steps work in this worktree:
+`python3 -m venv`, `pip install -r requirements.txt`, and `pytest tests/ -q`
+produced 539 passed in ~27s. Linked the new guide from `CONTRIBUTING.md`'s
+Getting Started section and from the README Documentation table so it is
+reachable from both the contributor and fork entry points.
+
+**Files:** `- docs/local-development.md`, `- CONTRIBUTING.md`, `- README.md`
+
+**Decisions:**
+  - - Created a new dedicated `docs/local-development.md` rather than expanding
+  - `CONTRIBUTING.md` or `docs/deployment-guide.md`, because the task asks for
+  - a shared baseline that both CONTRIBUTING.md and FORK_GUIDE.md reference
+  - - Kept the guide focused on the dev-loop-only scope (venv, tests, module
+  - import, pre-commit) and explicitly pointed readers to deployment-guide.md
+
+
 ### 2026-04-21 — [task-20260421-130125-create-fork-guide-md-with-customization-patterns] (#208 kai-linux/agent-os)
 Added FORK_GUIDE.md at the repo root covering the high-leverage customization entry points solo builders reach for when forking Agent OS — agent routing and fallback chains, adding a new agent (runner + registration + pricing), task dispatch and task_type extension, prompt assembly and context injection, objectives and scoring files, per-repo overrides, and the pre-commit secret guard. The guide is example-driven with concrete config snippets, file:line references to the real code paths, and a small "what NOT to fork" section to steer users away from invasive changes. Also linked the new guide from README.md's Documentation table so it is discoverable from the front door.
 
