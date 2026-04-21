@@ -52,8 +52,10 @@ TRANSIENT_BLOCKER_CODES = frozenset({
 # for the named blocker code — this is the manual curation surface.
 FIXED_BY_COMMIT_BLOCKERS: dict[str, tuple[str, str]] = {
     "prompt_too_large": (
-        "fab5144",
-        "Prompt-size gate landed in queue.py (commit fab5144) — the E2BIG root cause is resolved.",
+        "e4ae9d8",
+        "CODEBASE.md Recent-Changes cap landed (commit e4ae9d8), following the "
+        "earlier prompt-size gate and retry-history trim (fab5144). The three "
+        "layered fixes together resolve the known E2BIG causes.",
     ),
 }
 
