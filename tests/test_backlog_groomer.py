@@ -4,6 +4,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 import os
+import json
 import subprocess
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -964,3 +965,116 @@ def test_reap_stale_in_progress_skips_recent_activity(monkeypatch):
 
     demoted = _reap_stale_in_progress(_make_cfg(), "owner/repo", issues)
     assert demoted == []
+
+
+def test_groom_repo_queues_system_architect_findings_for_approval(tmp_path, monkeypatch):
+    cfg = {
+        "root_dir": str(tmp_path),
+        "worktrees_dir": str(tmp_path / "worktrees"),
+        "telegram_chat_id": "123",
+    }
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "README.md").write_text("## Goal\n\nKeep the repo healthy.\n", encoding="utf-8")
+    (repo / "NORTH_STAR.md").write_text("# North Star\n", encoding="utf-8")
+    (repo / "STRATEGY.md").write_text("# Strategy\n", encoding="utf-8")
+    (repo / "PLANNING_PRINCIPLES.md").write_text("# Planning Principles\n", encoding="utf-8")
+    (repo / "CODEBASE.md").write_text("# Codebase\n", encoding="utf-8")
+    analysis_dir = tmp_path / "runtime" / "analysis"
+    analysis_dir.mkdir(parents=True)
+    (analysis_dir / "agent_scorer_findings.json").write_text(
+        json.dumps(
+            {
+                "findings": [
+                    {
+                        "id": "capability_gap:role:system-architect",
+                        "source": "system_architect",
+                        "kind": "capability_gap",
+                        "repo": "owner/repo",
+                        "detail_type": "role",
+                        "name": "system_architect",
+                        "title_hint": "Add missing role `system_architect` to agent-os",
+                        "summary": "The curated operating model expects `system_architect`.",
+                        "goal_hint": "Add the missing role.",
+                        "success_criteria_hint": ["The role exists."],
+                        "constraints_hint": ["Prefer minimal diffs"],
+                        "evidence": ["target model: target_operating_model.yaml"],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(bg, "_list_open_issues", lambda repo, cfg: [])
+    monkeypatch.setattr(bg, "load_recent_metrics", lambda *args, **kwargs: [{"task_id": "t1", "repo": "owner/repo"}])
+    monkeypatch.setattr(bg, "_parse_known_issues", lambda repo_path: [])
+    monkeypatch.setattr(bg, "_find_risk_flags", lambda cfg: [])
+    monkeypatch.setattr(bg, "_call_haiku", lambda prompt: "[]")
+    monkeypatch.setattr(bg, "_open_issue_exists", lambda repo, title: False)
+    monkeypatch.setattr(bg, "_set_issue_backlog", lambda *args, **kwargs: None)
+    monkeypatch.setattr(bg, "_send_telegram", lambda *args, **kwargs: 77)
+
+    result = bg.groom_repo(cfg, "owner/repo", repo)
+
+    assert result["status"] == "approval_pending"
+    actions_dir = tmp_path / "runtime" / "telegram_actions"
+    actions = list(actions_dir.glob("*.json"))
+    assert len(actions) == 1
+    action = json.loads(actions[0].read_text(encoding="utf-8"))
+    assert action["type"] == "system_architect_approval"
+    assert action["approval"] == "pending"
+    assert action["issue"]["title"] == "Add missing role `system_architect` to agent-os"
+
+
+def test_groom_repo_applies_approved_system_architect_action(tmp_path, monkeypatch):
+    cfg = {
+        "root_dir": str(tmp_path),
+        "worktrees_dir": str(tmp_path / "worktrees"),
+    }
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "README.md").write_text("## Goal\n\nKeep the repo healthy.\n", encoding="utf-8")
+    (repo / "NORTH_STAR.md").write_text("# North Star\n", encoding="utf-8")
+    (repo / "STRATEGY.md").write_text("# Strategy\n", encoding="utf-8")
+    (repo / "PLANNING_PRINCIPLES.md").write_text("# Planning Principles\n", encoding="utf-8")
+    (repo / "CODEBASE.md").write_text("# Codebase\n", encoding="utf-8")
+
+    actions_dir = tmp_path / "runtime" / "telegram_actions"
+    actions_dir.mkdir(parents=True)
+    (actions_dir / "abcdef123456.json").write_text(
+        json.dumps(
+            {
+                "action_id": "abcdef123456",
+                "type": "system_architect_approval",
+                "status": "done",
+                "approval": "approved",
+                "repo": "owner/repo",
+                "finding_id": "sensor_gap:signal:support-tickets",
+                "issue": {
+                    "title": "Add missing signal `support_tickets` to repo",
+                    "body": "## Goal\nWire support tickets\n\n## Success Criteria\n- Exists\n\n## Constraints\n- Prefer minimal diffs",
+                    "labels": ["enhancement", "agent-os"],
+                    "priority": "prio:high",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(bg, "_list_open_issues", lambda repo, cfg: [])
+    monkeypatch.setattr(bg, "load_recent_metrics", lambda *args, **kwargs: [])
+    monkeypatch.setattr(bg, "_parse_known_issues", lambda repo_path: [])
+    monkeypatch.setattr(bg, "_find_risk_flags", lambda cfg: [])
+    monkeypatch.setattr(bg, "_set_issue_backlog", lambda *args, **kwargs: None)
+    monkeypatch.setattr(bg, "get_repo_outcome_check_ids", lambda *args, **kwargs: [])
+    created = []
+    monkeypatch.setattr(bg, "_create_issue", lambda repo, title, body, labels: created.append((title, body, labels)) or "https://github.com/owner/repo/issues/41")
+
+    result = bg.groom_repo(cfg, "owner/repo", repo)
+
+    assert result["status"] == "created"
+    assert created and created[0][0] == "Add missing signal `support_tickets` to repo"
+    stored = json.loads((actions_dir / "abcdef123456.json").read_text(encoding="utf-8"))
+    assert stored["status"] == "completed"
+    assert stored["issue_url"] == "https://github.com/owner/repo/issues/41"

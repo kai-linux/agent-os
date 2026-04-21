@@ -27,6 +27,7 @@ import subprocess
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 from pathlib import Path
+from uuid import uuid4
 
 from orchestrator.paths import load_config
 from orchestrator.agent_scorer import load_recent_metrics, findings_path as scorer_findings_path
@@ -65,6 +66,7 @@ from orchestrator.quality_harness import (
     resolve_quality_harness_config,
     write_harness_plan_finding,
 )
+from orchestrator.queue import planner_reply_markup, save_telegram_action
 from orchestrator.scheduler_state import is_due, record_run, job_lock
 from orchestrator.repo_modes import is_dispatcher_only_repo
 from orchestrator.skip_signals import load_skip_signals, skip_penalty_for_issue as _skip_penalty_for_issue
@@ -1079,6 +1081,190 @@ def _call_haiku(prompt: str) -> str:
     raise RuntimeError(" | ".join(errors))
 
 
+def _load_scorer_findings(root: Path) -> list[dict]:
+    try:
+        artifact = scorer_findings_path(root)
+        if not artifact.exists():
+            return []
+        payload = json.loads(artifact.read_text(encoding="utf-8"))
+        findings = payload.get("findings", [])
+        return findings if isinstance(findings, list) else []
+    except Exception:
+        return []
+
+
+def _system_architect_issue_body(finding: dict) -> str:
+    goal = str(finding.get("goal_hint") or finding.get("summary") or "").strip()
+    success = [str(item).strip() for item in finding.get("success_criteria_hint", []) if str(item).strip()]
+    constraints = [str(item).strip() for item in finding.get("constraints_hint", []) if str(item).strip()]
+    evidence = [str(item).strip() for item in finding.get("evidence", []) if str(item).strip()]
+    lines = [
+        "## Goal",
+        goal or "Close the named operating-model gap.",
+        "",
+        "## Success Criteria",
+    ]
+    for item in success or ["Implement the named gap with a concrete, reviewable change."]:
+        lines.append(f"- {item}")
+    if evidence:
+        lines.extend(["", "## Evidence"])
+        for item in evidence[:5]:
+            lines.append(f"- {item}")
+    lines.extend(["", "## Constraints"])
+    for item in constraints or ["- Prefer minimal diffs"]:
+        prefix = "" if item.startswith("- ") else "- "
+        lines.append(f"{prefix}{item}")
+    return "\n".join(lines)
+
+
+def _system_architect_issue_for_finding(finding: dict) -> dict:
+    detail_type = str(finding.get("detail_type") or "gap").strip()
+    labels = ["enhancement", "agent-os", "bot-generated", "operator-approval-required"]
+    if finding.get("kind") == "sensor_gap":
+        labels.append("measurement-gap")
+    else:
+        labels.append("capability-gap")
+    return {
+        "title": str(finding.get("title_hint") or f"Close missing {detail_type} gap").strip(),
+        "body": _system_architect_issue_body(finding),
+        "task_type": "architecture",
+        "priority": "prio:high",
+        "labels": labels,
+    }
+
+
+def _system_architect_action_summary(issue: dict, finding: dict, cadence_days: float) -> str:
+    detail_type = str(finding.get("detail_type") or "gap").strip()
+    name = str(finding.get("name") or "?").strip()
+    lines = [
+        f"🏗️ System Architect Proposal — {finding.get('repo', 'repo')}",
+        f"Cadence: every {cadence_days:g} day(s)",
+        "",
+        f"Gap type: {finding.get('kind', 'gap')} ({detail_type})",
+        f"Name: {name}",
+        f"Issue: {issue['title']}",
+        "",
+        str(finding.get("summary") or "").strip(),
+        "",
+        "Approve to create exactly one backlog issue from this finding.",
+        "Skip to leave the finding open without creating an issue.",
+    ]
+    return "\n".join(lines)
+
+
+def _list_system_architect_actions(actions_dir: Path, github_slug: str) -> list[dict]:
+    actions: list[dict] = []
+    if not actions_dir.exists():
+        return actions
+    for path in sorted(actions_dir.glob("*.json")):
+        try:
+            action = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if action.get("type") != "system_architect_approval":
+            continue
+        if action.get("repo") != github_slug:
+            continue
+        actions.append(action)
+    return actions
+
+
+def _queue_system_architect_approval(
+    cfg: dict,
+    paths: dict,
+    github_slug: str,
+    finding: dict,
+    issue: dict,
+    cadence_days: float,
+) -> bool:
+    for action in _list_system_architect_actions(paths["TELEGRAM_ACTIONS"], github_slug):
+        if action.get("finding_id") == finding.get("id") and action.get("status") in {"pending", "done", "completed"}:
+            return False
+
+    now = datetime.now(timezone.utc)
+    timeout_hours = max(24.0, min(cadence_days * 24.0, 24.0 * 14.0))
+    action = {
+        "action_id": uuid4().hex[:12],
+        "type": "system_architect_approval",
+        "status": "pending",
+        "approval": "pending",
+        "created_at": now.isoformat(),
+        "expires_at": (now + timedelta(hours=timeout_hours)).isoformat(),
+        "chat_id": str(cfg.get("telegram_chat_id", "")).strip(),
+        "message_id": None,
+        "repo": github_slug,
+        "finding_id": finding.get("id"),
+        "finding_kind": finding.get("kind"),
+        "finding_name": finding.get("name"),
+        "issue": issue,
+    }
+    save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
+    msg = _system_architect_action_summary(issue, finding, cadence_days)
+    message_id = _send_telegram(cfg, msg, reply_markup=planner_reply_markup(action["action_id"]))
+    if message_id is None:
+        return False
+    action["message_id"] = message_id
+    save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
+    return True
+
+
+def _apply_approved_system_architect_actions(
+    cfg: dict,
+    paths: dict,
+    github_slug: str,
+    open_titles: list[str],
+    base_ancestry: dict,
+) -> list[str]:
+    created_urls: list[str] = []
+    for action in _list_system_architect_actions(paths["TELEGRAM_ACTIONS"], github_slug):
+        if action.get("approval") != "approved":
+            continue
+        if action.get("issue_url"):
+            continue
+        issue = action.get("issue") or {}
+        title = str(issue.get("title") or "").strip()
+        if not title:
+            action["status"] = "invalid"
+            save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
+            continue
+        if _is_duplicate(title, open_titles) or _open_issue_exists(github_slug, title):
+            action["status"] = "completed"
+            action["issue_url"] = "(duplicate skipped)"
+            action["completed_at"] = datetime.now(timezone.utc).isoformat()
+            save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
+            continue
+
+        labels = [str(label) for label in issue.get("labels", []) if str(label).strip()]
+        priority = str(issue.get("priority") or "prio:high").strip()
+        if priority not in labels:
+            labels.append(priority)
+        body = append_goal_ancestry_sections(str(issue.get("body") or "").strip(), base_ancestry)
+        body += format_outcome_checks_section(
+            get_repo_outcome_check_ids(cfg, github_slug, issue_labels=labels)
+        )
+        url = _create_issue(github_slug, title, body, labels)
+        _set_issue_backlog(cfg, github_slug, url)
+        append_audit_event(
+            cfg,
+            "autonomous_issue_created",
+            {
+                "source": "backlog_groomer",
+                "repo": github_slug,
+                "title": title,
+                "labels": labels,
+                "issue_url": url,
+                "finding_id": action.get("finding_id"),
+            },
+        )
+        action["status"] = "completed"
+        action["issue_url"] = url
+        action["completed_at"] = datetime.now(timezone.utc).isoformat()
+        save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
+        created_urls.append(url)
+        open_titles.append(title)
+    return created_urls
+
+
 def _parse_issues(text: str) -> list[dict]:
     """Parse JSON array from Claude response, stripping markdown fences if present."""
     if text.startswith("```"):
@@ -1144,18 +1330,27 @@ def _set_issue_backlog(cfg: dict, github_slug: str, issue_url: str):
 
 
 
-def _send_telegram(cfg: dict, text: str):
+def _send_telegram(cfg: dict, text: str, reply_markup: dict | None = None) -> int | None:
     token = str(cfg.get("telegram_bot_token", "")).strip()
     chat_id = str(cfg.get("telegram_chat_id", "")).strip()
     if not token or not chat_id:
-        return
+        return None
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    subprocess.run(
-        ["curl", "-sS", "-X", "POST", url,
-         "-d", f"chat_id={chat_id}",
-         "--data-urlencode", f"text={text}"],
-        capture_output=True, text=True, timeout=20,
-    )
+    cmd = [
+        "curl", "-sS", "-X", "POST", url,
+        "-d", f"chat_id={chat_id}",
+        "--data-urlencode", f"text={text}",
+    ]
+    if reply_markup:
+        cmd += ["--data-urlencode", f"reply_markup={json.dumps(reply_markup, separators=(',', ':'))}"]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
+    try:
+        data = json.loads(result.stdout or "{}")
+        if data.get("ok"):
+            return data.get("result", {}).get("message_id")
+    except Exception:
+        pass
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -1218,6 +1413,11 @@ def _resolve_repos(cfg: dict) -> list[tuple[str, Path]]:
 def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
     """Groom a single repo. Returns summary dict."""
     print(f"\n--- Grooming {github_slug} ---")
+    root = Path(cfg.get("root_dir", ".")).expanduser()
+    paths = {
+        "TELEGRAM_ACTIONS": root / "runtime" / "telegram_actions",
+    }
+    paths["TELEGRAM_ACTIONS"].mkdir(parents=True, exist_ok=True)
 
     # 1. Gather open issues (trusted authors only — prompt injection defense)
     open_issues = _list_open_issues(github_slug, cfg)
@@ -1249,11 +1449,12 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
     )
 
     # 2. Recent completions from metrics
-    root = Path(cfg.get("root_dir", ".")).expanduser()
     metrics_file = root / "runtime" / "metrics" / "agent_stats.jsonl"
     all_records = load_recent_metrics(metrics_file, window_days=WINDOW_DAYS)
     records = _filter_records_for_repo(all_records, github_slug, repo_path)
     print(f"  Completions (last {WINDOW_DAYS}d): {len(records)}")
+    scorer_findings = [f for f in _load_scorer_findings(root) if f.get("repo") == github_slug]
+    architect_findings = [f for f in scorer_findings if str(f.get("source") or "") == "system_architect"]
 
     # 3. CODEBASE.md Known Issues
     known_issues = _parse_known_issues(repo_path)
@@ -1297,10 +1498,27 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
     print(f"  Bootstrap doc issues: {len(bootstrap_issues)}")
     print(f"  Adoption signals: gathered")
 
+    base_ancestry = resolve_goal_ancestry(
+        cfg=cfg,
+        repo_path=repo_path,
+        github_slug=github_slug,
+        issue=None,
+        existing=None,
+    )
+    approved_urls = _apply_approved_system_architect_actions(
+        cfg,
+        paths,
+        github_slug,
+        open_titles,
+        base_ancestry,
+    )
+    if approved_urls:
+        print(f"  Applied {len(approved_urls)} approved system architect proposal(s).")
+
     # Skip if no data to analyze
-    if not stale and not known_issues and not risk_flags and not blocked_tasks and not blocked_issues and not repo_gaps and not bootstrap_issues and not records:
+    if not stale and not known_issues and not risk_flags and not blocked_tasks and not blocked_issues and not repo_gaps and not bootstrap_issues and not records and not scorer_findings:
         print("  No data to analyze, skipping.")
-        return {"status": "no-data", "created": 0, "skipped": 0, "cleaned": len(cleaned)}
+        return {"status": "created" if approved_urls else "no-data", "created": len(approved_urls), "skipped": 0, "cleaned": len(cleaned), "urls": approved_urls}
 
     # 5. Determine how many issues to propose based on backlog depth target.
     # Goal: keep open backlog at ~plan_size * 2 so the planner always has
@@ -1327,7 +1545,7 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
         print(f"  Cadence backoff: {recent_auto_skips} recent auto-skips → reducing generation from {num_issues} to {reduced}")
         num_issues = reduced
 
-    if num_issues == 0 and not bootstrap_issues:
+    if num_issues == 0 and not bootstrap_issues and not architect_findings:
         print(f"  Backlog already at target depth ({current_backlog} ≥ {target_depth}); skipping generation.")
         return {"status": "skipped", "created": 0, "skipped": 0, "cleaned": len(cleaned)}
 
@@ -1374,12 +1592,9 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
     # debug vs. business-objective feature work).
     scorer_text = "(none)"
     try:
-        artifact = scorer_findings_path(root)
-        if artifact.exists():
-            payload = json.loads(artifact.read_text(encoding="utf-8"))
-            findings = payload.get("findings", [])
+        if scorer_findings:
             lines: list[str] = []
-            for f in findings[:10]:
+            for f in scorer_findings[:10]:
                 kind = str(f.get("kind") or "").strip()
                 metrics = f.get("metrics") or {}
                 if kind == "pipeline_anomaly":
@@ -1523,13 +1738,17 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
     created_urls: list[str] = []
     skipped: list[str] = []
     failed: list[str] = []
-    base_ancestry = resolve_goal_ancestry(
-        cfg=cfg,
-        repo_path=repo_path,
-        github_slug=github_slug,
-        issue=None,
-        existing=None,
-    )
+    created_urls.extend(approved_urls)
+
+    cadence_days = _repo_groomer_cadence_days(cfg, github_slug)
+    approval_requests = 0
+    for finding in architect_findings:
+        issue = _system_architect_issue_for_finding(finding)
+        title = issue["title"]
+        if _is_duplicate(title, open_titles) or _open_issue_exists(github_slug, title):
+            continue
+        if _queue_system_architect_approval(cfg, paths, github_slug, finding, issue, cadence_days):
+            approval_requests += 1
 
     for issue in proposed[:MAX_ISSUES_PER_RUN]:
         title = (issue.get("title") or "").strip()
@@ -1584,6 +1803,8 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
 
     if created_urls:
         status = "created"
+    elif approval_requests:
+        status = "approval_pending"
     elif failed and not skipped:
         # Every attempted create raised — treat as error so cadence isn't
         # burned on a no-op run (e.g. missing label, gh auth, rate limit).
@@ -1600,6 +1821,7 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
         "failed": len(failed),
         "cleaned": len(cleaned),
         "urls": created_urls,
+        "approval_requests": approval_requests,
     }
     if status == "error":
         if failed:
@@ -1627,7 +1849,7 @@ def run():
         all_created = 0
         all_skipped = 0
         all_cleaned = 0
-        status_counts = {"created": 0, "skipped": 0, "no-data": 0, "error": 0, "dormant": 0}
+        status_counts = {"created": 0, "approval_pending": 0, "skipped": 0, "no-data": 0, "error": 0, "dormant": 0}
         summaries = []
         notify = False
         agent_os_root = Path(cfg.get("root_dir", ".")).expanduser()
@@ -1683,13 +1905,15 @@ def run():
             all_created += result.get("created", 0)
             all_skipped += result.get("skipped", 0)
             all_cleaned += result.get("cleaned", 0)
-            if status in {"created", "error"} or result.get("cleaned", 0) > 0:
+            if status in {"created", "approval_pending", "error"} or result.get("cleaned", 0) > 0:
                 notify = True
-            if status in {"created", "skipped"}:
+            if status in {"created", "approval_pending", "skipped"}:
                 record_run(cfg, "backlog_groomer", github_slug)
 
             if status == "created":
                 summaries.append(f"{github_slug}: {result.get('created', 0)} created, {result.get('skipped', 0)} skipped, {result.get('cleaned', 0)} cleaned")
+            elif status == "approval_pending":
+                summaries.append(f"{github_slug}: {result.get('approval_requests', 0)} architect approval request(s) queued, {result.get('cleaned', 0)} cleaned")
             elif status == "skipped":
                 summaries.append(f"{github_slug}: skipped ({result.get('skipped', 0)} duplicate/failed creates, {result.get('cleaned', 0)} cleaned)")
             elif status == "no-data":
@@ -1703,7 +1927,7 @@ def run():
             f"Blocker triage: {triage_totals.get('unblocked', 0)} unblocked / "
             f"{triage_totals.get('considered', 0)} considered "
             f"(errors={triage_totals.get('errors', 0)})\n"
-            f"Repo statuses: created={status_counts['created']} skipped={status_counts['skipped']} "
+            f"Repo statuses: created={status_counts['created']} approval_pending={status_counts['approval_pending']} skipped={status_counts['skipped']} "
             f"no-data={status_counts['no-data']} error={status_counts['error']} dormant={status_counts['dormant']}\n"
             + "\n".join(summaries)
         )

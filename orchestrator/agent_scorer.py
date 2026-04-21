@@ -18,6 +18,7 @@ from orchestrator.outcome_attribution import load_outcome_records
 from orchestrator.paths import load_config
 from orchestrator.repo_modes import is_dispatcher_only_repo
 from orchestrator.sprint_history import find_recurring_concerns, load_sprint_history
+from orchestrator.system_architect import build_system_architect_findings
 
 
 GATE_DECISIONS_FILENAME = "health_gate_decisions.jsonl"
@@ -1087,6 +1088,7 @@ def run():
     findings.extend(build_retry_storm_findings(cfg))
     findings.extend(build_debug_hypothesis_findings(cfg))
     findings.extend(build_recurring_risk_findings(cfg))
+    findings.extend(build_system_architect_findings(cfg))
     artifact = findings_path(root)
     write_findings(artifact, findings)
 
