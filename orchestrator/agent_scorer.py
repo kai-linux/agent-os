@@ -7,6 +7,7 @@ log analyzer's evidence-synthesis flow.
 from __future__ import annotations
 
 import json
+import re
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -15,6 +16,7 @@ from orchestrator.objectives import load_repo_objective, objective_metrics, scor
 from orchestrator.outcome_attribution import load_outcome_records
 from orchestrator.paths import load_config
 from orchestrator.repo_modes import is_dispatcher_only_repo
+from orchestrator.sprint_history import find_recurring_concerns, load_sprint_history
 
 
 GATE_DECISIONS_FILENAME = "health_gate_decisions.jsonl"
@@ -648,6 +650,227 @@ def build_pipeline_anomaly_findings(cfg: dict) -> list[dict]:
     return findings
 
 
+RETRY_STORM_WINDOW_DAYS = 14
+RETRY_STORM_MIN_TASKS = 6
+RETRY_STORM_RATIO_THRESHOLD = 0.3
+_RETRY_SUFFIX_RE = re.compile(r"-retry-(\d+)$")
+
+
+def _retry_attempt_from_task_id(task_id: str) -> int:
+    """Extract the retry attempt number from a task_id's `-retry-N` suffix.
+
+    Task IDs without the suffix are attempt 0 (first attempt).
+    """
+    if not task_id:
+        return 0
+    match = _RETRY_SUFFIX_RE.search(str(task_id))
+    if not match:
+        return 0
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return 0
+
+
+def build_retry_storm_findings(cfg: dict) -> list[dict]:
+    """Flag repos where too many tasks escalate past attempt 2.
+
+    Retries are normal — a single flaky model cascade is cheap and expected.
+    Deep retry chains (attempt 2+ = third try or later) are a structural
+    signal that agents are fighting the same underlying problem repeatedly
+    instead of the planner/groomer intervening. If >30%% of recent tasks hit
+    attempt 2+, that is a pipeline-level defect that no per-agent degradation
+    finding will catch.
+    """
+    findings: list[dict] = []
+    root = Path(cfg.get("root_dir", ".")).expanduser()
+    metrics_file = root / "runtime" / "metrics" / "agent_stats.jsonl"
+    if not metrics_file.exists():
+        return findings
+
+    records = load_recent_metrics(metrics_file, window_days=RETRY_STORM_WINDOW_DAYS)
+    if not records:
+        return findings
+
+    by_repo: dict[str, list[dict]] = defaultdict(list)
+    for rec in records:
+        repo = _repo_slug(rec)
+        if repo:
+            by_repo[repo].append(rec)
+
+    eligible_repos = {github_slug for github_slug, _ in configured_repos(cfg)}
+    for repo, recs in by_repo.items():
+        if eligible_repos and repo not in eligible_repos:
+            continue
+        if len(recs) < RETRY_STORM_MIN_TASKS:
+            continue
+        deep_retries = [
+            r for r in recs
+            if _retry_attempt_from_task_id(r.get("task_id") or "") >= 2
+        ]
+        ratio = len(deep_retries) / len(recs)
+        if ratio < RETRY_STORM_RATIO_THRESHOLD:
+            continue
+        sample_task_ids = [
+            r.get("task_id") for r in deep_retries[-5:] if r.get("task_id")
+        ]
+        findings.append({
+            "id": f"pipeline_anomaly:retry_storm:{repo}",
+            "source": "agent_scorer",
+            "kind": "pipeline_anomaly",
+            "repo": repo,
+            "title_hint": (
+                f"Debug: deep retry chains dominating task flow in "
+                f"{repo.rsplit('/', 1)[-1]}"
+            ),
+            "summary": (
+                f"{len(deep_retries)}/{len(recs)} tasks in the last "
+                f"{RETRY_STORM_WINDOW_DAYS} days escalated to attempt 2 or "
+                f"deeper. High retry density is a pipeline-level defect — the "
+                f"planner or groomer should have caught whatever is causing "
+                f"repeated failure before the task re-entered the fallback "
+                f"chain. Investigate root-cause (task specification gap? "
+                f"environment drift? model/prompt mismatch?) rather than "
+                f"letting the retry chain absorb the noise."
+            ),
+            "metrics": {
+                "total_tasks": len(recs),
+                "deep_retry_tasks": len(deep_retries),
+                "deep_retry_ratio": round(ratio, 3),
+                "window_days": RETRY_STORM_WINDOW_DAYS,
+            },
+            "evidence": [
+                f"metrics log: runtime/metrics/agent_stats.jsonl",
+                f"recent deep-retry task ids: {sample_task_ids or '(none captured)'}",
+                "check: are the same task types repeatedly failing, or spread across types?",
+                "check: are the same agents repeatedly failing, or spread across agents?",
+            ],
+        })
+    return findings
+
+
+DEBUG_HYPOTHESIS_LOOKBACK = 3
+_GENERIC_HYPOTHESIS_TOKENS = frozenset({
+    "quality", "improve", "better", "more tests", "test coverage",
+    "needs", "should", "could", "maybe", "might",
+})
+
+
+def build_debug_hypothesis_findings(cfg: dict) -> list[dict]:
+    """Promote retro-provided ``debug_hypothesis`` fields into scorer findings.
+
+    When the sprint retro's LLM call emits a concrete structural hypothesis
+    (e.g. "outcome_check_ids are dropped between issue creation and pr_monitor
+    cleanup"), we want the groomer to turn that into an atomic debug issue
+    instead of the hypothesis dying inside the retrospective. Skip hypotheses
+    that are too vague to act on.
+    """
+    findings: list[dict] = []
+    for github_slug, _repo_path in configured_repos(cfg):
+        reports = load_sprint_history(cfg, github_slug, limit=DEBUG_HYPOTHESIS_LOOKBACK)
+        if not reports:
+            continue
+        latest = reports[-1]
+        hypothesis = str(latest.get("debug_hypothesis") or "").strip()
+        if not hypothesis:
+            continue
+        # Filter out boilerplate phrasings that add no investigation value.
+        lower = hypothesis.lower()
+        if len(hypothesis) < 20 or not any(ch.isalpha() for ch in hypothesis):
+            continue
+        generic_hits = sum(1 for token in _GENERIC_HYPOTHESIS_TOKENS if token in lower)
+        if generic_hits >= 2 and len(hypothesis) < 120:
+            continue
+        findings.append({
+            "id": f"pipeline_anomaly:debug_hypothesis:{github_slug}:{hash(hypothesis) & 0xffff:x}",
+            "source": "agent_scorer",
+            "kind": "pipeline_anomaly",
+            "repo": github_slug,
+            "title_hint": (
+                f"Investigate retro hypothesis: "
+                f"{hypothesis[:80]}{'...' if len(hypothesis) > 80 else ''}"
+            ),
+            "summary": (
+                f"The latest sprint retrospective emitted a structural "
+                f"root-cause hypothesis: '{hypothesis}'. Convert this into a "
+                f"single atomic debug issue that tests the hypothesis in code, "
+                f"rather than letting it live only in retro prose."
+            ),
+            "metrics": {
+                "hypothesis_length": len(hypothesis),
+                "sprint_headline": str(latest.get("headline") or "")[:200],
+            },
+            "evidence": [
+                f"sprint history log: runtime/metrics/sprint_reports.jsonl",
+                f"hypothesis: {hypothesis}",
+                f"sprint headline: {str(latest.get('headline') or '(no headline)')}",
+            ],
+        })
+    return findings
+
+
+RECURRING_RISK_SPRINT_LIMIT = 10
+RECURRING_RISK_MIN_REPEATS = 3
+
+
+def build_recurring_risk_findings(cfg: dict) -> list[dict]:
+    """Scan sprint_reports.jsonl for risks/gaps that recur across sprints.
+
+    When the same concern appears in the last 3+ sprint retrospectives, the
+    team has flagged it repeatedly but not resolved it. This detector emits a
+    finding the groomer can convert into a dedicated backlog issue so the
+    problem stops living only in ephemeral retro prose.
+    """
+    findings: list[dict] = []
+    for github_slug, _repo_path in configured_repos(cfg):
+        reports = load_sprint_history(cfg, github_slug, limit=RECURRING_RISK_SPRINT_LIMIT)
+        if len(reports) < RECURRING_RISK_MIN_REPEATS:
+            continue
+        recurring = find_recurring_concerns(
+            reports, min_repeats=RECURRING_RISK_MIN_REPEATS
+        )
+        if not recurring:
+            continue
+        for entry in recurring:
+            example = str(entry.get("example") or "").strip()
+            if not example:
+                continue
+            sprint_count = int(entry.get("sprint_count") or 0)
+            total = int(entry.get("total_sprints_considered") or len(reports))
+            keywords = entry.get("keywords") or []
+            # Build a stable id so repeat detections update the same finding
+            # instead of creating a new issue each cycle.
+            kw_slug = "-".join(sorted(keywords)[:4]) or "generic"
+            findings.append({
+                "id": f"recurring_risk:{github_slug}:{kw_slug}",
+                "source": "agent_scorer",
+                "kind": "recurring_risk",
+                "repo": github_slug,
+                "title_hint": (
+                    f"Resolve recurring sprint risk: "
+                    f"{example[:80]}{'...' if len(example) > 80 else ''}"
+                ),
+                "summary": (
+                    f"This concern has appeared in {sprint_count}/{total} recent "
+                    f"sprint reports without being resolved. Previous sprints flagged "
+                    f"it as a risk but no backlog work closed it out. Either promote "
+                    f"concrete remediation work, or open an investigation to root-cause "
+                    f"why the concern keeps recurring."
+                ),
+                "metrics": {
+                    "sprint_count": sprint_count,
+                    "total_sprints": total,
+                    "keywords": keywords,
+                },
+                "evidence": [
+                    f"latest phrasing: {example}",
+                    f"sprint history log: runtime/metrics/sprint_reports.jsonl",
+                    f"keywords: {', '.join(keywords) if keywords else '(none)'}",
+                ],
+            })
+    return findings
+
+
 def write_findings(path: Path, findings: list[dict]):
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -860,6 +1083,9 @@ def run():
     findings = build_degradation_findings(records)
     findings.extend(build_business_objective_findings(cfg))
     findings.extend(build_pipeline_anomaly_findings(cfg))
+    findings.extend(build_retry_storm_findings(cfg))
+    findings.extend(build_debug_hypothesis_findings(cfg))
+    findings.extend(build_recurring_risk_findings(cfg))
     artifact = findings_path(root)
     write_findings(artifact, findings)
 

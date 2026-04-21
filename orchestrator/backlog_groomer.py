@@ -888,6 +888,7 @@ Focus on:
 7. Repository foundation gaps (missing planning/research/ops scaffolding) — create enabling tasks
 8. Backlog pressure or blocked-work patterns visible in open issues — create high-leverage backlog items
 9. Pipeline / data-flow anomalies surfaced by the scorer — create DEBUGGING issues, not configuration tickets
+10. Recurring risks that have appeared in 3+ recent sprint reports — convert to concrete remediation or investigation tasks, not more retro flags
 
 Pipeline-anomaly handling (CRITICAL):
 When a scorer finding is prefixed with `[pipeline_anomaly]`, the system has
@@ -899,6 +900,18 @@ Goal quotes the specific summary + evidence from the finding and whose
 Success Criteria name the exact subsystem/functions to inspect. Treat the
 evidence bullets as investigation starting points, not boilerplate — the
 finding already contains the likely break point.
+
+Recurring-risk handling (CRITICAL):
+When a scorer finding is prefixed with `[recurring_risk]`, the SAME concern
+has appeared in 3+ recent sprint retrospectives without being resolved.
+Re-flagging it in another retrospective will not fix it. Create a single
+atomic issue (priority: prio:high) that converts the concern into concrete
+work: either (a) remediation — specific code/config/process changes that
+would close out the concern, or (b) investigation — a debugging task to
+root-cause why the concern keeps recurring. The Goal must quote the latest
+phrasing from the finding's evidence. Do NOT create vague "address risk X"
+tickets — the point of escalating from retro-only to backlog is to force
+atomic, executable work.
 
 Balance rule: At least {adoption_min} of the {num_issues} issues you generate
 this run (≥40%) MUST target adoption, credibility, activation, demos,
@@ -1332,6 +1345,15 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
                     ev_text = "; ".join(str(e) for e in evidence[:3])
                     lines.append(
                         f"- [pipeline_anomaly] {f.get('title_hint', '?')} — "
+                        f"{f.get('summary', '')[:300]} | evidence: {ev_text}"
+                    )
+                elif kind == "recurring_risk":
+                    evidence = f.get("evidence") or []
+                    ev_text = "; ".join(str(e) for e in evidence[:3])
+                    lines.append(
+                        f"- [recurring_risk] {f.get('title_hint', '?')} "
+                        f"(appeared in {metrics.get('sprint_count', '?')}/"
+                        f"{metrics.get('total_sprints', '?')} sprints) — "
                         f"{f.get('summary', '')[:300]} | evidence: {ev_text}"
                     )
                 elif kind == "business_objective_regressed":

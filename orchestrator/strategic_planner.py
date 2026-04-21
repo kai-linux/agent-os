@@ -62,6 +62,12 @@ from orchestrator.repo_context import (
     read_sprint_directives,
     visibility_prompt_note,
 )
+from orchestrator.sprint_history import (
+    append_sprint_report,
+    find_recurring_concerns,
+    format_recurring_concerns_for_prompt,
+    load_sprint_history,
+)
 from orchestrator.product_inspector import inspect_product
 from orchestrator.skip_signals import (
     load_skip_signals,
@@ -907,13 +913,25 @@ IMPORTANT framing rules for outcome signals:
 - If no outcome checks fired at all, silently omit outcome commentary rather
   than inventing one.
 
+OPTIONAL debug_hypothesis field:
+If the retrospective data shows a STRUCTURAL, system-level defect (not a one-
+off task failure) — e.g. "every merged PR has empty outcome_check_ids",
+"the same risk has been flagged for several sprints without closure", "a
+specific subsystem keeps producing failed tasks" — emit a one-sentence
+hypothesis about the most likely root cause, naming concrete
+subsystems/functions if identifiable. Leave the field empty if there is no
+such structural defect. Do NOT emit vague hypotheses like "we need more
+tests" or "quality could improve". The field is for actionable engineering
+hypotheses that the scorer/groomer can convert into debug issues.
+
 Return ONLY JSON with this schema:
 {{
   "headline": "one sentence summary of what changed",
   "movement_summary": "2-4 sentence explanation of how the sprint moved the repo toward or away from the goal and north star",
   "progress_points": ["bullet", "bullet", "bullet"],
   "risks_and_gaps": ["bullet", "bullet"],
-  "next_sprint_focus": ["bullet", "bullet", "bullet"]
+  "next_sprint_focus": ["bullet", "bullet", "bullet"],
+  "debug_hypothesis": "optional one-sentence structural root-cause hypothesis, or empty string"
 }}
 """
 
@@ -2769,6 +2787,7 @@ def _fallback_sprint_report(
         "progress_points": progress_points[:4],
         "risks_and_gaps": risks_and_gaps[:4],
         "next_sprint_focus": next_sprint_focus[:4],
+        "debug_hypothesis": "",
     }
 
 
@@ -2798,6 +2817,7 @@ def _build_sprint_report(
         progress_points = [str(item).strip() for item in data.get("progress_points", []) if str(item).strip()]
         risks_and_gaps = [str(item).strip() for item in data.get("risks_and_gaps", []) if str(item).strip()]
         next_sprint_focus = [str(item).strip() for item in data.get("next_sprint_focus", []) if str(item).strip()]
+        debug_hypothesis = str(data.get("debug_hypothesis", "")).strip()
         if headline and movement_summary:
             return {
                 "headline": headline[:240],
@@ -2805,6 +2825,7 @@ def _build_sprint_report(
                 "progress_points": progress_points[:4],
                 "risks_and_gaps": risks_and_gaps[:4],
                 "next_sprint_focus": next_sprint_focus[:4],
+                "debug_hypothesis": debug_hypothesis[:500],
             }
     except Exception as e:
         print(f"  Sprint report summarization failed: {e}")
@@ -2870,6 +2891,14 @@ def _write_sprint_report_artifact(
     ])
     for item in report.get("next_sprint_focus", []) or ["No next sprint focus was extracted."]:
         lines.append(f"- {item}")
+    debug_hypothesis = str(report.get("debug_hypothesis") or "").strip()
+    if debug_hypothesis:
+        lines.extend([
+            "",
+            "## Debug Hypothesis",
+            "",
+            debug_hypothesis,
+        ])
     lines.extend([
         "",
         "## Source Retrospective",
@@ -3018,6 +3047,10 @@ the NEXT-step follow-ups these directives call for.
 
 --- Last Sprint Retrospective ---
 {retrospective}
+
+--- Cross-Sprint Recurring Concerns (same risk flagged across multiple recent sprints — TREAT AS ESCALATION SIGNAL) ---
+If the same concern appears here, previous sprints have flagged it but not resolved it. Do not just re-flag it again; promote concrete backlog work that directly addresses the concern, or promote a debugging/investigation task to root-cause it. If the concern is a measurement-infrastructure concern (e.g. "measurement coverage thin", "outcome checks inconclusive") without additional specifics, do NOT promote blanket "configure metrics for all future PRs" work.
+{recurring_concerns}
 
 --- Last 30 git commits ---
 {git_log}
@@ -3174,6 +3207,7 @@ def _build_plan_prompt(
     cross_repo_context: str,
     skip_context: str = "",
     visibility_context: str = "",
+    recurring_concerns: str = "",
 ) -> str:
     return PLAN_PROMPT.format(
         plan_size=plan_size,
@@ -3200,6 +3234,7 @@ def _build_plan_prompt(
         open_issues=open_issues,
         cross_repo_context=cross_repo_context or "(single-repo mode — no sibling repos configured)",
         skip_context=skip_context or "(no recent skip history)",
+        recurring_concerns=recurring_concerns or "(no recurring concerns across recent sprints)",
     )
 
 
@@ -3396,6 +3431,10 @@ def _complete_plan_action(
             sprint_summary=sprint_summary,
             report=sprint_report,
         )
+        try:
+            append_sprint_report(cfg, repo, sprint_report)
+        except Exception as exc:
+            print(f"  Sprint history persistence failed: {exc}")
         record_run(cfg, "strategic_planner", repo)
         _clear_sprint_completion_notified(cfg, repo)
         summary = (
@@ -3666,6 +3705,13 @@ def plan_repo(
     visibility_context = visibility_prompt_note(visibility) or f"(visibility: {visibility})"
     print(f"  Visibility: {visibility}")
 
+    # 15d. Cross-sprint recurring concerns — escalation signal if same risk flagged 3+ sprints running
+    recent_sprint_reports = load_sprint_history(cfg, github_slug, limit=10)
+    recurring = find_recurring_concerns(recent_sprint_reports, min_repeats=3)
+    recurring_concerns_context = format_recurring_concerns_for_prompt(recurring, max_items=5)
+    if recurring:
+        print(f"  Recurring concerns: {len(recurring)} across {len(recent_sprint_reports)} recent sprints")
+
     # 16. Build prompt with all context
     prompt = _build_plan_prompt(
         plan_size=plan_size,
@@ -3690,6 +3736,7 @@ def plan_repo(
         cross_repo_context=cross_repo_context,
         skip_context=skip_context,
         visibility_context=visibility_context,
+        recurring_concerns=recurring_concerns_context,
     )
 
     # 16. Call Sonnet
