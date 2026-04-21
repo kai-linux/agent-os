@@ -42,6 +42,18 @@
 
 ## Recent Changes
 
+### 2026-04-21 — [task-20260421-093841-add-quality-harness-architect-with-modality-detect] (#250 kai-linux/agent-os)
+Implemented a quality-harness architect flow with repo modality detection, opt-in eval-suite planning and merge gating, plus a Telegram/GitHub field-failure capture path that writes permanent regression fixtures.
+
+**Files:** `- .agent_result.md`, `- example.config.yaml`, `- orchestrator/backlog_groomer.py`, `- orchestrator/pr_monitor.py`, `- orchestrator/quality_harness.py`, `- orchestrator/queue.py`, `- tests/test_quality_harness.py`
+
+**Decisions:**
+  - - Reused repo-local runtime artifacts and Telegram action files instead of inventing a second approval or fixture-ingestion subsystem
+  - - Made the merge gate opt-in via explicit `quality_harness.enabled + suites` so non-opted-in repos keep the existing pytest-only behavior
+  - - Enforced the operator gate by filtering quality-harness implementation issues in the groomer until `operator_approved` is set
+  - - Stored incomplete field failures under `tests/fixtures/unverified/...` so ambiguous reports do not silently become merge-blocking fixtures
+
+
 ### 2026-04-15 — [task-20260415-120520-complete-pr-165-ci-failure-debug-and-prevent-casca] (#186 kai-linux/agent-os)
 PR-165 was already merged with all CI checks passing (SUCCESS). The PR-98 cascading-CI fix (persistent failed_checks in frontmatter) worked correctly: only 2 follow-up tasks were spawned (#166, #170) before the chain terminated, compared to 8+ cascading tasks in the pre-fix PR-98 incident. Added a regression test for failed_checks propagation through follow-up task creation to complete test coverage of the anti-cascade mechanism.
 
