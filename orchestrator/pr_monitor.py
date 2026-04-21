@@ -12,8 +12,10 @@ from orchestrator.outcome_attribution import (
     append_outcome_record,
     capture_github_baseline,
     extract_task_id_from_pr_title,
+    get_repo_outcome_check_ids,
     load_metrics_baseline_from_stats,
     load_outcome_records,
+    parse_outcome_check_ids,
 )
 from orchestrator.gh_project import (
     add_issue_comment,
@@ -709,6 +711,13 @@ def _cleanup_merged_pr_issues(cfg: dict, repo: str, pr: dict):
             outcome_check_ids = list(record.get("outcome_check_ids") or [])
             break
 
+    # Fallback: no prior attribution record carried check IDs (e.g. the agent
+    # opened the PR directly, bypassing github_sync). Derive IDs from the
+    # source issue body first, then repo config + issue labels. This prevents
+    # every merge from cascading to "inconclusive / no outcome check attached".
+    if not outcome_check_ids and not merge_already_logged:
+        outcome_check_ids = _derive_outcome_check_ids_fallback(cfg, repo, issue_number)
+
     if not merge_already_logged:
         # Capture baseline metrics at merge time for before/after comparison
         baseline_github = capture_github_baseline(repo)
@@ -991,6 +1000,49 @@ debugging
 def _extract_issue_number(pr_body: str) -> int | None:
     m = re.search(r"#(\d+)", pr_body or "")
     return int(m.group(1)) if m else None
+
+
+def _derive_outcome_check_ids_fallback(
+    cfg: dict, repo: str, issue_number: int | None
+) -> list[str]:
+    """Recover outcome_check_ids at merge time when no prior attribution record exists.
+
+    Order of preference:
+      1. Parse the source issue body's `## Outcome Checks` section (authoritative
+         — that's what the groomer/planner embedded at issue creation).
+      2. Fall back to repo config + issue labels via get_repo_outcome_check_ids.
+    """
+    labels: list[str] = []
+    body_ids: list[str] = []
+    if issue_number:
+        try:
+            raw = subprocess.run(
+                ["gh", "issue", "view", str(issue_number),
+                 "--repo", repo, "--json", "body,labels"],
+                capture_output=True, text=True, timeout=15,
+            )
+            if raw.returncode == 0:
+                payload = json.loads(raw.stdout or "{}")
+                body = str(payload.get("body") or "")
+                labels = [
+                    str(l.get("name", "")).strip()
+                    for l in (payload.get("labels") or [])
+                    if isinstance(l, dict) and l.get("name")
+                ]
+                m = re.search(
+                    r"(?im)^##\s*outcome checks\s*\n(.+?)(?=\n##\s|\Z)",
+                    body, re.DOTALL,
+                )
+                if m:
+                    body_ids = parse_outcome_check_ids(m.group(1))
+        except Exception:
+            pass
+    if body_ids:
+        return body_ids
+    try:
+        return list(get_repo_outcome_check_ids(cfg, repo, issue_labels=labels or None))
+    except Exception:
+        return []
 
 
 def _handle_ci_failure(cfg: dict, repo: str, pr: dict, checks: list[dict], attempt: int):

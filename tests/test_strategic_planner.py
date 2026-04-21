@@ -750,7 +750,9 @@ def test_fallback_sprint_report_extracts_counts_and_next_focus():
     assert "2 issue(s)" in report["headline"]
     assert "1 PR(s)" in report["headline"]
     assert any("Shipped execution moved forward" in item for item in report["progress_points"])
-    assert any("inconclusive" in item.lower() for item in report["risks_and_gaps"])
+    # With 1 improved offsetting 1 inconclusive, measurement is working — don't
+    # surface inconclusive as a risk. Only all-inconclusive + >=3 qualifies.
+    assert not any("inconclusive" in item.lower() for item in report["risks_and_gaps"])
     assert report["next_sprint_focus"] == ["Add sprint report artifact", "Tighten outcome checks"]
 
 

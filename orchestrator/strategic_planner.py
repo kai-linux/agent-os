@@ -894,6 +894,19 @@ Last sprint retrospective:
 Next sprint plan:
 {sprint_summary}
 
+IMPORTANT framing rules for outcome signals:
+- "inconclusive" outcome checks are ONLY a measurement-infrastructure concern,
+  not a sprint-quality failure. Do not present inconclusive as a "critical
+  gap", "systematic blocker", "sprint-failing risk", or anything that implies
+  the shipped work is suspect. Do not write next-sprint items demanding that
+  every future PR have a pre-configured metric before merge — that is not the
+  policy here. If inconclusive dominates and you must mention it, do so in a
+  single neutral sentence under risks_and_gaps (e.g. "measurement coverage is
+  still thin for this class of work"). Do not repeat the point across fields.
+- Only flag "regressed" checks as real risks; "improved" as real progress.
+- If no outcome checks fired at all, silently omit outcome commentary rather
+  than inventing one.
+
 Return ONLY JSON with this schema:
 {{
   "headline": "one sentence summary of what changed",
@@ -2706,9 +2719,13 @@ def _fallback_sprint_report(
         risks_and_gaps.append(
             f"Outcome evidence included {regressed} regressed check(s), so not all shipped work moved the objective in the right direction."
         )
-    if inconclusive:
+    # Inconclusive is only surfaced as a risk when NO directly-measured signal
+    # exists to offset it. If even one check improved or regressed, the
+    # measurement plumbing is working — inconclusive is just partial coverage,
+    # not a sprint-quality failure worth a risks_and_gaps bullet.
+    if inconclusive and not improved and not regressed and inconclusive >= 3:
         risks_and_gaps.append(
-            f"{inconclusive} outcome check(s) were inconclusive, which means progress is still under-measured in important areas."
+            f"Measurement coverage is thin: {inconclusive} outcome check(s) had no directly-measured signal this window."
         )
 
     for raw_line in sprint_summary.splitlines():
