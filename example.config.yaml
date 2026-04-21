@@ -38,6 +38,12 @@ automation_mode: full                # full=planner/review/self-healing enabled,
 max_parallel_workers: 1
 test_timeout_minutes: 5             # Timeout for test commands (default: 5)
 
+dashboard_bind_address: "127.0.0.1" # Set to a non-local address only with dashboard_auth_backend configured
+# dashboard_auth_backend: "tailscale" # "tailscale" or "shared_secret"
+# dashboard_allowed_users:
+#   - "operator@example.com"
+# dashboard_shared_secret: "change-me"
+
 incident_router:
   business_timezone: "UTC"          # IANA timezone for next-business-hour and digest routing
   business_hours:
