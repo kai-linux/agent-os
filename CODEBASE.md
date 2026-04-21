@@ -42,6 +42,17 @@
 
 ## Recent Changes
 
+### 2026-04-21 — [task-20260421-130427-auto-recover-stalled-tasks-left-in-runtime-mailbox] (#232 kai-linux/agent-os)
+Added a processing-stall watchdog with PID-backed task locks so stale tasks in `runtime/mailbox/processing/` are automatically requeued or blocked with `worker_crash`, with Telegram and audit-log reporting, and covered the recovery path with focused regression tests.
+
+**Files:** `- .agent_result.md`, `- example.config.yaml`, `- orchestrator/paths.py`, `- orchestrator/queue.py`, `- orchestrator/supervisor.py`, `- tests/test_queue.py`
+
+**Decisions:**
+  - - Stored per-task watchdog ownership in `processing/<task>.md.lock.json` with the worker PID instead of relying on repo locks, because the stall decision must be task-specific and safe under multi-worker execution.
+  - - Called the watchdog from `supervisor.py` as well as `queue.py` so stale `processing/` tasks still recover when `inbox/` is empty and no worker would otherwise spawn.
+  - - Used the existing scheduler-state lock/cadence machinery for the watchdog to keep the diff small and avoid overlapping recovery passes.
+
+
 ### 2026-04-21 — [task-20260421-130329-fix-readme-rendering-truncation-in-workflow-diagra] (#215 kai-linux/agent-os)
 Adjusted the README markdown structure with a minimal diff so GitHub can render the full workflow diagram and the remaining sections without parser breakage or section cutoff.
 
