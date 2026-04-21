@@ -1,11 +1,11 @@
 # Sprint Report
 
-- Generated: 2026-04-15 10:01 UTC
-- Sprint Date: 2026-04-15
+- Generated: 2026-04-21 11:01 UTC
+- Sprint Date: 2026-04-21
 
 ## Headline
 
-Shipped 5 adoption and reliability improvements, but all outcomes remain inconclusive due to unwired external metrics—highlighting a measurement gap that is blocking evidence-driven optimization.
+Sprint delivered core infrastructure for evidence-driven planning and execution reliability, shifting focus from adoption surfaces to foundational agent architecture.
 
 ## Goal
 
@@ -65,54 +65,67 @@ Public attention matters, but it is not the primary objective.
 
 ## How This Sprint Moved The Repo Forward
 
-Last sprint completed high-priority work aligned with the north star: published a live reliability dashboard, embedded performance data in the README, improved GitHub discoverability, validated agent stabilization, and reduced the top blocker (missing_context). Execution reliability remains strong (92% success, 0% escalation over 14 days), but adoption metrics are stalled (stars remain at 2, forks at 0) despite the content work. The core issue is not execution quality but measurement: every merged PR is explicitly tracked as 'inconclusive' because outcome metrics are not configured. This blocks the transition from execution-focused (Level 1) to evidence-driven planning (Level 3) that the strategy demands.
+This sprint prioritized execution-layer infrastructure—SLO tracking, cost tracking, deploy-watchdog, CVE watcher, external-signal ingestion, and quality-harness architect—to support the north star's Level 3-4 transition (evidence-driven planning and closed-loop optimization). All 7 PRs merged with outcome checks configured. However, the infrastructure-first approach deprioritized adoption-facing work (README, setup guides, fork documentation), which remain strategic constraints. The next-sprint plan explicitly flags activation friction and missing onboarding artifacts as direct blockers to the stars metric.
 
 ## Progress This Sprint
 
-- Execution reliability strengthened: 14-day success rate 92%, escalation rate 0%, 50 tasks shipped with median 6-min completion time
-- Adoption infrastructure improved: reliability dashboard now live, performance metrics embedded in README, GitHub discoverability optimized, case study published
-- Agent reliability validated: codex agent stabilization fix merged and regression-tested; missing_context blocker (top issue for two sprints) reduced through intake validation
-- Content quality proven viable: README now contains quickstart, deployment guide, proof links, and hard performance numbers—all present and functional
+- Delivered 7 architectural PRs instrumenting evidence collection: SLO state tracker, cost tracking, CVE watcher, deploy-watchdog, external-signal ingester, quality-harness architect
+- Attached goal ancestry (objective→sprint→issue→task) to all dispatched work, creating auditability and traceability across the planning chain
+- Implemented deploy-watchdog auto-recovery for post-merge regressions, advancing the Execution Reliability rubric dimension
+- All merged PRs have outcome checks configured; awaiting snapshot evaluation across 63 total configured checks
 
 ## Risks And Gaps
 
-- Adoption metrics decoupled from execution: Despite 5 merged PRs focused on adoption, GitHub stars remain at 2 and forks at 0, suggesting content quality alone is insufficient—conversion funnel optimization is now the blocking constraint
-- External measurement gap is deliberate blocker: Every outcome from last sprint explicitly scores 'inconclusive' due to unwired metrics; this is the stated prerequisite for advancing from Level 1 (reliable execution) to Level 3 (evidence-driven planning) per next sprint plan
-- Top blockers persist despite intervention: missing_credentials (3), missing_context (2), and quota_limited (2) remain active, indicating intake validation fixed downstream symptoms but not root distribution patterns
+- Adoption work fell below the 40% baseline specified in strategy: README truncation, FORK_GUIDE, and local setup documentation remain unfixed despite being flagged as highest-leverage conversion points
+- Outcome measurement lag: all infrastructure work shows 'outcome snapshot pending' with no validated impact signals yet, creating a gap between shipped capability and evidence of progress
 
 ## Next Sprint Focus
 
-- Wire external adoption metrics and measure funnel: Implement visitor-to-star conversion tracking and weekly impact reporting to close the measurement gap—this unblocks the ability to optimize adoption work and validate ROI of content investments
-- Diagnose and optimize GitHub conversion funnel: Investigate why content improvements (README, quickstart, proof links) don't convert visitors to stars; test hypotheses (discoverability, activation friction, positioning) with targeted experiments
-- Complete multi-agent case study distribution: Finish case study rollout as first real external distribution test; combined with conversion monitoring, this closes the measure-then-optimize loop the strategy requires
+- Auto-recover stalled tasks in runtime/mailbox/processing/ to eliminate the repeated operational failure mode (11 blocked, 25 partial tasks observed)
+- Add work-verifier agent to block stubs, mocks, and scope-mismatch before merge, closing a pre-merge trust gap that undermines operator confidence
+- Fix README workflow diagram rendering truncation—the single highest-traffic adoption surface cannot have a broken first impression
+- Create FORK_GUIDE.md with customization patterns (forks stalled at 0 with 14% strategic weight) and document local development setup end-to-end to unblock the activation funnel
+
+## Debug Hypothesis
+
+Planner may be over-weighting infrastructure reliability relative to the 40% adoption-work baseline in strategy; infrastructure is necessary but insufficient without corresponding activation-surface fixes. The adoption bottleneck (README clarity, setup friction, fork/customization guidance) has not improved since 2026-04-15 and is now explicitly called out in next-sprint directives as blocking the 29%-weighted stars metric.
 
 ## Source Retrospective
 
 Issues completed:
-- #198: Validate codex agent stabilization fix and prevent regression [bug, prio:normal, done, bot-generated] — COMPLETED
-- #197: Reduce missing_context blockers through task intake validation [enhancement, prio:normal, done, bot-generated] — COMPLETED
-- #196: Publish operational reliability dashboard to drive adoption [enhancement, prio:high, done, bot-generated] — COMPLETED
-- #194: Embed agent performance data and success stories in README [enhancement, prio:high, done, bot-generated] — COMPLETED
-- #157: Boost GitHub discoverability through search and trending signals [enhancement, prio:high, done, bot-generated] — COMPLETED
+- #260: Build SLO state tracker module [prio:normal, done] — COMPLETED
+- #253: Implement cost tracking infrastructure [prio:normal, done] — COMPLETED
+- #251: Add authenticated web control plane with meta-info panels (Tailscale-ready) [enhancement, task:architecture, prio:normal] — COMPLETED
+- #250: Add quality-harness architect with modality detection and field-failure fixture loop [enhancement, task:architecture, prio:high, done] — COMPLETED
+- #245: Add deploy-watchdog agent that auto-reverts post-merge regressions [enhancement, task:architecture, prio:normal, done] — COMPLETED
+- #244: Add SLO / error-budget tracker so planner can modulate risk tolerance [enhancement, task:architecture, prio:normal, done] — COMPLETED
+- #243: Add dependency / CVE watcher with auto-bump PRs and high-risk escalation [enhancement, task:architecture, prio:normal, done] — COMPLETED
+- #242: Add external-signal ingester for production telemetry, support, and mentions [enhancement, task:architecture, prio:normal, done] — COMPLETED
+- #241: Add cost-tracking agent with per-repo budgets and burn-rate detector [enhancement, task:architecture, prio:normal, done] — COMPLETED
+- #240: Attach goal ancestry (objective→sprint→issue) to every dispatched task [enhancement, task:architecture, prio:normal, done] — COMPLETED
 
 PRs merged:
-- PR #203: Agent: task-20260414-220519-validate-codex-agent-stabilization-fix-and-prevent (branch: agent/task-20260414-220519-validate-codex-agent-stabilization-fix-and-prevent)
-- PR #202: Agent: task-20260414-220418-reduce-missing-context-blockers-through-task-intak (branch: agent/task-20260414-220418-reduce-missing-context-blockers-through-task-intak)
-- PR #201: Agent: task-20260414-220319-publish-operational-reliability-dashboard-to-drive (branch: agent/task-20260414-220319-publish-operational-reliability-dashboard-to-drive)
-- PR #200: Agent: task-20260414-220222-embed-agent-performance-data-and-success-stories-i (branch: agent/task-20260414-220222-embed-agent-performance-data-and-success-stories-i)
-- PR #199: Agent: task-20260414-220123-boost-github-discoverability-through-search-and-tr (branch: agent/task-20260414-220123-boost-github-discoverability-through-search-and-tr)
+- PR #277: Agent: task-20260421-094629-add-deploy-watchdog-agent-that-auto-reverts-post-m (branch: agent/task-20260421-094629-add-deploy-watchdog-agent-that-auto-reverts-post-m)
+- PR #276: Agent: task-20260421-094524-build-slo-state-tracker-module (branch: agent/task-20260421-094524-build-slo-state-tracker-module)
+- PR #275: Agent: task-20260421-094340-add-dependency-cve-watcher-with-auto-bump-prs-and- (branch: agent/task-20260421-094340-add-dependency-cve-watcher-with-auto-bump-prs-and-)
+- PR #274: Agent: task-20260421-094236-add-external-signal-ingester-for-production-teleme (branch: agent/task-20260421-094236-add-external-signal-ingester-for-production-teleme)
+- PR #273: Agent: task-20260421-094128-implement-cost-tracking-infrastructure (branch: agent/task-20260421-094128-implement-cost-tracking-infrastructure)
+- PR #272: Agent: task-20260421-093931-attach-goal-ancestry-objective-sprint-issue-to-eve (branch: agent/task-20260421-093931-attach-goal-ancestry-objective-sprint-issue-to-eve)
+- PR #265: Agent: task-20260421-093841-add-quality-harness-architect-with-modality-detect (branch: agent/task-20260421-093841-add-quality-harness-architect-with-modality-detect)
 
 Outcome evidence:
-- #? / PR #199 / No measurable external metric: inconclusive — Merged work had no configured outcome check, so it is explicitly tracked as inconclusive instead of being treated as impact-free or automatically successful.
-- #? / PR #201 / No measurable external metric: inconclusive — Merged work had no configured outcome check, so it is explicitly tracked as inconclusive instead of being treated as impact-free or automatically successful.
-- #? / PR #200 / No measurable external metric: inconclusive — Merged work had no configured outcome check, so it is explicitly tracked as inconclusive instead of being treated as impact-free or automatically successful.
-- #? / PR #202 / No measurable external metric: inconclusive — Merged work had no configured outcome check, so it is explicitly tracked as inconclusive instead of being treated as impact-free or automatically successful.
-- #? / PR #203 / No measurable external metric: inconclusive — Merged work had no configured outcome check, so it is explicitly tracked as inconclusive instead of being treated as impact-free or automatically successful.
+- #250 / PR #265: merged, outcome snapshot pending (9 configured checks).
+- #253 / PR #273: merged, outcome snapshot pending (7 configured checks).
+- #242 / PR #274: merged, outcome snapshot pending (9 configured checks).
+- #240 / PR #272: merged, outcome snapshot pending (9 configured checks).
+- #243 / PR #275: merged, outcome snapshot pending (9 configured checks).
+- #260 / PR #276: merged, outcome snapshot pending (7 configured checks).
+- #245 / PR #277: merged, outcome snapshot pending (9 configured checks).
 
 ## Planned Next Sprint
 
-- [prio:high] Diagnose and optimize GitHub visitor-to-star conversion funnel: Stars remain at 2 and forks at 0 despite extensive adoption content work — diagnosing WHY visitors aren't converting is higher leverage than shipping more content into a broken funnel, and directly targets the 29%-weighted GitHub stars metric.
-- [prio:high] Implement adoption funnel monitoring and weekly impact reporting: Every single outcome across 10+ sprints scores 'inconclusive' because external metrics remain unwired despite repeated planning — closing this measurement gap is the prerequisite for evidence-driven adoption optimization and advancing toward Level 4 closed-loop planning.
-- [prio:high] Complete multi-agent case study distribution and measure adoption impact: Case study distribution was partial in sprint 2026-04-12 and completing it provides the first real external distribution test — combined with #206's monitoring, this finally closes the measure-then-optimize loop the strategy demands.
-- [prio:normal] Create fork-friendly contribution and customization guides: GitHub forks carry 14% objective weight and remain at zero — a contribution guide removes the primary friction for technical builders who want to try Agent OS in their own environment, converting interest into the measurable adoption signal the objective demands.
-- [prio:normal] Complete PR-165 CI failure debug and prevent cascading follow-ups: PR-165 remains the only open partial debug task and validates that the PR-98 cascade fix holds — closing it removes lingering reliability debt and frees the system from carrying stale blocked work into future sprints.
+- [prio:high] Auto-recover stalled tasks left in runtime/mailbox/processing/: Recent task metrics show blocked/partial debug tasks piling up (11 blocked, 25 partial) and stalled processing tasks are a repeated operational failure mode; auto-recovery is human-filed, targets two objective metrics directly, and advances the Execution Reliability rubric dimension. Production signals: Repeat-Recovery Signals (improved=4, inconclusive=8, unchanged=1).
+- [prio:high] Add work-verifier agent blocking stubs, mocks, and scope-mismatch before merge: Every recent outcome is 'inconclusive' and product inspection flagged credibility skepticism risk; a pre-merge work-verifier closes a trust gap that undermines both the task success rate metric and the Operator Trust rubric dimension, and is a human-filed structural fix rather than self-improvement churn. Production signals: Repeat-Recovery Signals (improved=4, inconclusive=8, unchanged=1).
+- [prio:high] Fix README rendering truncation in workflow diagram: The README is the single highest-traffic adoption surface and product inspection explicitly flagged truncation as a live rendering concern; a broken first impression directly undermines the 29%-weighted stars metric and every other adoption task depends on a complete README. Production signals: Repeat-Recovery Signals (improved=4, inconclusive=8, unchanged=1).
+- [prio:high] Create FORK_GUIDE.md with customization patterns: Forks are stalled at 0 with 14% objective weight and the strategy explicitly targets solo builders; a fork/customization guide is the operator-validated missing activation artifact that directly addresses the stalled adoption funnel flagged in last sprint's directives.
+- [prio:high] Document and test local development setup end-to-end: Product inspection flags low adoption despite sophisticated features, and the operator directive names activation friction as a blocking constraint; a tested local setup directly compounds with the FORK_GUIDE to convert visitors into retained users and is the highest-leverage remaining adoption-facing doc.
