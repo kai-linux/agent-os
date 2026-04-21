@@ -12,9 +12,10 @@ from typing import Any
 
 from orchestrator.external_ingester import load_external_signals
 from orchestrator.gh_project import create_pr_for_branch, ensure_labels, gh, gh_json
+from orchestrator.incident_router import classify_severity, escalate as route_incident
 from orchestrator.outcome_attribution import load_outcome_records
 from orchestrator.paths import load_config
-from orchestrator.queue import save_telegram_action, send_telegram
+from orchestrator.queue import save_telegram_action
 from orchestrator.repo_modes import is_dispatcher_only_repo
 from orchestrator.scheduler_state import job_lock
 
@@ -517,18 +518,25 @@ def revert_reply_markup(action_id: str) -> dict[str, Any]:
     }
 
 
-def _send_revert_telegram(cfg: dict, action: dict[str, Any]) -> int | None:
+def _send_revert_telegram(cfg: dict, action: dict[str, Any]) -> dict[str, Any]:
     evidence = action.get("evidence") or {}
-    text = (
-        "🚨 Deploy watchdog regression detected\n"
-        f"Repo: {action.get('repo')}\n"
-        f"Source PR: #{action.get('source_pr_number')}\n"
-        f"Revert PR: {action.get('revert_pr_url')}\n"
-        f"Error-rate ratio: {_fmt_ratio(((evidence.get('error_rate') or {}).get('ratio')))}\n"
-        f"Latency p95 ratio: {_fmt_ratio(((evidence.get('latency_p95_ms') or {}).get('ratio')))}\n"
-        "Choose /approve-revert to merge the revert PR or /cancel-revert to close it."
-    )
-    return send_telegram(cfg, text, reply_markup=revert_reply_markup(action["action_id"]))
+    event = {
+        "source": "deploy_watchdog",
+        "type": "deploy_regression",
+        "repo": action.get("repo"),
+        "pr_number": action.get("source_pr_number"),
+        "revert_pr_url": action.get("revert_pr_url"),
+        "verdict": action.get("verdict"),
+        "summary": (
+            f"Deploy regression after PR #{action.get('source_pr_number')}: revert PR {action.get('revert_pr_url')} ready. "
+            f"error_rate={_fmt_ratio(((evidence.get('error_rate') or {}).get('ratio')))}, "
+            f"latency_p95={_fmt_ratio(((evidence.get('latency_p95_ms') or {}).get('ratio')))}."
+        ),
+        "dedup_key": f"deploy-regression:{action.get('repo')}:{action.get('source_pr_number')}",
+        "reply_markup": revert_reply_markup(action["action_id"]),
+    }
+    severity = classify_severity(cfg, "deploy_watchdog", event)
+    return route_incident(severity, event, cfg=cfg)
 
 
 def _already_processed(cfg: dict, repo: str, source_pr_number: int) -> bool:
@@ -594,9 +602,9 @@ def evaluate_merge(
         action = _create_revert_action(cfg, repo, source_pr_number, revert_pr_url, verdict, evidence)
         actions_dir = _telegram_actions_dir(cfg)
         save_telegram_action(actions_dir, action)
-        message_id = _send_revert_telegram(cfg, action)
-        if message_id:
-            action["message_id"] = message_id
+        incident = _send_revert_telegram(cfg, action)
+        if incident.get("message_id"):
+            action["message_id"] = incident["message_id"]
             save_telegram_action(actions_dir, action)
         action_id = action["action_id"]
     if action_id:

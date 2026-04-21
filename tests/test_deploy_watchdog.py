@@ -93,7 +93,7 @@ def test_watch_repo_creates_revert_pr_on_regression(tmp_path, monkeypatch):
         ],
     )
     monkeypatch.setattr(dw, "_create_revert_pr", lambda *args, **kwargs: "https://github.com/owner/repo/pull/88")
-    monkeypatch.setattr(dw, "send_telegram", lambda *args, **kwargs: 42)
+    monkeypatch.setattr("orchestrator.queue.send_telegram", lambda *args, **kwargs: 42)
 
     summaries = dw.watch_repo(cfg, "owner/repo", repo, now=now)
 
