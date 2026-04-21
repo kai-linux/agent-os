@@ -1,33 +1,33 @@
 {
-  "generated_at": "2026-04-18T03:00:01.741806+00:00",
+  "generated_at": "2026-04-21T03:00:01.580955+00:00",
   "github": {
     "forks": 0,
-    "open_issues": 8,
+    "open_issues": 18,
     "repo": "kai-linux/agent-os",
     "stars": 2
   },
   "momentum": {
     "current_week": {
-      "escalation_rate": 0.5079365079365079,
-      "mean_completion_hours": 0.07788988095238095,
-      "success_rate": 0.65625,
-      "successes": 21,
-      "total": 32
+      "escalation_rate": 0.16666666666666666,
+      "mean_completion_hours": 0.09720238095238096,
+      "success_rate": 0.5833333333333334,
+      "successes": 35,
+      "total": 60
     },
     "prior_week": {
       "escalation_rate": 0.0,
-      "mean_completion_hours": 0.11969270833333334,
-      "success_rate": 0.9411764705882353,
-      "successes": 32,
-      "total": 34
+      "mean_completion_hours": 0.12698397435897435,
+      "success_rate": 0.9285714285714286,
+      "successes": 26,
+      "total": 28
     }
   },
   "per_agent": [
     {
       "agent": "claude",
-      "rate": 0.9183673469387755,
-      "successes": 45,
-      "total": 49
+      "rate": 0.7681159420289855,
+      "successes": 53,
+      "total": 69
     },
     {
       "agent": "deepseek",
@@ -37,9 +37,9 @@
     },
     {
       "agent": "codex",
-      "rate": 0.4,
+      "rate": 0.2857142857142857,
       "successes": 2,
-      "total": 5
+      "total": 7
     },
     {
       "agent": "gemini",
@@ -49,30 +49,6 @@
     }
   ],
   "rolling_14_day": [
-    {
-      "blocked": 0,
-      "date": "2026-04-05",
-      "escalation_rate": 0.0,
-      "success_rate": 1.0,
-      "successes": 4,
-      "total": 4
-    },
-    {
-      "blocked": 0,
-      "date": "2026-04-06",
-      "escalation_rate": 0.0,
-      "success_rate": 1.0,
-      "successes": 3,
-      "total": 3
-    },
-    {
-      "blocked": 0,
-      "date": "2026-04-07",
-      "escalation_rate": 0.0,
-      "success_rate": 1.0,
-      "successes": 4,
-      "total": 4
-    },
     {
       "blocked": 0,
       "date": "2026-04-08",
@@ -146,16 +122,40 @@
       "total": 0
     },
     {
-      "blocked": 32,
+      "blocked": 8,
       "date": "2026-04-17",
-      "escalation_rate": 0.6667,
-      "success_rate": 0.2708,
-      "successes": 13,
-      "total": 48
+      "escalation_rate": 0.4706,
+      "success_rate": 0.3529,
+      "successes": 6,
+      "total": 17
+    },
+    {
+      "blocked": 2,
+      "date": "2026-04-18",
+      "escalation_rate": 0.0714,
+      "success_rate": 0.5,
+      "successes": 14,
+      "total": 28
     },
     {
       "blocked": 0,
-      "date": "2026-04-18",
+      "date": "2026-04-19",
+      "escalation_rate": 0.0,
+      "success_rate": 1.0,
+      "successes": 5,
+      "total": 5
+    },
+    {
+      "blocked": 0,
+      "date": "2026-04-20",
+      "escalation_rate": null,
+      "success_rate": null,
+      "successes": 0,
+      "total": 0
+    },
+    {
+      "blocked": 0,
+      "date": "2026-04-21",
       "escalation_rate": null,
       "success_rate": null,
       "successes": 0,
@@ -165,33 +165,33 @@
   "sources": {
     "agent_stats": {
       "available": true,
-      "latest_timestamp": "2026-04-17T21:01:45.022945+00:00",
+      "latest_timestamp": "2026-04-19T15:02:43.659451+00:00",
       "path": "runtime/metrics/agent_stats.jsonl",
-      "records": 97
+      "records": 88
     },
     "production_feedback": {
       "available": true,
-      "generated_at": "2026-04-13T04:30:02.099526+00:00",
+      "generated_at": null,
       "path": "PRODUCTION_FEEDBACK.md"
     }
   },
   "summary": {
     "escalation_rate": {
-      "escalated": 32,
-      "rate": 0.32989690721649484,
-      "total": 97
+      "escalated": 10,
+      "rate": 0.11363636363636363,
+      "total": 88
     },
-    "mean_completion_time_hours": 0.10018472222222223,
+    "mean_completion_time_hours": 0.10989617486338799,
     "task_success_rate": {
-      "rate": 0.803030303030303,
-      "successes": 53,
-      "total": 66
+      "rate": 0.6931818181818182,
+      "successes": 61,
+      "total": 88
     }
   },
   "top_blockers": [
     {
-      "code": "fallback_exhausted",
-      "count": 31
+      "code": "dependency_blocked",
+      "count": 8
     },
     {
       "code": "missing_credentials",
@@ -199,11 +199,11 @@
     },
     {
       "code": "quota_limited",
-      "count": 5
+      "count": 7
     },
     {
-      "code": "dependency_blocked",
-      "count": 4
+      "code": "no_diff_produced",
+      "count": 7
     },
     {
       "code": "runner_failure",
