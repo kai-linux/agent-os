@@ -45,6 +45,7 @@ dashboard_bind_address: "127.0.0.1" # Set to a non-local address only with dashb
 # dashboard_allowed_users:
 #   - "operator@example.com"
 # dashboard_shared_secret: "change-me"
+# dashboard_readonly_fallback: true # Optional fail-closed fallback: force localhost read-only mode when auth config is invalid
 
 incident_router:
   business_timezone: "UTC"          # IANA timezone for next-business-hour and digest routing

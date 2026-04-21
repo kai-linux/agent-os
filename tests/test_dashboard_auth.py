@@ -24,6 +24,19 @@ def test_validate_dashboard_auth_config_rejects_remote_bind_without_auth():
         validate_dashboard_auth_config({"dashboard_bind_address": "0.0.0.0"})
 
 
+def test_validate_dashboard_auth_config_can_fallback_to_readonly_mode():
+    validated = validate_dashboard_auth_config(
+        {
+            "dashboard_bind_address": "0.0.0.0",
+            "dashboard_readonly_fallback": True,
+        }
+    )
+
+    assert validated["dashboard_bind_address"] == LOCALHOST_BIND
+    assert validated["dashboard_auth_backend"] is None
+    assert validated["dashboard_readonly_mode"] is True
+
+
 def test_tailscale_backend_requires_allowed_users():
     with pytest.raises(ValueError, match="dashboard_allowed_users"):
         validate_dashboard_auth_config({"dashboard_auth_backend": "tailscale"})
@@ -72,6 +85,21 @@ def test_local_reads_allow_unauthenticated_access_but_writes_do_not():
     assert auth.require_read({}) is None
     with pytest.raises(DashboardUnauthorizedError):
         auth.require_write({})
+
+
+def test_readonly_fallback_mode_stays_read_only():
+    auth = build_dashboard_auth(
+        {
+            "dashboard_auth_backend": "shared_secret",
+            "dashboard_bind_address": "0.0.0.0",
+            "dashboard_readonly_fallback": True,
+        }
+    )
+
+    assert auth.readonly_mode is True
+    assert auth.require_read({}) is None
+    with pytest.raises(DashboardUnauthorizedError):
+        auth.require_write({"Authorization": "Bearer anything"})
 
 
 def test_remote_reads_require_authentication():
