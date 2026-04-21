@@ -42,6 +42,16 @@
 
 ## Recent Changes
 
+### 2026-04-21 — [task-20260421-094629-add-deploy-watchdog-agent-that-auto-reverts-post-m] (#245 kai-linux/agent-os)
+Implemented an opt-in deploy watchdog that scans recent merged PRs against external production telemetry, opens labeled revert PRs on regression, routes operator approval through Telegram buttons, and logs both detection and operator decisions to a dedicated JSONL audit trail.
+
+**Files:** `- .agent_result.md`, `- CRON.md`, `- example.config.yaml`, `- bin/run_deploy_watchdog.sh`, `- orchestrator/deploy_watchdog.py`, `- orchestrator/queue.py`, `- tests/test_deploy_watchdog.py`, `- tests/test_queue.py`
+
+**Decisions:**
+  - - Reused the existing `outcome_attribution.jsonl`, `external_signals.jsonl`, Telegram action store, and `gh` helpers so the watchdog stays file-based and auditable instead of introducing a parallel control path.
+  - - Kept the watchdog opt-in per repo with fixed 10-minute cron cadence and configurable regression ratios (`2.0x` error rate, `1.5x` latency p95) to match the requested operating model with minimal surface area.
+
+
 ### 2026-04-21 — [task-20260421-094524-build-slo-state-tracker-module] (#260 kai-linux/agent-os)
 Built a new `orchestrator/slo_tracker.py` module that loads opt-in repo SLO YAML files, computes success-rate and merge-cycle burn metrics from runtime telemetry while excluding transient blocker codes from success-rate violations, and rewrites `runtime/metrics/slo_state.jsonl` with standardized daily state rows.
 
