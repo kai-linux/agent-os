@@ -46,6 +46,7 @@ from orchestrator.quality_harness import (
     resolve_quality_harness_config,
     resolve_repo_local_path,
 )
+from orchestrator.adr_curator import curate_pr
 from orchestrator.review_signals import record_review_signal, generate_followup_issues
 from orchestrator.adr_curator import curate_pr
 
