@@ -3508,9 +3508,13 @@ def _complete_plan_action(
         )
         print(summary)
         _send_telegram(cfg, summary)
-        report_msg = _format_sprint_report_message(sprint_report, repo)
-        print(report_msg)
-        _send_telegram(cfg, report_msg)
+        # Intentionally not sending the full sprint report here: the
+        # retrospective already fired earlier via _notify_sprint_completed
+        # ("🏁 Sprint Completed") BEFORE this plan was proposed, so a second
+        # "📊 Sprint Report" right after approval is redundant and arrives
+        # before any new-sprint work has dispatched — which made it look
+        # like a status report on work that hadn't happened yet.
+        # The report artifact is still written to disk and to sprint history.
         action["status"] = "completed"
         action["completed_at"] = now
         save_telegram_action(paths["TELEGRAM_ACTIONS"], action)

@@ -1768,6 +1768,31 @@ def test_format_sprint_report_message_empty_fields():
     assert "No movement summary." in msg
 
 
+def test_approval_path_does_not_resend_sprint_report_to_telegram():
+    """Regression: after user approves a sprint plan, the approval summary is
+    sent via Telegram but the full "📊 Sprint Report" is NOT.
+
+    The retrospective already fires earlier via ``_notify_sprint_completed``
+    (labeled "🏁 Sprint Completed") before the new plan is proposed. Sending
+    it again right after approval duplicates the retrospective and arrives
+    before any new-sprint dispatch — making the report look like it describes
+    work that hadn't happened yet.
+
+    Source-level guard because the full approval flow requires heavy mocking:
+    asserts the approval branch inside ``_complete_plan_action`` does not call
+    ``_format_sprint_report_message`` or send it via ``_send_telegram``.
+    """
+    import inspect
+    from orchestrator import strategic_planner
+
+    src = inspect.getsource(strategic_planner._complete_plan_action)
+    approval_branch = src.split('approval == "approved"', 1)[1]
+    approval_branch = approval_branch.split('approval == "rejected"', 1)[0]
+    assert "_format_sprint_report_message(sprint_report" not in approval_branch, (
+        "approval path should not format-and-send the sprint report via Telegram"
+    )
+
+
 def test_build_plan_prompt_includes_evaluation_rubric():
     prompt = _build_plan_prompt(
         plan_size=3,
