@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from orchestrator.audit_log import append_audit_event
 from orchestrator.external_ingester import load_external_signals
 from orchestrator.gh_project import create_pr_for_branch, ensure_labels, gh, gh_json
 from orchestrator.incident_router import classify_severity, escalate as route_incident
@@ -609,6 +610,18 @@ def evaluate_merge(
         action_id = action["action_id"]
     if action_id:
         result["telegram_action_id"] = action_id
+        append_audit_event(
+            cfg,
+            "autonomous_pr_opened",
+            {
+                "source": "deploy_watchdog",
+                "repo": repo,
+                "pr_url": revert_pr_url,
+                "source_pr_number": source_pr_number,
+                "kind": "revert",
+                "telegram_action_id": action_id,
+            },
+        )
     append_deploy_decision(cfg, result)
     return result
 
@@ -673,6 +686,18 @@ def handle_revert_callback(
         gh(["pr", "merge", str(revert_pr_number), "-R", repo, "--squash", "--delete-branch"])
         response = "approved"
         human_text = f"Approved revert PR #{revert_pr_number} for {repo}."
+        append_audit_event(
+            cfg,
+            "autonomous_pr_merged",
+            {
+                "source": "deploy_watchdog",
+                "repo": repo,
+                "pr_number": revert_pr_number,
+                "source_pr_number": action.get("source_pr_number"),
+                "merge_method": "squash",
+                "kind": "revert",
+            },
+        )
     elif operation == "cancel":
         gh(
             [

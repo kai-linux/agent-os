@@ -726,6 +726,8 @@ def test_groomer_cadence_backoff_on_auto_skips(tmp_path, monkeypatch):
     monkeypatch.setattr(bg, "_open_issue_exists", lambda repo, title: False)
     monkeypatch.setattr(bg, "_create_issue", lambda repo, title, body, labels: "https://github.com/owner/repo/issues/99")
     monkeypatch.setattr(bg, "_set_issue_backlog", lambda cfg, github_slug, issue_url: None)
+    audit_calls = []
+    monkeypatch.setattr(bg, "append_audit_event", lambda cfg, event_type, payload: audit_calls.append((event_type, payload)))
 
     result = bg.groom_repo(cfg, "owner/repo", repo)
 
@@ -733,6 +735,7 @@ def test_groomer_cadence_backoff_on_auto_skips(tmp_path, monkeypatch):
     # The key assertion is that the prompt was generated (LLM was called)
     # and the cadence backoff message was printed.
     assert result.get("status") in {"created", "skipped"}
+    assert audit_calls and audit_calls[0][0] == "autonomous_issue_created"
 
 
 # ---------------------------------------------------------------------------

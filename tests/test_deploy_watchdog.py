@@ -108,6 +108,8 @@ def test_watch_repo_creates_revert_pr_on_regression(tmp_path, monkeypatch):
     assert stored["approval"] == "pending"
     logged = [json.loads(line) for line in (metrics_dir / "deploy_decisions.jsonl").read_text(encoding="utf-8").splitlines()]
     assert logged[-1]["action"] == "revert_pr_created"
+    audit_lines = (tmp_path / "runtime" / "audit" / "audit.jsonl").read_text(encoding="utf-8").splitlines()
+    assert any('"event_type":"autonomous_pr_opened"' in line for line in audit_lines)
 
 
 def test_watch_repo_skips_revert_when_signals_are_clean(tmp_path, monkeypatch):
@@ -167,3 +169,5 @@ def test_handle_revert_callback_records_approval(tmp_path, monkeypatch):
     assert calls and calls[0][:3] == ["pr", "merge", "88"]
     logged = [json.loads(line) for line in (tmp_path / "runtime" / "metrics" / "deploy_decisions.jsonl").read_text(encoding="utf-8").splitlines()]
     assert logged[-1]["operator_response"] == "approved"
+    audit_lines = (tmp_path / "runtime" / "audit" / "audit.jsonl").read_text(encoding="utf-8").splitlines()
+    assert any('"event_type":"autonomous_pr_merged"' in line for line in audit_lines)

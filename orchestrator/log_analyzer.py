@@ -20,6 +20,7 @@ from orchestrator.agent_scorer import (
     findings_path as scorer_findings_path,
     load_recent_metrics,
 )
+from orchestrator.audit_log import append_audit_event
 from orchestrator.gh_project import gh as _gh, query_project, set_item_status
 from orchestrator.outcome_attribution import get_repo_outcome_check_ids, format_outcome_checks_section
 from orchestrator.paths import load_config, runtime_paths
@@ -567,6 +568,18 @@ def run():
         )
         try:
             url = _create_issue(repo, title, body, labels)
+            append_audit_event(
+                cfg,
+                "autonomous_issue_created",
+                {
+                    "source": "log_analyzer",
+                    "repo": repo,
+                    "title": title,
+                    "labels": labels,
+                    "issue_url": url,
+                    "evidence_ids": issue.get("evidence_ids", []),
+                },
+            )
             print(f"Created: {url}")
             created_urls.append(url)
             _add_issue_to_board(cfg, repo, url)
