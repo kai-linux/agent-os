@@ -20,9 +20,27 @@ def _cfg(tmp_path: Path) -> dict:
             "business_hours": {"start_hour": 9, "end_hour": 17},
             "digest_hour": 9,
             "tiers": {
-                "sev1": {"delivery": "immediate", "dedup_window_minutes": 0, "bypass_kill_switch": True},
-                "sev2": {"delivery": "next_business_hour", "dedup_window_minutes": 60, "bypass_kill_switch": False},
-                "sev3": {"delivery": "regular_digest", "dedup_window_minutes": 240, "bypass_kill_switch": False},
+                "sev1": {
+                    "delivery": "immediate",
+                    "dedup_window_minutes": 0,
+                    "bypass_kill_switch": True,
+                    "snooze_minutes": 0,
+                    "handlers": [{"type": "telegram_chat", "snooze_minutes": 0}],
+                },
+                "sev2": {
+                    "delivery": "next_business_hour",
+                    "dedup_window_minutes": 60,
+                    "bypass_kill_switch": False,
+                    "snooze_minutes": 60,
+                    "handlers": [{"type": "telegram_chat", "snooze_minutes": 60}],
+                },
+                "sev3": {
+                    "delivery": "regular_digest",
+                    "dedup_window_minutes": 240,
+                    "bypass_kill_switch": False,
+                    "snooze_minutes": 240,
+                    "handlers": [{"type": "telegram_chat", "snooze_minutes": 240}],
+                },
             },
             "sources": {},
         },
@@ -31,10 +49,10 @@ def _cfg(tmp_path: Path) -> dict:
 
 def test_sev1_routes_immediately_without_dedup(tmp_path, monkeypatch):
     cfg = _cfg(tmp_path)
-    sent: list[tuple[str, dict | None]] = []
+    sent: list[tuple[str, dict | None, str | None, bool]] = []
     monkeypatch.setattr(
         "orchestrator.queue.send_telegram",
-        lambda cfg, text, logfile=None, queue_summary_log=None, reply_markup=None: sent.append((text, reply_markup)) or 101,
+        lambda cfg, text, logfile=None, queue_summary_log=None, reply_markup=None, chat_id=None, bypass_kill_switch=False: sent.append((text, reply_markup, chat_id, bypass_kill_switch)) or 101,
     )
     now = datetime(2026, 4, 21, 10, 0, tzinfo=timezone.utc)
     event = {
@@ -54,10 +72,41 @@ def test_sev1_routes_immediately_without_dedup(tmp_path, monkeypatch):
     assert first["message_id"] == 101
     assert second["message_id"] == 101
     assert "Runbook:" in sent[0][0]
+    assert sent[0][2] is None
+    assert sent[0][3] is True
     incidents = ir.list_incidents(cfg)
     assert len(incidents) == 2
     assert incidents[0].get("deduped_to") is None
     assert incidents[1].get("deduped_to") is None
+
+
+def test_router_uses_per_tier_handler_chat_override(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    cfg["incident_router"]["tiers"]["sev2"]["handlers"] = [
+        {"type": "telegram_chat", "chat_id": "ops-sev2", "snooze_minutes": 60}
+    ]
+    sent: list[tuple[str | None, bool]] = []
+    monkeypatch.setattr(
+        "orchestrator.queue.send_telegram",
+        lambda cfg, text, logfile=None, queue_summary_log=None, reply_markup=None, chat_id=None, bypass_kill_switch=False: sent.append((chat_id, bypass_kill_switch)) or 202,
+    )
+
+    ir.escalate(
+        "sev2",
+        {
+            "source": "pr_monitor",
+            "type": "high_risk_pr",
+            "repo": "owner/repo",
+            "pr_number": 17,
+            "summary": "Risk escalation",
+            "dedup_key": "risk:17",
+        },
+        cfg=cfg,
+        now=datetime(2026, 4, 21, 18, 0, tzinfo=timezone.utc),
+    )
+    ir.flush_pending(cfg, now=datetime(2026, 4, 22, 9, 0, tzinfo=timezone.utc))
+
+    assert sent == [("ops-sev2", False)]
 
 
 def test_sev3_dedups_within_configured_window(tmp_path, monkeypatch):

@@ -737,11 +737,15 @@ def send_telegram(
     logfile: Path | None = None,
     queue_summary_log: Path | None = None,
     reply_markup: dict | None = None,
+    *,
+    chat_id: str | None = None,
+    bypass_kill_switch: bool = False,
 ) -> int | None:
-    chat_id = str(cfg.get("telegram_chat_id", "")).strip()
-    if not chat_id:
+    del bypass_kill_switch  # Delivery is transport-level; router decides whether to call it.
+    resolved_chat_id = str(chat_id or cfg.get("telegram_chat_id", "")).strip()
+    if not resolved_chat_id:
         return None
-    payload: dict[str, object] = {"chat_id": chat_id, "text": text}
+    payload: dict[str, object] = {"chat_id": resolved_chat_id, "text": text}
     if reply_markup:
         payload["reply_markup"] = reply_markup
     data = telegram_api(cfg, "sendMessage", payload, logfile, queue_summary_log)

@@ -49,14 +49,26 @@ incident_router:
       delivery: immediate
       dedup_window_minutes: 0
       bypass_kill_switch: true
+      snooze_minutes: 0
+      handlers:
+        - type: telegram_chat
+          snooze_minutes: 0
     sev2:
       delivery: next_business_hour
       dedup_window_minutes: 60
       bypass_kill_switch: false
+      snooze_minutes: 60
+      handlers:
+        - type: telegram_chat
+          snooze_minutes: 60
     sev3:
       delivery: regular_digest
       dedup_window_minutes: 240
       bypass_kill_switch: false
+      snooze_minutes: 240
+      handlers:
+        - type: telegram_chat
+          snooze_minutes: 240
   sources:
     queue:
       default_severity: sev3
