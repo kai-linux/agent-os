@@ -54,7 +54,7 @@ Agent OS solves coordination. The agents do the rest.
 
 ## The Loop
 
-```
+<pre lang="text">
             GitHub Issue (Backlog)
                     │
             Status → Ready
@@ -79,7 +79,7 @@ Agent OS solves coordination. The agents do the rest.
         ▼                       ▼
   Log Analyzer            Backlog Groomer
   Files fix tickets ──► back into the backlog
-```
+</pre>
 
 **That last arrow is the point.** The system files tickets about its own failures.
 Those tickets enter the backlog. The agents fix them. The fixes get merged.
@@ -332,7 +332,6 @@ reviewing CI, and merging changes with zero human intervention per task.
 | Configuration, objectives, evidence, cron setup | [docs/configuration.md](docs/configuration.md) |
 | Roadmap and capability ladder | [docs/roadmap.md](docs/roadmap.md) |
 | Case study: self-managed repo | [docs/case-study-agent-os.md](docs/case-study-agent-os.md) |
-
 | Public reliability dashboard | [docs/reliability/README.md](docs/reliability/README.md) |
 | Case study discussion | [GitHub Discussions #167](https://github.com/kai-linux/agent-os/discussions/167) |
 
@@ -347,4 +346,3 @@ reviewing CI, and merging changes with zero human intervention per task.
 **Questions?** — open a [discussion](https://github.com/kai-linux/agent-os/discussions) or reach out via the repo.
 
 If Agent OS is interesting to you, **[give it a star](https://github.com/kai-linux/agent-os)**. It helps others find the project.
-
