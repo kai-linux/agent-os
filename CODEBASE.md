@@ -42,6 +42,16 @@
 
 ## Recent Changes
 
+### 2026-04-21 — [task-20260421-094524-build-slo-state-tracker-module] (#260 kai-linux/agent-os)
+Built a new `orchestrator/slo_tracker.py` module that loads opt-in repo SLO YAML files, computes success-rate and merge-cycle burn metrics from runtime telemetry while excluding transient blocker codes from success-rate violations, and rewrites `runtime/metrics/slo_state.jsonl` with standardized daily state rows.
+
+**Files:** `- orchestrator/slo_tracker.py`, `- tests/test_slo_tracker.py`, `- .agent_result.md`
+
+**Decisions:**
+  - - Imported `_TRANSIENT_BLOCKER_CODES` from `agent_scorer` so SLO success-rate calculations stay aligned with the existing health-gate definition of transient failures.
+  - - Kept the implementation file-based and rebuild-oriented, matching adjacent metrics modules by reading `agent_stats.jsonl` and `outcome_attribution.jsonl` and atomically rewriting `runtime/metrics/slo_state.jsonl`.
+
+
 ### 2026-04-21 — [task-20260421-094340-add-dependency-cve-watcher-with-auto-bump-prs-and-] (#243 kai-linux/agent-os)
 Implemented a new dependency and CVE watcher module with weekly per-repo cadence gating, dispatcher-only skips, bounded weekly action limits, high-risk issue escalation, and low-risk npm devDependency patch auto-PR support, plus focused regression coverage and config examples.
 
