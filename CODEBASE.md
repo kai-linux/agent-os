@@ -42,6 +42,18 @@
 
 ## Recent Changes
 
+### 2026-04-21 — [task-20260421-130544-add-work-verifier-agent-blocking-stubs-mocks-and-s] (#257 kai-linux/agent-os)
+Implemented a pre-merge work verifier that blocks suspicious agent PRs on deterministic stub/mock/scope checks, runs an independent fixed-family LLM judge for issue-criteria validation, supports audited Telegram overrides, and integrates the gate into `pr_monitor` before auto-merge.
+
+**Files:** `- orchestrator/work_verifier.py`, `- orchestrator/pr_monitor.py`, `- orchestrator/queue.py`, `- tests/test_work_verifier.py`, `- tests/test_queue.py`, `- .agent_result.md`
+
+**Decisions:**
+  - - Used a new `runtime/work_verifier/` JSONL artifact set for verifier reports and overrides so the gate stays auditable without changing unrelated metrics schemas
+  - - Short-circuited the LLM judge when deterministic pattern or scope checks already fail to keep Phase 1 latency bounded and satisfy the no-LLM deterministic requirement
+  - - Hard-coded the judge family selection to Anthropic/Claude by default and Gemini only when the worker family is Anthropic, preserving fixed independent model-family behavior without repo-level configurability
+  - - Routed `/verify-override` through the immutable audit log and stored operator `chat_id`/username/display name from the Telegram update payload for traceability
+
+
 ### 2026-04-21 — [task-20260421-130427-auto-recover-stalled-tasks-left-in-runtime-mailbox] (#232 kai-linux/agent-os)
 Added a processing-stall watchdog with PID-backed task locks so stale tasks in `runtime/mailbox/processing/` are automatically requeued or blocked with `worker_crash`, with Telegram and audit-log reporting, and covered the recovery path with focused regression tests.
 
