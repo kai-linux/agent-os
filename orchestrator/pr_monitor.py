@@ -1255,6 +1255,73 @@ def _send_risk_telegram(cfg: dict, repo: str, pr_number: int, risk: RiskAssessme
     route_incident(severity, event, cfg=cfg)
 
 
+def _handle_stuck_merge_attempts(
+    cfg: dict,
+    repo: str,
+    pr: dict,
+    pr_state: dict,
+    paths: dict,
+    state: dict,
+) -> None:
+    """Surface + (once) self-heal a PR stuck at ``MAX_MERGE_ATTEMPTS``.
+
+    Called when ``attempts >= MAX_MERGE_ATTEMPTS`` but the PR is still open.
+    If the PR is still cleanly mergeable with no active remediation issue,
+    the stuck counter is almost certainly an orchestrator-side bug (e.g. a
+    crash in one of the merge-gate functions), not a problem with the PR.
+
+    Policy:
+      - Alert via Telegram (deduped per stuck cycle).
+      - On the *first* stuck cycle per PR, reset ``attempts`` to 0 so the
+        next poll gets a clean retry. Record ``auto_reset_used`` in state.
+      - On a subsequent stuck cycle (``auto_reset_used`` already True),
+        alert again but do NOT reset — leave it for operator action.
+    """
+    pr_number = int(pr["number"])
+    pr_url = pr["url"]
+    mergeable = str(pr.get("mergeable") or "").upper()
+    merge_state = str(pr.get("mergeStateStatus") or "").upper()
+    clean = mergeable == "MERGEABLE" and merge_state in ("CLEAN", "UNSTABLE", "HAS_HOOKS", "")
+
+    remediation = _find_open_issue_by_title(repo, f"Fix CI failure on PR #{pr_number}")
+    if not clean or remediation:
+        # Not our case — a real PR problem or operator already has a ticket.
+        print(f"  PR #{pr_number}: max merge attempts reached, skipping")
+        return
+
+    auto_reset_used = bool(pr_state.get("auto_reset_used"))
+    stage = "escalate" if auto_reset_used else "self_heal"
+
+    summary = (
+        f"PR #{pr_number} stuck at max merge attempts despite CLEAN/MERGEABLE state "
+        f"({'already auto-reset once — operator review required' if auto_reset_used else 'auto-resetting attempt counter for one retry'}). "
+        "This usually means pr_monitor crashed mid-poll in a gate function."
+    )
+    event = {
+        "source": "pr_monitor",
+        "type": "stuck_pr_merge",
+        "repo": repo,
+        "pr_number": pr_number,
+        "pr_url": pr_url,
+        "stage": stage,
+        "summary": summary,
+        "dedup_key": f"stuck-pr:{repo}:{pr_number}:{stage}",
+    }
+    try:
+        severity = classify_severity(cfg, "pr_monitor", event)
+        route_incident(severity, event, cfg=cfg)
+    except Exception as e:
+        print(f"Warning: failed to route stuck-PR alert for #{pr_number}: {e}")
+
+    if not auto_reset_used:
+        pr_state["attempts"] = 0
+        pr_state["auto_reset_used"] = True
+        _save_state(paths, state)
+        print(f"  PR #{pr_number}: stuck at max attempts on clean PR — auto-reset counter (one-shot)")
+    else:
+        print(f"  PR #{pr_number}: stuck again after auto-reset — leaving for operator")
+
+
 def _send_quality_harness_telegram(cfg: dict, repo: str, pr_number: int, failing_fixtures: list[str], score: float, threshold: float):
     event = {
         "source": "pr_monitor",
@@ -1539,7 +1606,14 @@ def monitor_prs():
                 continue
 
             if attempts >= MAX_MERGE_ATTEMPTS:
-                print(f"  PR #{pr_number}: max merge attempts reached, skipping")
+                # Hitting max on a PR that is still CLEAN/MERGEABLE with no
+                # remediation issue almost always means pr_monitor itself died
+                # mid-poll before it could merge (e.g. the 2026-04-21
+                # work_verifier .format() crash on liminalconsultants#32).
+                # Self-heal: surface once via Telegram, auto-reset the counter
+                # one time so the next poll gets a clean shot, then escalate
+                # if it happens again.
+                _handle_stuck_merge_attempts(cfg, repo, pr, pr_state, paths, state)
                 continue
 
             mergeable = (pr.get("mergeable") or "").upper()

@@ -1,0 +1,158 @@
+"""Regression coverage for the stuck-PR self-heal path.
+
+Incident 2026-04-21: work_verifier.py crashed mid-poll on a ``.format``
+KeyError. Each pr_monitor run incremented ``attempts`` before dying, so
+liminalconsultants#32 hit ``MAX_MERGE_ATTEMPTS`` without ever reaching
+the merge call. The agent reported "Complete" on Telegram, but the PR
+was silently stuck open and the 9 image assets never landed on main.
+
+``_handle_stuck_merge_attempts`` is the recovery primitive: when the
+counter caps but the PR is still cleanly mergeable with no active
+remediation issue, surface one Telegram alert and auto-reset the
+counter once. On a second cap after the auto-reset, alert again but
+leave it for the operator.
+"""
+from __future__ import annotations
+
+from unittest.mock import MagicMock
+
+from orchestrator import pr_monitor
+
+
+def _make_pr(mergeable: str = "MERGEABLE", merge_state: str = "CLEAN") -> dict:
+    return {
+        "number": 32,
+        "url": "https://github.com/kai-linux/liminalconsultants/pull/32",
+        "mergeable": mergeable,
+        "mergeStateStatus": merge_state,
+    }
+
+
+def test_first_stuck_cycle_alerts_and_auto_resets(monkeypatch):
+    routed: list = []
+    saved_states: list = []
+
+    monkeypatch.setattr(pr_monitor, "_find_open_issue_by_title", lambda *a, **kw: None)
+    monkeypatch.setattr(pr_monitor, "classify_severity", lambda *a, **kw: "warning")
+    monkeypatch.setattr(pr_monitor, "route_incident", lambda sev, ev, cfg=None: routed.append((sev, ev)))
+    monkeypatch.setattr(pr_monitor, "_save_state", lambda paths, state: saved_states.append(dict(state)))
+
+    pr = _make_pr()
+    pr_state = {"attempts": 3}
+    full_state = {pr["url"]: pr_state}
+
+    pr_monitor._handle_stuck_merge_attempts(
+        cfg={},
+        repo="kai-linux/liminalconsultants",
+        pr=pr,
+        pr_state=pr_state,
+        paths={},
+        state=full_state,
+    )
+
+    assert pr_state["attempts"] == 0
+    assert pr_state["auto_reset_used"] is True
+    assert len(routed) == 1
+    _, event = routed[0]
+    assert event["type"] == "stuck_pr_merge"
+    assert event["stage"] == "self_heal"
+    assert event["pr_number"] == 32
+    assert "auto-resetting" in event["summary"]
+    assert saved_states, "state should be persisted after reset"
+
+
+def test_second_stuck_cycle_alerts_without_resetting(monkeypatch):
+    routed: list = []
+    saves: list = []
+
+    monkeypatch.setattr(pr_monitor, "_find_open_issue_by_title", lambda *a, **kw: None)
+    monkeypatch.setattr(pr_monitor, "classify_severity", lambda *a, **kw: "warning")
+    monkeypatch.setattr(pr_monitor, "route_incident", lambda sev, ev, cfg=None: routed.append(ev))
+    monkeypatch.setattr(pr_monitor, "_save_state", lambda paths, state: saves.append(1))
+
+    pr = _make_pr()
+    pr_state = {"attempts": 3, "auto_reset_used": True}
+
+    pr_monitor._handle_stuck_merge_attempts(
+        cfg={},
+        repo="kai-linux/liminalconsultants",
+        pr=pr,
+        pr_state=pr_state,
+        paths={},
+        state={pr["url"]: pr_state},
+    )
+
+    assert pr_state["attempts"] == 3  # unchanged — operator must intervene
+    assert pr_state["auto_reset_used"] is True
+    assert len(routed) == 1
+    assert routed[0]["stage"] == "escalate"
+    assert "operator review required" in routed[0]["summary"]
+    assert not saves, "no auto-reset means no state save needed"
+
+
+def test_stuck_pr_with_active_remediation_issue_is_not_self_healed(monkeypatch):
+    routed: list = []
+    monkeypatch.setattr(
+        pr_monitor, "_find_open_issue_by_title",
+        lambda *a, **kw: {"number": 99, "title": "Fix CI failure on PR #32"},
+    )
+    monkeypatch.setattr(pr_monitor, "route_incident", lambda *a, **kw: routed.append(1))
+
+    pr = _make_pr()
+    pr_state = {"attempts": 3}
+    pr_monitor._handle_stuck_merge_attempts(
+        cfg={}, repo="kai-linux/liminalconsultants", pr=pr,
+        pr_state=pr_state, paths={}, state={pr["url"]: pr_state},
+    )
+
+    # A remediation issue already owns this PR — don't spam, don't reset.
+    assert pr_state["attempts"] == 3
+    assert "auto_reset_used" not in pr_state
+    assert not routed
+
+
+def test_stuck_pr_that_is_dirty_is_left_alone(monkeypatch):
+    routed: list = []
+    monkeypatch.setattr(pr_monitor, "_find_open_issue_by_title", lambda *a, **kw: None)
+    monkeypatch.setattr(pr_monitor, "route_incident", lambda *a, **kw: routed.append(1))
+
+    pr = _make_pr(mergeable="CONFLICTING", merge_state="DIRTY")
+    pr_state = {"attempts": 3}
+    pr_monitor._handle_stuck_merge_attempts(
+        cfg={}, repo="repo/x", pr=pr, pr_state=pr_state, paths={},
+        state={pr["url"]: pr_state},
+    )
+
+    # DIRTY PRs are a real problem — stuck attempts are the right signal.
+    # Conflict rebase / escalation is handled elsewhere; don't self-heal here.
+    assert pr_state["attempts"] == 3
+    assert "auto_reset_used" not in pr_state
+    assert not routed
+
+
+def test_stuck_pr_alert_is_deduped_per_stage():
+    # The dedup_key includes the stage so self_heal and escalate alerts are
+    # separate entries but repeated stuck cycles at the same stage collapse.
+    routed = []
+
+    class _Cfg:
+        def get(self, *a, **kw):
+            return None
+
+    ev1 = {
+        "source": "pr_monitor",
+        "type": "stuck_pr_merge",
+        "repo": "r/x",
+        "pr_number": 32,
+        "stage": "self_heal",
+        "dedup_key": "stuck-pr:r/x:32:self_heal",
+    }
+    ev2 = {
+        "source": "pr_monitor",
+        "type": "stuck_pr_merge",
+        "repo": "r/x",
+        "pr_number": 32,
+        "stage": "escalate",
+        "dedup_key": "stuck-pr:r/x:32:escalate",
+    }
+    assert ev1["dedup_key"] != ev2["dedup_key"]
