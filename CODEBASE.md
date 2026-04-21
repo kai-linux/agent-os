@@ -42,6 +42,16 @@
 
 ## Recent Changes
 
+### 2026-04-21 — [task-20260421-122534-add-system-architect-agent-for-capability-sensor-g] (#291 kai-linux/agent-os)
+Audited the current repository state for the system-architect architecture task and verified the requested capability-gap and sensor-gap detection flow is already implemented, integrated into the scorer and groomer pipeline, gated through Telegram approval, and covered by focused regression tests.
+
+**Files:** `- .agent_result.md`
+
+**Decisions:**
+  - - Kept the diff minimal because the requested system-architect implementation is already present in the current repository state and matches the task requirements.
+  - - Treated the out-of-worktree write failure during direct module execution as an environment/config verification caveat rather than a code blocker, since the focused tests passed and the failure is caused by the configured runtime root.
+
+
 ### 2026-04-21 — [task-20260421-122430-phase-1-tailscale-secret-key-auth-layer] (#289 kai-linux/agent-os)
 Implemented the dashboard auth-layer fallback contract so invalid remote/auth configs still fail closed by default but can optionally downgrade into localhost read-only mode, while preserving the existing Tailscale/shared-secret auth checks and audit-write schema.
 
