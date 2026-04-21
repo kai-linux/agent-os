@@ -42,6 +42,16 @@
 
 ## Recent Changes
 
+### 2026-04-21 — [task-20260421-130329-fix-readme-rendering-truncation-in-workflow-diagra] (#215 kai-linux/agent-os)
+Adjusted the README markdown structure with a minimal diff so GitHub can render the full workflow diagram and the remaining sections without parser breakage or section cutoff.
+
+**Files:** `- README.md`, `- .agent_result.md`
+
+**Decisions:**
+  - - Used a raw `<pre lang="text">` block instead of rewriting the diagram content so the visible messaging and ASCII layout stay unchanged while avoiding fenced-block rendering quirks on GitHub.
+  - - Kept the fix limited to README structure and repaired the broken Documentation table in the same pass because it was another concrete GitHub markdown parsing hazard.
+
+
 ### 2026-04-21 — [task-20260421-130226-document-and-test-local-development-setup-end-to-e] (#209 kai-linux/agent-os)
 Added `docs/local-development.md` — a concise, example-driven end-to-end local
 development setup guide (prerequisites, venv + install, running the test suite,
