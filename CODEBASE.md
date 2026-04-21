@@ -42,6 +42,16 @@
 
 ## Recent Changes
 
+### 2026-04-21 — [task-20260421-122231-phase-1-authenticated-web-dashboard-auth-layer-tai] (#266 kai-linux/agent-os)
+Implemented a new dashboard auth layer with Tailscale and shared-secret backends, enforced safe bind-address startup validation, allowed unauthenticated reads only on localhost, required authentication for writes, and logged authenticated write actions to the immutable audit trail.
+
+**Files:** `- .agent_result.md`, `- example.config.yaml`, `- orchestrator/dashboard/__init__.py`, `- orchestrator/dashboard/auth.py`, `- orchestrator/paths.py`, `- tests/test_dashboard_auth.py`, `- tests/test_paths.py`
+
+**Decisions:**
+  - - Kept the implementation framework-agnostic inside a new `orchestrator/dashboard/auth.py` helper so the eventual Flask/Quart dashboard can reuse one auth contract with minimal integration churn.
+  - - Enforced the non-local bind guard inside `load_config()` so unsafe dashboard exposure fails during startup rather than waiting for a later route initialization path.
+
+
 ### 2026-04-21 — [task-20260421-122140-add-system-architect-agent-for-capability-sensor-g] (#249 kai-linux/agent-os)
 Implemented a new deterministic system architect loop that compares current agent-os capabilities and sensors against a required operator-curated `target_operating_model.yaml`, emits `capability_gap` and `sensor_gap` findings through the existing scorer artifact, gates architect-generated backlog issues behind the existing Telegram approval flow, and surfaces the latest architect state in the daily digest.
 
