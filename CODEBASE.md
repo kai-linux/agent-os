@@ -42,6 +42,17 @@
 
 ## Recent Changes
 
+### 2026-04-21 — [task-20260421-121837-add-adr-curator-extracting-architecture-decisions-] (#246 kai-linux/agent-os)
+Implemented an append-only ADR curator that captures qualifying merged PRs into per-repo `docs/adrs/`, updates the planner prompt with recent ADR context, hooks ADR capture into the merge path, and adds focused regression coverage.
+
+**Files:** `- orchestrator/adr_curator.py`, `- orchestrator/pr_monitor.py`, `- orchestrator/strategic_planner.py`, `- tests/test_adr_curator.py`, `- tests/test_strategic_planner.py`, `- .agent_result.md`
+
+**Decisions:**
+  - - Reused the existing completed ADR-curator change set from commit `34b19c3` as the implementation source, but applied it manually because the sandbox denied `git cherry-pick` index writes in this worktree.
+  - - Kept ADR generation deterministic from merged PR metadata, labels, and architectural-surface file heuristics instead of introducing an LLM dependency into the recurring merge and planning control path.
+  - - Deduplicated ADRs with a stable `<!-- adr-source: owner/repo#PR -->` marker so reruns stay append-only and never rewrite an existing ADR file.
+
+
 ### 2026-04-21 — [task-20260421-121730-add-adr-curator-extracting-architecture-decisions-] (#288 kai-linux/agent-os)
 Implemented an ADR curator that extracts architectural decisions from qualifying merged PRs into per-repo `docs/adrs/`, maintains `docs/adrs/INDEX.md`, hooks the curator into the post-merge PR monitor flow, and injects recent ADR context into the strategic planner prompt.
 
