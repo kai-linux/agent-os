@@ -66,6 +66,7 @@ from orchestrator.quality_harness import (
 from orchestrator.scheduler_state import is_due, record_run, job_lock
 from orchestrator.repo_modes import is_dispatcher_only_repo
 from orchestrator.skip_signals import load_skip_signals, skip_penalty_for_issue as _skip_penalty_for_issue
+from orchestrator.task_formatter import append_goal_ancestry_sections, resolve_goal_ancestry
 from orchestrator.trust import is_trusted
 
 WINDOW_DAYS = 30
@@ -1520,6 +1521,13 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
     created_urls: list[str] = []
     skipped: list[str] = []
     failed: list[str] = []
+    base_ancestry = resolve_goal_ancestry(
+        cfg=cfg,
+        repo_path=repo_path,
+        github_slug=github_slug,
+        issue=None,
+        existing=None,
+    )
 
     for issue in proposed[:MAX_ISSUES_PER_RUN]:
         title = (issue.get("title") or "").strip()
@@ -1529,7 +1537,7 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
         outcome_section = format_outcome_checks_section(
             get_repo_outcome_check_ids(cfg, github_slug, issue_labels=labels)
         )
-        body = (issue.get("body") or "").strip() + outcome_section
+        body = append_goal_ancestry_sections((issue.get("body") or "").strip(), base_ancestry) + outcome_section
         priority = issue.get("priority", "prio:normal")
 
         # Add priority label

@@ -10,7 +10,7 @@ import json
 import os
 import re
 import subprocess
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -24,6 +24,7 @@ from orchestrator.gh_project import gh as _gh, query_project, set_item_status
 from orchestrator.outcome_attribution import get_repo_outcome_check_ids, format_outcome_checks_section
 from orchestrator.paths import load_config, runtime_paths
 from orchestrator.repo_modes import is_dispatcher_only_repo
+from orchestrator.task_formatter import append_goal_ancestry_sections, resolve_goal_ancestry
 
 ANALYSIS_MODEL = "haiku"
 TOP_N = 3
@@ -222,6 +223,17 @@ def _resolve_default_repo(cfg: dict) -> str:
     return f"{owner}/agent-os" if owner else "kai-linux/agent-os"
 
 
+def _dominant_goal_ancestry(records: list[dict]) -> dict:
+    keys = ("objective_id", "sprint_id", "parent_issue", "parent_goal_summary")
+    ancestry: dict[str, str] = {}
+    for key in keys:
+        values = [str(record.get(key) or "").strip() for record in records if str(record.get(key) or "").strip()]
+        if not values:
+            continue
+        ancestry[key] = Counter(values).most_common(1)[0][0]
+    return ancestry
+
+
 def build_blocker_findings(records: list[dict], default_repo: str) -> list[dict]:
     grouped: dict[tuple[str, str], list[dict]] = defaultdict(list)
     cutoff = datetime.now(tz=timezone.utc) - timedelta(days=BLOCKER_WINDOW_DAYS)
@@ -248,6 +260,7 @@ def build_blocker_findings(records: list[dict], default_repo: str) -> list[dict]
         if len(matches) < BLOCKER_THRESHOLD:
             continue
         repo_name = repo.rsplit("/", 1)[-1]
+        ancestry = _dominant_goal_ancestry(matches)
         findings.append({
             "id": f"blocker_spike:{repo}:{blocker_code}",
             "source": "log_analyzer",
@@ -265,6 +278,7 @@ def build_blocker_findings(records: list[dict], default_repo: str) -> list[dict]
                 f"runtime/metrics/agent_stats.jsonl last {BLOCKER_WINDOW_DAYS} day(s)",
                 f"blocked_or_partial_count={len(matches)} for blocker_code={blocker_code}",
             ],
+            **ancestry,
         })
     return findings
 
@@ -386,6 +400,26 @@ def dedupe_synthesized_issues(candidates: list[dict]) -> list[dict]:
     return deduped
 
 
+def _issue_goal_ancestry(issue: dict, evidence_lookup: dict[str, dict]) -> dict:
+    ancestry = {
+        key: str(issue.get(key) or "").strip()
+        for key in ("objective_id", "sprint_id", "parent_issue", "parent_goal_summary")
+        if str(issue.get(key) or "").strip()
+    }
+    if ancestry:
+        return ancestry
+    for evidence_id in issue.get("evidence_ids", []) or []:
+        evidence = evidence_lookup.get(str(evidence_id).strip(), {})
+        candidate = {
+            key: str(evidence.get(key) or "").strip()
+            for key in ("objective_id", "sprint_id", "parent_issue", "parent_goal_summary")
+            if str(evidence.get(key) or "").strip()
+        }
+        if candidate:
+            return candidate
+    return {}
+
+
 def build_issue_body(issue: dict, evidence_lookup: dict[str, dict]) -> str:
     goal = str(issue.get("goal", "")).strip()
     success_criteria = [str(item).strip() for item in issue.get("success_criteria", []) if str(item).strip()]
@@ -415,7 +449,7 @@ def build_issue_body(issue: dict, evidence_lookup: dict[str, dict]) -> str:
     if not evidence_ids:
         lines.append("- No explicit evidence ids provided by analyzer.")
     lines.extend(["", "## Reasoning", reasoning or "Prioritized as the clearest single remediation backed by the cited evidence."])
-    return "\n".join(lines)
+    return append_goal_ancestry_sections("\n".join(lines), _issue_goal_ancestry(issue, evidence_lookup))
 
 
 def synthesize_issues(
@@ -451,6 +485,15 @@ def run():
     default_repo = _resolve_default_repo(cfg)
 
     records = load_recent_metrics(metrics_file)
+    repo_paths: dict[str, Path] = {}
+    for project_cfg in cfg.get("github_projects", {}).values():
+        if not isinstance(project_cfg, dict):
+            continue
+        for repo_cfg in project_cfg.get("repos", []):
+            github_repo = str(repo_cfg.get("github_repo") or "").strip()
+            local_repo = str(repo_cfg.get("local_repo") or repo_cfg.get("repo") or "").strip()
+            if github_repo and local_repo:
+                repo_paths[github_repo] = Path(local_repo).expanduser()
 
     # Check blocker regression alerts (forward-looking, post-fix only)
     regression_alerts = check_blocker_regression_alerts(records, cfg)
@@ -509,6 +552,15 @@ def run():
         if "bot-generated" not in labels:
             labels.append("bot-generated")
 
+        issue.update(
+            resolve_goal_ancestry(
+                cfg=cfg,
+                repo_path=repo_paths.get(repo, root),
+                github_slug=repo,
+                issue=None,
+                existing=_issue_goal_ancestry(issue, evidence_lookup),
+            )
+        )
         body = build_issue_body(issue, evidence_lookup)
         body += format_outcome_checks_section(
             get_repo_outcome_check_ids(cfg, repo, issue_labels=labels)
