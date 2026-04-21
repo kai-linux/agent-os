@@ -6,7 +6,7 @@
 [![GitHub issues](https://img.shields.io/github/issues/kai-linux/agent-os)](https://github.com/kai-linux/agent-os/issues)
 [![License](https://img.shields.io/github/license/kai-linux/agent-os)](LICENSE)
 
-**An autonomous-first software organization: AI agents handle routine delivery loops, while humans stay in governance and escalation paths.**
+**An autonomous-first software organization for supervised rollout: agents handle routine delivery loops, while humans stay in governance, review, and escalation paths.**
 
 You give it a backlog. It ships product.
 
@@ -19,7 +19,7 @@ You give it a backlog. It ships product.
   <img src="docs/demo.svg" alt="Agent OS autonomously completing issue #115: from dispatch to merged PR in 12 minutes" width="800">
 </p>
 
-<p align="center"><em>Real execution: Issue <a href="https://github.com/kai-linux/agent-os/issues/115">#115</a> → agent dispatched → code written → tests pass → <a href="https://github.com/kai-linux/agent-os/pull/122">PR #122</a> merged → issue closed. No human touched it.</em></p>
+<p align="center"><em>Real execution: Issue <a href="https://github.com/kai-linux/agent-os/issues/115">#115</a> → agent dispatched → code written → tests pass → <a href="https://github.com/kai-linux/agent-os/pull/122">PR #122</a> merged → issue closed. The happy path can complete without manual coding, but new repos should still start in supervised mode.</em></p>
 
 ### Agent Performance - rolling 14 days
 
@@ -27,7 +27,7 @@ You give it a backlog. It ships product.
 |:---:|:---:|:---:|:---:|
 | **69%** (61/88) | **0.1h** | **11%** (10/88) | **88** |
 
-4 agents (Claude · Codex · Gemini · DeepSeek). Metrics above are from the public reliability dashboard updated on 2026-04-21.
+Current pool: Claude · Codex · Gemini · DeepSeek. Metrics above are from the public reliability dashboard updated on 2026-04-21.
 [Full reliability dashboard →](docs/reliability/README.md) · [Multi-agent case study →](docs/case-study-agent-os.md)
 
 ---
@@ -37,6 +37,30 @@ You give it a backlog. It ships product.
 - Agent OS is autonomous in the happy path, not "no-human-ever." Escalations are a first-class path after bounded retries.
 - Results shown in this repo are for this repo's workload. A fresh external repo usually starts lower and needs tuning.
 - Use `automation_mode: dispatcher_only` first for new repos, then graduate to full automation after reliability is stable.
+
+## Recommended Rollout
+
+If you are evaluating Agent OS on a real product, do not jump straight to full autonomy.
+
+1. Run the sandbox demo and verify the local toolchain works end to end.
+2. Start your repo in `dispatcher_only` mode with manual PR review.
+3. Give it 5 to 10 bounded issues with clear success criteria and good tests.
+4. Measure operator time, escalation rate, and merged-PR quality before expanding scope.
+5. Turn on the planner, groomer, and full cron loop only after the supervised pilot is stable.
+
+The best adoption story is not "trust us blindly." It is "run a cheap, auditable pilot and promote the system only after it earns trust."
+
+## Good Initial Fits
+
+- backend endpoints, CLI commands, docs, tests, CI fixes, and contained refactors behind existing tests
+- repositories with one clear default branch, deterministic test commands, and explicit ownership
+- teams that want issue-to-PR automation first, not autonomous product strategy on day one
+
+## Poor First Fits
+
+- sweeping UX redesigns, weakly specified frontend work, or broad "make this better" tickets
+- repos with flaky CI, missing tests, hidden credentials, or ambiguous local setup
+- products expecting unattended operation before the first supervised pilot has passed
 
 ---
 
@@ -121,9 +145,9 @@ gh auth login          # only prerequisite besides claude CLI
 
 **Requirements:** `gh` (authenticated), `python3`, `claude` CLI. Works on macOS and Linux.
 
-### Option B: Production setup (5 minutes)
+### Option B: Supervised pilot on your repo (5 minutes)
 
-Run Agent OS against your own repo with full dispatch, CI gating, and auto-merge.
+Run Agent OS against your own repo in the recommended adoption path: manual dispatch first, manual review first, then controlled expansion.
 
 **Step 1 — Clone and install**
 
@@ -173,6 +197,8 @@ Open an issue on your repo with a clear title and body containing:
 
 Then move the issue to **Ready** on your GitHub Projects board (or add a `Status: Ready` label).
 
+For the first pilot, choose tasks that should take one agent 10 to 40 minutes and touch a narrow surface area.
+
 **Step 5 — Dispatch and watch**
 
 ```bash
@@ -194,7 +220,10 @@ The agent clones a worktree, writes code, runs tests, pushes a branch, and opens
 # See the PR the agent created
 gh pr list --repo your-user/your-repo
 
-# Auto-merge when CI passes (run on a loop or cron)
+# Review the first few PRs manually
+gh pr view <PR_NUMBER> --repo your-user/your-repo
+
+# Auto-merge only after the supervised pilot is stable
 python3 -m orchestrator.pr_monitor
 ```
 
@@ -210,7 +239,7 @@ crontab -l 2>/dev/null; echo "
 "
 ```
 
-Once cron is running, the system dispatches, executes, reviews, and merges autonomously.
+Once cron is running, the system dispatches, executes, reviews, and merges with bounded retries and escalation.
 </details>
 
 ### Option C: Bootstrap From Scratch
@@ -328,6 +357,7 @@ Use the reliability dashboard for current health.
 | Topic | Link |
 |---|---|
 | **Deployment guide for solo builders** | [docs/deployment-guide.md](docs/deployment-guide.md) |
+| **External repo pilot playbook** | [docs/external-repo-pilot.md](docs/external-repo-pilot.md) |
 
 | **Fork guide — customize agent routing, dispatch, prompts** | [FORK_GUIDE.md](FORK_GUIDE.md) |
 

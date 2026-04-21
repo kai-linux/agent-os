@@ -169,7 +169,7 @@
   <!-- Summary -->
   <g opacity="0">
     <animate attributeName="opacity" from="0" to="1" begin="13.5s" dur="0.3s" fill="freeze"/>
-    <text x="16" y="492" fill="#9ece6a" font-size="12" font-weight="bold">  ✓ Task complete — zero human intervention</text>
+    <text x="16" y="492" fill="#9ece6a" font-size="12" font-weight="bold">  ✓ Task complete — happy-path autonomous execution</text>
   </g>
   <g opacity="0">
     <animate attributeName="opacity" from="0" to="1" begin="14.0s" dur="0.3s" fill="freeze"/>

@@ -1,9 +1,24 @@
 # Deployment Guide — Agent OS for Solo Builders
 
 Deploy Agent OS to manage your own GitHub repositories. This guide takes you
-from zero to your first autonomously completed task.
+from zero to a supervised first task, then to broader automation once the repo
+has earned it.
 
-**Time estimate:** ~15 minutes for minimal setup, ~30 minutes for full production.
+**Time estimate:** ~15 minutes for a supervised pilot, ~30 minutes for full production.
+
+---
+
+## Recommended Rollout
+
+For a new external repo, the safest path is:
+
+1. Run the demo and confirm the toolchain works.
+2. Configure one repo in `dispatcher_only` mode.
+3. Start with 5 to 10 bounded issues and manual PR review.
+4. Measure escalation rate, operator overhead, and PR quality.
+5. Enable the full planner/groomer/self-improvement loop only after the supervised pilot is stable.
+
+If you want a concrete pilot checklist, use [external-repo-pilot.md](external-repo-pilot.md).
 
 ---
 
@@ -30,8 +45,8 @@ gh auth refresh -s project    # required for GitHub Projects integration
 - Gemini CLI — `gemini --version`
 - DeepSeek via OpenRouter — requires `openRouterApiKey` in DeepSeek config
 
-You only need Claude to get started. Additional agents become fallbacks if
-Claude fails on a task.
+You only need Claude to get started. Additional agents become optional
+fallbacks after the core loop is working reliably in your environment.
 
 ---
 
@@ -191,6 +206,10 @@ mkdir -p ~/agent-os/runtime/{mailbox/inbox,mailbox/done,mailbox/blocked,logs,met
 
 ## 6. Dispatch Your First Task
 
+For the first week, prefer issues that are narrow, testable, and locally
+contained. Avoid large UI redesigns, repo-wide cleanup, and tasks blocked on
+missing credentials or undocumented setup.
+
 ### Create a GitHub Issue
 
 Create an issue on your managed repository using the standard template:
@@ -282,8 +301,8 @@ gh pr checks <PR_NUMBER> --repo your-github-username/my-python-app
 
 ### Merge (Manual or Automatic)
 
-For your first task, review the PR manually. Once you trust the flow, the
-PR monitor handles merging automatically:
+For your first tasks, review PRs manually. Once you trust the flow, the PR
+monitor can handle merging automatically:
 
 ```bash
 python3 -m orchestrator.pr_monitor
@@ -338,7 +357,7 @@ To use the full cron setup, switch `automation_mode` to `full` in your config.
 
 ## 8. Upgrade to Full Automation
 
-Once you trust the system with a few manually dispatched tasks:
+Only do this after the supervised pilot is stable:
 
 1. **Switch to full mode** in `config.yaml`:
    ```yaml
@@ -472,5 +491,6 @@ Agents that fail auth are automatically skipped in the fallback chain.
 - [Architecture deep dive](architecture.md) — system roles, safety mechanisms, observability
 - [Execution flow](execution.md) — task dispatch, handoff contract, retry logic
 - [Configuration reference](configuration.md) — objectives, evidence, planning research
+- [External repo pilot playbook](external-repo-pilot.md) — how to evaluate Agent OS safely on a real product
 - [CRON.md](../CRON.md) — complete cron job reference with schedule table
 - [Case study](case-study-agent-os.md) — Agent OS managing its own development

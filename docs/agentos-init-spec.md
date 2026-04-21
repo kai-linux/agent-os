@@ -8,7 +8,7 @@
 
 ## 1. Goal
 
-Add a single command, `agentos init`, that walks a new user through every prerequisite to take Agent OS from "freshly cloned orchestrator + a product idea" to "fully autonomous loop running on cron, Telegram control plane live, first PR on its way." No manual YAML editing, no GitHub Projects web UI clicking, no cron math, no issue templating.
+Add a single command, `agentos init`, that walks a new user through every prerequisite to take Agent OS from "freshly cloned orchestrator + a product idea" to "supervised-first loop running on cron, Telegram control plane live, first PR on its way." No manual YAML editing, no GitHub Projects web UI clicking, no cron math, no issue templating.
 
 **Definition of done for the user:** after running `agentos init` once and answering the prompts, within ~2 minutes cron ticks execute, a dispatcher picks up a seeded "Ready" issue from the new project board, claude opens a PR on the new repo, and a Telegram message arrives confirming the loop is live.
 

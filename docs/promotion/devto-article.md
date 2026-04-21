@@ -1,16 +1,16 @@
 ---
 title: "I Built an Autonomous Software Organization That Manages Its Own Development"
 published: false
-description: "Agent OS shipped 85 merged PRs, closed 110 issues, and produced 352 commits in 30 days — with zero human intervention per task. Here's how it works and what I learned."
+description: "Agent OS is an autonomous-first issue-to-PR system with public reliability metrics, bounded escalation, and a supervised rollout path. Here's how it works and what I learned."
 tags: ai, automation, github, opensource
 canonical_url: https://github.com/kai-linux/agent-os/blob/main/docs/case-study-agent-os.md
 ---
 
 ## The Experiment
 
-What happens when you let AI agents manage an entire software project — not just write code, but triage issues, route tasks, review CI, merge PRs, analyze failures, and file their own fix tickets?
+What happens when you build a coordination layer that lets AI agents manage large parts of a software project — not just write code, but triage issues, route tasks, review CI, merge PRs, analyze failures, and file their own fix tickets?
 
-I built [Agent OS](https://github.com/kai-linux/agent-os) to find out. It bootstrapped itself from an empty repo to a fully autonomous software organization in 30 days.
+I built [Agent OS](https://github.com/kai-linux/agent-os) to find out. It bootstrapped itself from an empty repo to an autonomous-first software organization in 30 days.
 
 **The results are public, auditable, and reproducible.**
 
@@ -21,11 +21,13 @@ I built [Agent OS](https://github.com/kai-linux/agent-os) to find out. It bootst
 | Issues closed | 110 of 119 (92% closure rate) |
 | PRs merged | 85 of 90 (94% merge rate) |
 | Total commits | 352 in 30 days (~12/day) |
-| Agent tasks executed | 146+ (91% 14-day success rate) |
+| Agent tasks executed | 146+ during the historical 30-day case study |
 | Agents in pool | 4 (Claude, Codex, Gemini, DeepSeek) |
 | Infrastructure cost | $5/month VPS |
 
 Every number is verifiable from public GitHub data: [commits](https://github.com/kai-linux/agent-os/commits/main), [closed issues](https://github.com/kai-linux/agent-os/issues?q=is%3Aissue+is%3Aclosed), [merged PRs](https://github.com/kai-linux/agent-os/pulls?q=is%3Apr+is%3Amerged).
+
+For current health, the source of truth is the live reliability dashboard in the repo, not this historical 30-day snapshot.
 
 ## How It Works
 
@@ -104,11 +106,11 @@ The demo creates a test issue, dispatches it to Claude, and shows the agent writ
 
 2. **Honest metrics build trust.** A 55.7% success rate sounds bad until you see that 92% of issues got closed — retries and fallback routing work.
 
-3. **Self-improvement compounds.** The log analyzer filing its own fix tickets creates a virtuous cycle that keeps getting better without human input.
+3. **Self-improvement compounds.** The log analyzer filing its own fix tickets creates a virtuous cycle that keeps getting better, but external repos still need a supervised rollout first.
 
 4. **$5/month is enough.** The entire system runs on a cheap VPS with cron jobs. No Kubernetes, no message queues, no cloud functions.
 
-5. **91% and climbing.** The 14-day rolling success rate improved from 61% to 91% through the self-improvement loop — the system literally engineered its own reliability.
+5. **Adoption depends on honest framing.** A strong internal case study helps, but new external repos should start in `dispatcher_only` mode and earn broader trust through a measured pilot.
 
 ---
 

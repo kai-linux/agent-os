@@ -3,13 +3,13 @@
 ## r/programming
 
 ### Title
-Show r/programming: I built an autonomous software org that shipped 85 PRs and 352 commits in 30 days with zero human intervention per task
+Show r/programming: I built an issue-to-PR automation system with public reliability metrics and supervised rollout guidance
 
 ### Body
 
-I've been building [Agent OS](https://github.com/kai-linux/agent-os) — a coordination layer that lets AI agents manage an entire software project. Not just write code, but triage issues, route tasks, run CI, merge PRs, analyze failures, and file their own fix tickets.
+I've been building [Agent OS](https://github.com/kai-linux/agent-os) — a coordination layer that lets AI agents manage large parts of a software project. Not just write code, but triage issues, route tasks, run CI, merge PRs, analyze failures, and file their own fix tickets.
 
-**Results from 30 days managing its own repo:**
+**Historical results from 30 days managing its own repo:**
 
 | Metric | Value |
 |---|---|
@@ -19,7 +19,7 @@ I've been building [Agent OS](https://github.com/kai-linux/agent-os) — a coord
 | 14-day success rate | 91% (up from 61%) |
 | Infrastructure | $5/month VPS |
 
-The interesting part is the recursive self-improvement loop: the log analyzer reads execution metrics weekly and files fix tickets. Those tickets enter the same backlog, get dispatched to agents, go through CI, and get merged. The system literally fixes its own bugs — and the 14-day success rate climbed from 61% to 91% as a result.
+The interesting part is the recursive self-improvement loop: the log analyzer reads execution metrics weekly and files fix tickets. Those tickets enter the same backlog, get dispatched to agents, go through CI, and get merged.
 
 **I'm honest about failures.** PR-98 had a CI verification bug that spawned 8 cascading debug tasks before the system fixed its own verification logic — that story is documented in the [case study](https://github.com/kai-linux/agent-os/blob/main/docs/case-study-agent-os.md).
 
@@ -30,6 +30,8 @@ The interesting part is the recursive self-improvement loop: the log analyzer re
 - `.agent_result.md` is the only interface contract
 
 Everything is auditable from public GitHub data. The README, CI pipeline, and backlog groomer were all written by agents.
+
+**Current framing:** new external repos should start in `dispatcher_only` mode, with 5 to 10 bounded issues and manual PR review before turning on the full loop.
 
 **Try it:** `git clone https://github.com/kai-linux/agent-os && ./demo.sh`
 
@@ -42,7 +44,7 @@ Would love feedback — especially on failure recovery patterns and multi-agent 
 ## r/SideProject
 
 ### Title
-Agent OS: My side project that manages its own development — 85 PRs merged, 110 issues closed, zero human intervention
+Agent OS: My side project that manages its own development — and now recommends supervised rollout for external repos
 
 ### Body
 
@@ -56,7 +58,7 @@ After 30 days of autonomous operation managing its own repo:
 
 **How it works:** GitHub Issues are the backlog. A dispatcher triages and routes tasks to one of 4 AI agents (Claude, Codex, Gemini, DeepSeek). Each agent works in an isolated worktree, writes code, runs tests, opens a PR. A PR monitor checks CI and auto-merges on green. A log analyzer files fix tickets about failures weekly. Those tickets enter the same pipeline. The system improves itself.
 
-**The honest version:** First-attempt success rate started at 61%. But the self-improvement loop pushed the 14-day rolling rate to 91%, and with retries and fallback routing, 92% of issues eventually get closed. The [case study](https://github.com/kai-linux/agent-os/blob/main/docs/case-study-agent-os.md) documents both the wins and the failure cascades.
+**The honest version:** the self-managed repo case study is strong, but a fresh external repo should still start in `dispatcher_only` mode and expand only after a supervised pilot. The [case study](https://github.com/kai-linux/agent-os/blob/main/docs/case-study-agent-os.md) documents both the wins and the failure cascades.
 
 **What's next:** Evidence-driven sprint planning, closed-loop optimization, and managing external repos.
 
@@ -69,7 +71,7 @@ Would love to hear from other solo builders — what would you want an autonomou
 ## r/LocalLLaMA
 
 ### Title
-Agent OS: Multi-agent orchestration system using Claude, Codex, Gemini & DeepSeek — 91% success rate after 30 days of self-improvement
+Agent OS: Multi-agent orchestration system with public metrics, fallback routing, and supervised rollout guidance
 
 ### Body
 
@@ -85,7 +87,7 @@ The system dispatches GitHub issues as tasks, each agent works in an isolated gi
 
 **Key learning on multi-agent routing:** Blended success rates across task types are misleading. Codex scored 56% when measured across all tasks but 100% on its target task type. We added task-type-scoped scoring and the routing quality improved immediately.
 
-352 commits, 85 PRs merged, 110 issues closed. All public and auditable.
+Current live metrics are in the repo's reliability dashboard. The 30-day numbers are retained as a historical case study, not as a promise that every new repo will perform the same on day one.
 
 [Case study](https://github.com/kai-linux/agent-os/blob/main/docs/case-study-agent-os.md) | [Repo](https://github.com/kai-linux/agent-os) | [Reliability dashboard](https://github.com/kai-linux/agent-os/blob/main/docs/reliability/README.md)
 
@@ -94,7 +96,7 @@ The system dispatches GitHub issues as tasks, each agent works in an isolated gi
 ## r/AutomateYourself / r/selfhosted
 
 ### Title
-Self-hosted autonomous dev system on a $5/month VPS — 30 days, 85 PRs merged, zero human intervention
+Self-hosted issue-to-PR automation on a $5/month VPS with public metrics and bounded escalation
 
 ### Body
 

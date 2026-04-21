@@ -1,14 +1,18 @@
 # Promotion Content — Agent OS Case Study
 
-Publish-ready drafts for cross-posting the Agent OS multi-agent case study.
+Promotion drafts for cross-posting the Agent OS case study.
+
+These drafts are historical marketing assets, not the source of truth for
+current reliability. Refresh metrics against [docs/reliability/README.md](../reliability/README.md)
+before publishing anything externally.
 
 ## Files
 
 | File | Platform | Status |
 |---|---|---|
-| [devto-article.md](devto-article.md) | dev.to | Ready to publish (requires `DEV_API_KEY`) |
-| [hn-submission.md](hn-submission.md) | Hacker News | Ready to submit (manual) |
-| [reddit-posts.md](reddit-posts.md) | Reddit (4 subreddits) | Ready to post (manual) |
+| [devto-article.md](devto-article.md) | dev.to | Draft, needs metric refresh before publishing |
+| [hn-submission.md](hn-submission.md) | Hacker News | Draft, needs metric refresh before publishing |
+| [reddit-posts.md](reddit-posts.md) | Reddit (4 subreddits) | Draft, needs metric refresh before publishing |
 
 ## Target Platforms
 
