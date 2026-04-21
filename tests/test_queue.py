@@ -49,6 +49,10 @@ from orchestrator.queue import (
     WorkflowValidationError,
     create_escalation_note,
     write_prompt,
+    PromptTooLargeError,
+    PROMPT_SIZE_LIMIT_BYTES,
+    PERMANENT_INFRA_BLOCKERS,
+    should_try_fallback,
 )
 
 
@@ -1969,3 +1973,35 @@ def test_downgrade_no_diff_complete_unknown_task_type_passes_through():
     result = _complete_result()
     out = downgrade_no_diff_complete(meta, result, "claude")
     assert out is result
+
+
+# ---------------------------------------------------------------------------
+# Prompt size ceiling (E2BIG guard)
+# ---------------------------------------------------------------------------
+
+def test_write_prompt_raises_when_body_exceeds_argv_limit(tmp_path):
+    root = tmp_path / "root"
+    worktree = tmp_path / "repo"
+    root.mkdir()
+    worktree.mkdir()
+    giant_body = "x" * (PROMPT_SIZE_LIMIT_BYTES + 10_000)
+    with pytest.raises(PromptTooLargeError) as exc_info:
+        write_prompt(
+            "task-e2big",
+            {"task_type": "implementation"},
+            giant_body,
+            "codex",
+            [],
+            root,
+            worktree=worktree,
+        )
+    assert exc_info.value.size_bytes > PROMPT_SIZE_LIMIT_BYTES
+    assert exc_info.value.limit_bytes == PROMPT_SIZE_LIMIT_BYTES
+
+
+def test_should_try_fallback_short_circuits_on_permanent_infra_blocker():
+    assert "prompt_too_large" in PERMANENT_INFRA_BLOCKERS
+    blocked = {"status": "blocked", "blocker_code": "prompt_too_large"}
+    assert should_try_fallback(blocked) is False
+    recoverable = {"status": "blocked", "blocker_code": "timeout"}
+    assert should_try_fallback(recoverable) is True

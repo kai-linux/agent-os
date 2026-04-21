@@ -56,8 +56,28 @@ BLOCKER_CODE_DESCRIPTIONS = {
     "invalid_result_contract": "The worker produced an invalid or missing task outcome contract.",
     "push_not_ready": "Task requires git publish capability but push-readiness checks failed.",
     "no_diff_produced": "The agent claimed completion but produced no file changes for a task type that requires a diff.",
+    "prompt_too_large": "The rendered prompt exceeded the per-argv byte ceiling; retrying with more context will not help.",
 }
 VALID_BLOCKER_CODES = set(BLOCKER_CODE_DESCRIPTIONS)
+# Blockers that are not agent-quality issues and will not be fixed by rotating
+# to the next fallback model. Short-circuit the fallback chain for these so we
+# stop burning credits on deterministic environmental failures.
+PERMANENT_INFRA_BLOCKERS = frozenset({"prompt_too_large"})
+# Linux caps a single argv string at PAGE_SIZE * 32 = 128 KiB (MAX_ARG_STRLEN).
+# Keep prompts well under that so we never hit E2BIG during execve.
+PROMPT_SIZE_LIMIT_BYTES = 100_000
+
+
+class PromptTooLargeError(RuntimeError):
+    """Raised when the rendered prompt would exceed the argv size ceiling."""
+
+    def __init__(self, size_bytes: int, limit_bytes: int = PROMPT_SIZE_LIMIT_BYTES):
+        self.size_bytes = size_bytes
+        self.limit_bytes = limit_bytes
+        super().__init__(
+            f"prompt size {size_bytes} bytes exceeds limit {limit_bytes} "
+            f"(MAX_ARG_STRLEN would cause execve E2BIG)"
+        )
 # Task types where status=complete is meaningless without an accompanying
 # diff. Investigative types (research, architecture) can legitimately conclude
 # with only a result-contract summary, so they are excluded.
@@ -186,6 +206,8 @@ def _classify_runner_failure(text: str) -> str | None:
     lowered = (text or "").lower()
     if not lowered:
         return None
+    if "argument list too long" in lowered or "e2big" in lowered:
+        return "prompt too large"
     if any(token in lowered for token in ["rate limit", "rate-limit", "too many requests", "429", "usage limit", "quota"]):
         return "usage limit / rate limit"
     if any(token in lowered for token in ["authentication", "unauthorized", "forbidden", "invalid api key", "not authenticated", "login required"]):
@@ -216,6 +238,8 @@ def _format_runner_failure(exc: Exception) -> tuple[str, list[str], str | None]:
 
 def _blocker_code_from_runner_failure(summary: str, detail: str | None = None) -> str:
     classification = _classify_runner_failure("\n".join(part for part in [summary, detail or ""] if part))
+    if classification == "prompt too large":
+        return "prompt_too_large"
     if classification == "usage limit / rate limit":
         return "quota_limited"
     if classification == "authentication failure":
@@ -1669,22 +1693,56 @@ def ensure_worktree(cfg: dict, repo: Path, base_branch: str, branch: str, task_i
     )
     return worktree
 
+_PRIOR_HISTORY_MAX_ATTEMPTS = 2
+_PRIOR_HISTORY_SUMMARY_CHARS = 400
+_PRIOR_HISTORY_LIST_ITEMS = 4
+_PRIOR_HISTORY_LIST_ITEM_CHARS = 160
+
+
+def _truncate_list(items: list[str], max_items: int, max_chars: int) -> list[str]:
+    kept = []
+    for line in items[:max_items]:
+        s = str(line)
+        if len(s) > max_chars:
+            s = s[:max_chars].rstrip() + "…"
+        kept.append(s)
+    dropped = max(0, len(items) - max_items)
+    if dropped:
+        kept.append(f"- …({dropped} older item(s) truncated)")
+    return kept or ["- None"]
+
+
 def render_prior_attempt_history(prior_results: list[dict]) -> str:
+    """Render only the last few attempts with per-field truncation.
+
+    Unbounded prior-attempt history made rendered prompts balloon past the
+    MAX_ARG_STRLEN (128 KiB) on retry-3/retry-4, causing execve E2BIG.
+    """
     if not prior_results:
         return "None"
 
+    recent = prior_results[-_PRIOR_HISTORY_MAX_ATTEMPTS:]
+    skipped = len(prior_results) - len(recent)
     chunks = []
-    for idx, r in enumerate(prior_results, start=1):
+    if skipped:
+        chunks.append(f"(…{skipped} earlier attempt(s) truncated for prompt-size budget…)")
+    for offset, r in enumerate(recent):
+        idx = skipped + offset + 1
+        summary = str(r.get("summary", "No summary"))
+        if len(summary) > _PRIOR_HISTORY_SUMMARY_CHARS:
+            summary = summary[:_PRIOR_HISTORY_SUMMARY_CHARS].rstrip() + "…"
+        blockers = _truncate_list(r.get("blockers", []), _PRIOR_HISTORY_LIST_ITEMS, _PRIOR_HISTORY_LIST_ITEM_CHARS)
+        approaches = _truncate_list(r.get("attempted_approaches", []), _PRIOR_HISTORY_LIST_ITEMS, _PRIOR_HISTORY_LIST_ITEM_CHARS)
         chunks.append(
             f"""Attempt {idx}
 MODEL: {r.get("agent", "unknown")}
 STATUS: {r.get("status", "unknown")}
 BLOCKER_CODE: {r.get("blocker_code", "none") or "none"}
-SUMMARY: {r.get("summary", "No summary")}
+SUMMARY: {summary}
 BLOCKERS:
-{chr(10).join(r.get("blockers", ["- None"]))}
+{chr(10).join(blockers)}
 ATTEMPTED_APPROACHES:
-{chr(10).join(r.get("attempted_approaches", ["- None"]))}
+{chr(10).join(approaches)}
 """
         )
     return "\n".join(chunks)
@@ -1841,6 +1899,9 @@ Rules:
   required. This section is CRITICAL — the operator depends on it to know
   what genuinely cannot be automated.
 """
+    prompt_size = len(prompt.encode("utf-8"))
+    if prompt_size > PROMPT_SIZE_LIMIT_BYTES:
+        raise PromptTooLargeError(prompt_size)
     prompt_file.write_text(prompt, encoding="utf-8")
     snapshot_path.write_text(prompt, encoding="utf-8")
     return prompt_file
@@ -2177,9 +2238,14 @@ def timeout_for_agent(agent: str, meta: dict, cfg: dict) -> int:
 
 def should_try_fallback(result: dict) -> bool:
     status = result.get("status", "blocked")
-    if status == "blocked":
-        return True
-    return False
+    if status != "blocked":
+        return False
+    # Permanent environmental failures are not going to be fixed by the next
+    # model in the chain — short-circuit so we stop burning credits.
+    blocker_code = (result.get("blocker_code") or "").strip()
+    if blocker_code in PERMANENT_INFRA_BLOCKERS:
+        return False
+    return True
 
 # Short, human-readable headlines per blocker_code. Telegram surface beats the
 # old "⏸️ Partial/Blocked" label, which required the user to open the task to
@@ -2199,6 +2265,7 @@ _BLOCKER_HEADLINES = {
     "invalid_result_contract": ("📄", "Invalid result file"),
     "push_not_ready": ("⛔", "Push readiness check failed"),
     "no_diff_produced": ("🫥", "No code changes produced"),
+    "prompt_too_large": ("📏", "Prompt exceeded argv size limit"),
 }
 
 def _first_concrete_blocker(blockers: list[str]) -> str:
@@ -2287,6 +2354,16 @@ def create_followup_task(
     queue_summary_log: Path,
 ):
     if result["status"] not in ("partial", "blocked"):
+        return None
+
+    blocker_code = str(result.get("blocker_code") or "").strip()
+    if blocker_code in PERMANENT_INFRA_BLOCKERS:
+        log(
+            f"Not creating follow-up: blocker_code={blocker_code!r} is a permanent infra failure.",
+            logfile,
+            also_summary=True,
+            queue_summary_log=queue_summary_log,
+        )
         return None
 
     next_step = result.get("next_step", "").strip()
@@ -2924,7 +3001,56 @@ def main():
             meta_for_prompt = dict(meta)
             meta_for_prompt["resolved_agent"] = current_agent
             meta_for_prompt["model_attempts"] = model_attempts
-            prompt_file = write_prompt(task_id, meta_for_prompt, body, current_agent, prior_results, ROOT, worktree=worktree)
+            try:
+                prompt_file = write_prompt(task_id, meta_for_prompt, body, current_agent, prior_results, ROOT, worktree=worktree)
+            except PromptTooLargeError as e:
+                oversize_result = {
+                    "agent": current_agent,
+                    "status": "blocked",
+                    "blocker_code": "prompt_too_large",
+                    "summary": f"Rendered prompt is {e.size_bytes} bytes, exceeding the {e.limit_bytes}-byte ceiling.",
+                    "done": ["- Attempted to render prompt before dispatch."],
+                    "blockers": [
+                        f"- Prompt size {e.size_bytes} bytes exceeds {e.limit_bytes}-byte limit.",
+                        "- Retrying with more prior-attempt context will not help; the task body itself must be trimmed.",
+                    ],
+                    "next_step": "none",
+                    "files_changed": ["- None"],
+                    "tests_run": ["- None"],
+                    "decisions": ["- Refused to dispatch oversized prompt to avoid execve E2BIG."],
+                    "risks": ["- Downstream retry loops would burn credits without making progress."],
+                    "attempted_approaches": [f"- Rendered prompt for {current_agent}; size={e.size_bytes}B."],
+                    "unblock_notes": {
+                        "blocking_cause": f"Prompt size {e.size_bytes}B exceeds argv ceiling {e.limit_bytes}B.",
+                        "next_action": "Split the issue, shorten the body, or reduce prior-attempt history before re-queuing.",
+                    },
+                    "raw": "",
+                }
+                model_attempts.append(current_agent)
+                model_attempt_details.append({
+                    **{
+                        "attempt": len(model_attempts),
+                        "agent": current_agent,
+                        "provider": resolve_attempt_provider(current_agent, cfg),
+                        "model": resolve_attempt_model(current_agent, cfg),
+                        "input_chars": e.size_bytes,
+                        "input_tokens_estimate": 0,
+                    },
+                    "status": oversize_result["status"],
+                    "blocker_code": oversize_result["blocker_code"],
+                    "output_chars": 0,
+                    "output_tokens_estimate": 0,
+                })
+                prior_results.append(oversize_result)
+                log(
+                    f"Refusing to dispatch: prompt {e.size_bytes}B exceeds {e.limit_bytes}B limit.",
+                    logfile,
+                    also_summary=True,
+                    queue_summary_log=QUEUE_SUMMARY_LOG,
+                )
+                final_result = oversize_result
+                final_agent = current_agent
+                break
             prompt_text = prompt_file.read_text(encoding="utf-8")
             attempt_number = len(model_attempts) + 1
             attempt_base = {
