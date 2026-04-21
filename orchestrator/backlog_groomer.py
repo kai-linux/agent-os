@@ -373,36 +373,47 @@ def _reconcile_board_state(cfg: dict, github_slug: str) -> dict:
         if labels != set(item.get("labels") or set()):
             summary["labels_fixed"] += 1
 
-        expected = _expected_status_for(labels, item.get("state", "OPEN"), project_cfg)
-        if expected is None:
-            continue
+        state = (item.get("state") or "OPEN").upper()
+
+        # Strip lingering lifecycle labels on closed items up-front. Closed
+        # issues already in the Done column previously slipped through the
+        # cleanup because the reconciler short-circuited on current==expected
+        # before reaching the strip block — leaving stale `in-progress` /
+        # `agent-dispatched` that would mis-route the card if reopened.
+        closed_work_done = False
+        if state == "CLOSED":
+            stale_labels = [lbl for lbl in ("blocked", "in-progress", "agent-dispatched", "ready") if lbl in labels]
+            if stale_labels:
+                try:
+                    edit_issue_labels(github_slug, int(issue_number), add=["done"], remove=stale_labels)
+                    labels = (labels - set(stale_labels)) | {"done"}
+                    closed_work_done = True
+                except Exception as e:
+                    print(f"  Warning: failed to strip stale labels on #{issue_number}: {e}")
+
+        expected = _expected_status_for(labels, state, project_cfg)
         current = item.get("status")
-        # Leave Review column alone unless the labels explicitly disagree
-        # (e.g. a Review issue got re-labeled ``blocked``).
-        review_value = project_cfg.get("review_value")
-        if review_value and current == review_value and not (labels & {"blocked", "done"}):
-            continue
-        if current == expected:
-            continue
-        option_id = status_options.get(expected)
-        if not option_id:
-            continue
-        try:
-            set_item_status(info["project_id"], item["item_id"], status_field_id, option_id)
-            summary["moved"] += 1
-            if (item.get("state") or "").upper() == "CLOSED":
-                # Also strip lingering lifecycle labels on closed items.
-                stale_labels = [lbl for lbl in ("blocked", "in-progress", "agent-dispatched", "ready") if lbl in labels]
-                if stale_labels:
+        column_moved = False
+        if expected is not None:
+            review_value = project_cfg.get("review_value")
+            skip_move = (
+                (review_value and current == review_value and not (labels & {"blocked", "done"}))
+                or current == expected
+            )
+            if not skip_move:
+                option_id = status_options.get(expected)
+                if option_id:
                     try:
-                        edit_issue_labels(github_slug, int(issue_number), add=["done"], remove=stale_labels)
-                    except Exception:
-                        pass
-                summary["closed_reconciled"] += 1
-            print(f"  Reconciled #{issue_number}: {current!r} -> {expected!r}")
-        except Exception as e:
-            print(f"  Warning: failed to move #{issue_number} to {expected}: {e}")
-            summary["errors"] += 1
+                        set_item_status(info["project_id"], item["item_id"], status_field_id, option_id)
+                        summary["moved"] += 1
+                        column_moved = True
+                        print(f"  Reconciled #{issue_number}: {current!r} -> {expected!r}")
+                    except Exception as e:
+                        print(f"  Warning: failed to move #{issue_number} to {expected}: {e}")
+                        summary["errors"] += 1
+
+        if state == "CLOSED" and (closed_work_done or column_moved):
+            summary["closed_reconciled"] += 1
     return summary
 
 

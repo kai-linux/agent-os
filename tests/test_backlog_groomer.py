@@ -838,6 +838,29 @@ def test_reconcile_closed_with_stale_labels_moves_to_done_and_strips(monkeypatch
     assert any("in-progress" in (s.get("remove") or []) for s in stripped)
 
 
+def test_reconcile_strips_stale_labels_on_closed_already_in_done(monkeypatch):
+    fake = _FakeProject([{
+        "item_id": "I6", "number": 100,
+        "url": "https://github.com/owner/repo/issues/100",
+        "state": "CLOSED", "status": "Done",
+        "labels": {"in-progress", "agent-dispatched"},
+    }])
+    stripped: list[dict] = []
+    monkeypatch.setattr(bg, "query_project", lambda pn, owner: fake.info())
+    monkeypatch.setattr(bg, "set_item_status", lambda pid, iid, fid, oid: fake.moves.append((iid, oid)))
+    monkeypatch.setattr(
+        bg, "edit_issue_labels",
+        lambda repo, number, add=None, remove=None: stripped.append({"add": add, "remove": remove}),
+    )
+
+    summary = _reconcile_board_state(_make_cfg(), "owner/repo")
+    assert fake.moves == []
+    assert summary["closed_reconciled"] == 1
+    removed_calls = [s.get("remove") or [] for s in stripped]
+    assert any("in-progress" in rm for rm in removed_calls)
+    assert any("agent-dispatched" in rm for rm in removed_calls)
+
+
 def test_reconcile_leaves_review_column_alone(monkeypatch):
     fake = _FakeProject([{
         "item_id": "I4", "number": 4,
