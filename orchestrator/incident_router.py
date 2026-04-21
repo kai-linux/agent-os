@@ -58,14 +58,48 @@ def _router_cfg(cfg: dict) -> dict[str, Any]:
     router.setdefault("tiers", {})
     router.setdefault("sources", {})
     for severity, defaults in {
-        "sev1": {"delivery": "immediate", "dedup_window_minutes": 0, "bypass_kill_switch": True},
-        "sev2": {"delivery": "next_business_hour", "dedup_window_minutes": 60, "bypass_kill_switch": False},
-        "sev3": {"delivery": "regular_digest", "dedup_window_minutes": 240, "bypass_kill_switch": False},
+        "sev1": {
+            "delivery": "immediate",
+            "dedup_window_minutes": 0,
+            "bypass_kill_switch": True,
+            "handlers": [{"type": "telegram_chat", "snooze_minutes": 0}],
+            "snooze_minutes": 0,
+        },
+        "sev2": {
+            "delivery": "next_business_hour",
+            "dedup_window_minutes": 60,
+            "bypass_kill_switch": False,
+            "handlers": [{"type": "telegram_chat", "snooze_minutes": 60}],
+            "snooze_minutes": 60,
+        },
+        "sev3": {
+            "delivery": "regular_digest",
+            "dedup_window_minutes": 240,
+            "bypass_kill_switch": False,
+            "handlers": [{"type": "telegram_chat", "snooze_minutes": 240}],
+            "snooze_minutes": 240,
+        },
     }.items():
         merged = dict(defaults)
         merged.update(router["tiers"].get(severity) or {})
+        merged["handlers"] = _normalize_handlers(merged.get("handlers"), default_snooze=merged.get("snooze_minutes", 0))
         router["tiers"][severity] = merged
     return router
+
+
+def _normalize_handlers(raw: Any, *, default_snooze: int) -> list[dict[str, Any]]:
+    handlers: list[dict[str, Any]] = []
+    for item in raw or []:
+        if isinstance(item, str):
+            handlers.append({"type": item, "snooze_minutes": default_snooze})
+            continue
+        if not isinstance(item, dict):
+            continue
+        handler = dict(item)
+        handler.setdefault("type", "telegram_chat")
+        handler.setdefault("snooze_minutes", default_snooze)
+        handlers.append(handler)
+    return handlers
 
 
 def _business_timezone(router_cfg: dict) -> ZoneInfo:
@@ -242,12 +276,25 @@ def _send_incident(cfg: dict, incident: dict[str, Any], tier_cfg: dict[str, Any]
 
     message = _build_message(incident, tier_cfg)
     reply_markup = incident.get("event", {}).get("reply_markup")
-    message_id = send_telegram(cfg, message, logfile, queue_summary_log, reply_markup=reply_markup)
-    if not message_id:
-        return False
-    incident["message_id"] = message_id
-    incident["notified_at"] = _now_utc().isoformat()
-    return True
+    delivered = False
+    for handler in tier_cfg.get("handlers") or []:
+        if str(handler.get("type") or "").strip() != "telegram_chat":
+            continue
+        message_id = send_telegram(
+            cfg,
+            message,
+            logfile,
+            queue_summary_log,
+            reply_markup=reply_markup,
+            chat_id=str(handler.get("chat_id") or "").strip() or None,
+            bypass_kill_switch=bool(tier_cfg.get("bypass_kill_switch")),
+        )
+        if not message_id:
+            continue
+        incident["message_id"] = message_id
+        incident["notified_at"] = _now_utc().isoformat()
+        delivered = True
+    return delivered
 
 
 def _incident_due(router_cfg: dict, incident: dict[str, Any], now: datetime) -> bool:
