@@ -8,15 +8,19 @@ workflow, and conventions you need to get a PR merged.
 ```bash
 git clone https://github.com/kai-linux/agent-os.git
 cd agent-os
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-pip install pytest
 ```
 
 Verify your setup:
 
 ```bash
-pytest tests/ -v
+pytest tests/ -q
 ```
+
+For the full setup walkthrough — prerequisites, pre-commit hook, which
+modules are safe to run locally, and common troubleshooting — see
+[docs/local-development.md](docs/local-development.md).
 
 ## Making Changes
 
