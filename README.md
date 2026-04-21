@@ -326,7 +326,11 @@ reviewing CI, and merging changes with zero human intervention per task.
 | Topic | Link |
 |---|---|
 | **Deployment guide for solo builders** | [docs/deployment-guide.md](docs/deployment-guide.md) |
+
 | **Fork guide — customize agent routing, dispatch, prompts** | [FORK_GUIDE.md](FORK_GUIDE.md) |
+
+| **Local development setup (contributors + forkers)** | [docs/local-development.md](docs/local-development.md) |
+
 | Architecture, team roles, observability, safety | [docs/architecture.md](docs/architecture.md) |
 | Task execution, handoff contract, retry logic | [docs/execution.md](docs/execution.md) |
 | Configuration, objectives, evidence, cron setup | [docs/configuration.md](docs/configuration.md) |
