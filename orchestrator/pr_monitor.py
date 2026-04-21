@@ -1316,13 +1316,21 @@ def _quality_harness_gate(cfg: dict, repo: str, pr_number: int) -> tuple[bool, s
 
 
 def _work_verifier_gate(cfg: dict, repo: str, pr: dict, pr_state: dict) -> tuple[bool, str]:
-    report = verify_pull_request(
-        cfg,
-        repo=repo,
-        pr_number=int(pr["number"]),
-        pr_body=str(pr.get("body") or ""),
-        worker_agent=str(pr_state.get("worker_agent") or ""),
-    )
+    # A verifier crash must not take pr_monitor down for every other repo
+    # (2026-04-21: a .format() brace bug here killed the whole poll, burning
+    # auto-merge attempts on unrelated PRs). Fail open with a warning — a
+    # transient verifier error should not block a mergeable PR.
+    try:
+        report = verify_pull_request(
+            cfg,
+            repo=repo,
+            pr_number=int(pr["number"]),
+            pr_body=str(pr.get("body") or ""),
+            worker_agent=str(pr_state.get("worker_agent") or ""),
+        )
+    except Exception as e:
+        print(f"Warning: work verifier crashed on PR #{pr['number']}: {e!r} — failing open")
+        return True, f"work verifier unavailable ({type(e).__name__})"
     pr_state["work_verifier_signature"] = report.signature
     pr_state["work_verifier_verdict"] = report.verdict
     if not report.blocked:

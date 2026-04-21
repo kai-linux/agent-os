@@ -1,10 +1,53 @@
 from __future__ import annotations
 
+import subprocess
+
 from orchestrator.pr_risk_assessment import RiskAssessment
 from orchestrator.work_verifier import (
+    _call_independent_judge,
     _deterministic_pattern_findings,
     verify_pull_request,
 )
+
+
+def test_call_independent_judge_does_not_treat_literal_json_as_format_placeholders(monkeypatch):
+    """Regression: the judge prompt contains literal JSON (``{"verdict": ...}``).
+    Running it through ``str.format`` mis-parses the ``{`` as a placeholder and
+    raises ``KeyError: '\\n  "verdict"'``, which crashed pr_monitor mid-merge
+    on 2026-04-21 and burned PR #32's auto-merge attempts until MAX hit."""
+
+    captured: dict = {}
+
+    def fake_run(argv, *args, **kwargs):
+        prompt = argv[-1] if argv and isinstance(argv[-1], str) else ""
+        for piece in argv:
+            if isinstance(piece, str) and piece.startswith("You are the Agent OS work verifier"):
+                prompt = piece
+                break
+        captured["prompt"] = prompt
+        return subprocess.CompletedProcess(
+            argv, 0,
+            stdout='{"verdict":"pass","summary":"ok","criteria":[],"scope_assessment":{"verdict":"match","reason":"ok"},"missing_tests":false,"notes":[]}',
+            stderr="",
+        )
+
+    monkeypatch.setattr("orchestrator.work_verifier.subprocess.run", fake_run)
+    monkeypatch.setattr(
+        "orchestrator.work_verifier._judge_command",
+        lambda *a, **kw: (["claude"], "anthropic", "stub-model"),
+    )
+
+    payload, family, model = _call_independent_judge(
+        {},
+        worker_agent="claude",
+        issue_body="Issue with literal {curly} braces inside body.",
+        diff_text='+x = {"k": 1}\n+y = {} ',
+    )
+    assert payload["verdict"] == "pass"
+    # The literal JSON schema survived into the final prompt text intact.
+    assert '"verdict": "pass|block|uncertain"' in captured["prompt"]
+    assert "Issue body:" in captured["prompt"]
+    assert "literal {curly} braces" in captured["prompt"]
 
 
 def test_deterministic_pattern_findings_detects_blocking_antipatterns():

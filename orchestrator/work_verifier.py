@@ -269,9 +269,10 @@ def _call_independent_judge(
     issue_body: str,
     diff_text: str,
 ) -> tuple[dict[str, Any], str, str]:
-    prompt = _JUDGE_PROMPT.format(
-        issue_body=(issue_body or "")[:_MAX_ISSUE_CHARS],
-        diff_text=(diff_text or "")[:_MAX_DIFF_CHARS],
+    prompt = (
+        f"{_JUDGE_PROMPT_HEADER}\n"
+        f"Issue body:\n{(issue_body or '')[:_MAX_ISSUE_CHARS]}\n\n"
+        f"PR diff:\n{(diff_text or '')[:_MAX_DIFF_CHARS]}\n"
     )
     cmd, family, model = _judge_command(worker_agent, cfg)
     if family == "anthropic":
