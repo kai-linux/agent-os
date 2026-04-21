@@ -2005,3 +2005,126 @@ def test_should_try_fallback_short_circuits_on_permanent_infra_blocker():
     assert should_try_fallback(blocked) is False
     recoverable = {"status": "blocked", "blocker_code": "timeout"}
     assert should_try_fallback(recoverable) is True
+
+
+# ---------------------------------------------------------------------------
+# Web-task detection + rubric injection + no_web_artifact downgrade
+# ---------------------------------------------------------------------------
+
+from orchestrator.queue import (
+    _web_task_kind,
+    _web_task_rubric_for,
+    downgrade_web_no_artifact,
+)
+
+
+def test_web_task_kind_detects_homepage_in_body():
+    meta = {"task_type": "implementation"}
+    assert _web_task_kind(meta, "Build homepage with hero and testimonials") == "homepage"
+
+
+def test_web_task_kind_detects_landing_page():
+    meta = {"task_type": "content"}
+    assert _web_task_kind(meta, "Draft a landing page for the new product") == "homepage"
+
+
+def test_web_task_kind_detects_general_web_for_website_keyword():
+    meta = {"task_type": "design"}
+    assert _web_task_kind(meta, "Design a website for the consulting firm") == "web"
+
+
+def test_web_task_kind_none_for_non_web_task():
+    meta = {"task_type": "implementation"}
+    assert _web_task_kind(meta, "Refactor the queue module") is None
+
+
+def test_web_task_kind_none_for_research_task_even_if_web_keyword():
+    meta = {"task_type": "research"}
+    assert _web_task_kind(meta, "Investigate best practices for homepage design") is None
+
+
+def test_web_task_rubric_for_homepage_contains_index_html_rule():
+    text = _web_task_rubric_for("homepage")
+    assert "index.html" in text
+    assert "Markdown" in text or "markdown" in text
+
+
+def test_write_prompt_injects_web_rubric_for_homepage_task(tmp_path):
+    root = tmp_path / "root"
+    worktree = tmp_path / "repo"
+    root.mkdir()
+    worktree.mkdir()
+    prompt_file = write_prompt(
+        "task-web-1",
+        {"task_type": "implementation"},
+        "Build the homepage with a hero section and call-to-action.",
+        "codex",
+        [],
+        root,
+        worktree=worktree,
+    )
+    text = prompt_file.read_text(encoding="utf-8")
+    assert "Web deliverable rubric" in text
+    assert "index.html" in text
+
+
+def test_write_prompt_omits_web_rubric_for_non_web_task(tmp_path):
+    root = tmp_path / "root"
+    worktree = tmp_path / "repo"
+    root.mkdir()
+    worktree.mkdir()
+    prompt_file = write_prompt(
+        "task-web-2",
+        {"task_type": "implementation"},
+        "Refactor the queue loop for clarity.",
+        "codex",
+        [],
+        root,
+        worktree=worktree,
+    )
+    text = prompt_file.read_text(encoding="utf-8")
+    assert "Web deliverable rubric" not in text
+
+
+def test_downgrade_web_no_artifact_downgrades_when_index_html_missing(tmp_path):
+    (tmp_path / "BVT_HOMEPAGE.md").write_text("# draft copy", encoding="utf-8")
+    meta = {"task_type": "implementation"}
+    body = "Build homepage with hero, value prop, and testimonials."
+    result = {"status": "complete", "summary": "Shipped homepage spec."}
+    out = downgrade_web_no_artifact(meta, body, result, "codex", tmp_path)
+    assert out["status"] == "partial"
+    assert out["blocker_code"] == "no_web_artifact"
+    assert "index.html" in out["next_step"]
+
+
+def test_downgrade_web_no_artifact_passes_through_when_index_html_present(tmp_path):
+    (tmp_path / "index.html").write_text("<html></html>", encoding="utf-8")
+    meta = {"task_type": "implementation"}
+    body = "Build homepage."
+    result = {"status": "complete"}
+    out = downgrade_web_no_artifact(meta, body, result, "codex", tmp_path)
+    assert out is result
+
+
+def test_downgrade_web_no_artifact_ignores_non_homepage_tasks(tmp_path):
+    meta = {"task_type": "implementation"}
+    body = "Refactor the queue module."
+    result = {"status": "complete"}
+    out = downgrade_web_no_artifact(meta, body, result, "codex", tmp_path)
+    assert out is result
+
+
+def test_downgrade_web_no_artifact_ignores_general_web_tasks_without_homepage_keyword(tmp_path):
+    meta = {"task_type": "implementation"}
+    body = "Add a Services page to the website."
+    result = {"status": "complete"}
+    out = downgrade_web_no_artifact(meta, body, result, "codex", tmp_path)
+    assert out is result
+
+
+def test_downgrade_web_no_artifact_ignores_non_complete_status(tmp_path):
+    meta = {"task_type": "implementation"}
+    body = "Build homepage."
+    result = {"status": "partial", "blocker_code": "missing_context"}
+    out = downgrade_web_no_artifact(meta, body, result, "codex", tmp_path)
+    assert out is result

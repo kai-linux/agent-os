@@ -57,6 +57,7 @@ BLOCKER_CODE_DESCRIPTIONS = {
     "push_not_ready": "Task requires git publish capability but push-readiness checks failed.",
     "no_diff_produced": "The agent claimed completion but produced no file changes for a task type that requires a diff.",
     "prompt_too_large": "The rendered prompt exceeded the per-argv byte ceiling; retrying with more context will not help.",
+    "no_web_artifact": "A homepage/website implementation task completed without producing the expected HTML entry point (e.g. index.html at repo root).",
 }
 VALID_BLOCKER_CODES = set(BLOCKER_CODE_DESCRIPTIONS)
 # Blockers that are not agent-quality issues and will not be fixed by rotating
@@ -90,6 +91,69 @@ DIFF_REQUIRED_TASK_TYPES = frozenset({
     "browser_automation",
 })
 PROMPT_INSPECTION_BLOCKER_CODES = {"invalid_result_contract"}
+
+# Web-implementation task detection. "Build homepage / landing page" tasks
+# repeatedly shipped markdown copy-specs (BVT_HOMEPAGE.md, etc.) instead of
+# the actual runnable HTML entry point. The rubric below nails down that a
+# web task's first deliverable is a file renderable in a browser at the web
+# root, not a content plan.
+_WEB_HOMEPAGE_KEYWORDS = (
+    "homepage", "home page", "landing page", "index page", "index.html",
+)
+_WEB_GENERAL_KEYWORDS = (
+    "homepage", "home page", "landing page", "index page", "index.html",
+    "website", "web page", "webpage", "static site", "hero section",
+)
+
+
+def _web_task_kind(meta: dict, body: str) -> str | None:
+    """Return "homepage" for explicit homepage tasks, "web" for broader web
+    implementation tasks, or None otherwise.
+
+    Only applies to implementation / content / design task types — research
+    and architecture tasks can legitimately produce a markdown plan.
+    """
+    task_type = str(meta.get("task_type", "") or "").strip().lower()
+    if task_type not in {"implementation", "content", "design"}:
+        return None
+    haystack = f"{body or ''}".lower()
+    if any(kw in haystack for kw in _WEB_HOMEPAGE_KEYWORDS):
+        return "homepage"
+    if any(kw in haystack for kw in _WEB_GENERAL_KEYWORDS):
+        return "web"
+    return None
+
+
+_WEB_TASK_RUBRIC = """
+## Web deliverable rubric (task matched a web-implementation pattern)
+
+This is a web task. The acceptance bar is a file that renders in a browser,
+not a content plan.
+
+Hard rules:
+- The first file you write must be a runnable page. For a homepage / landing
+  page task, produce `index.html` at the repository root before any other
+  file. For a named page (About, Services, Insights), produce
+  `<name>.html` at the repository root.
+- Write actual HTML with working markup, not a Markdown copy-spec. If you
+  also produce a markdown reference (voice notes, copy drafts), it must be a
+  *supplement* to the HTML file, never a substitute.
+- The page must be self-contained enough to open in a browser: valid
+  `<html>/<head>/<body>`, a `<title>`, and either inline CSS or a linked
+  stylesheet that actually exists in the diff.
+- If the task mentions sections (hero, value prop, testimonials, features),
+  each section must appear in the HTML as a real element (`<section>`,
+  `<header>`, etc.), not only described in prose.
+- Status = complete is only legitimate if the expected .html artifact is
+  present in the diff. Reporting STATUS: complete while shipping only a .md
+  file for a web task is a contract violation and will be auto-downgraded.
+"""
+
+
+def _web_task_rubric_for(kind: str) -> str:
+    if not kind:
+        return ""
+    return _WEB_TASK_RUBRIC
 _CI_REMEDIATION_TITLE_RE = re.compile(r"^fix ci failure on pr #(\d+)$", re.IGNORECASE)
 _CI_REMEDIATION_PR_RE = re.compile(r"\bPR\s*#(\d+)\b", re.IGNORECASE)
 _CI_REMEDIATION_PR_URL_RE = re.compile(r"/pull/(\d+)", re.IGNORECASE)
@@ -1779,6 +1843,9 @@ def write_prompt(task_id: str, meta: dict, body: str, current_agent: str, prior_
         enhanced_sections.append(f"## Objective Alignment\n\n{objective_context}")
     if sprint_directives and not sprint_directives.startswith("(no sprint directives"):
         enhanced_sections.append(f"## Sprint Directives\n\n{sprint_directives}")
+    web_kind = _web_task_kind(meta, body)
+    if web_kind:
+        enhanced_sections.append(_web_task_rubric_for(web_kind).strip())
     enhanced_context = "\n\n".join(enhanced_sections)
     if enhanced_context:
         enhanced_context = f"\n\n---\n# Dispatch Context (structured)\n\n{enhanced_context}\n\n---\n"
@@ -2830,6 +2897,57 @@ def downgrade_no_diff_complete(meta: dict, final_result: dict, agent: str | None
     }
     return downgraded
 
+def downgrade_web_no_artifact(
+    meta: dict,
+    body: str,
+    final_result: dict,
+    agent: str | None,
+    worktree: Path | None,
+) -> dict:
+    """Downgrade status=complete to partial when a homepage/web-implementation
+    task shipped without the expected HTML entry point.
+
+    This closes the failure mode observed on liminalconsultants#2, where the
+    worker interpreted "build homepage" as a copy-planning task and produced a
+    markdown spec instead of an index.html at the web root. The check is
+    narrowly scoped — it only fires for tasks whose body explicitly names a
+    homepage/landing-page concern, so "build About page" style tasks that
+    already produce <name>.html are unaffected.
+    """
+    if final_result.get("status") != "complete":
+        return final_result
+    kind = _web_task_kind(meta, body)
+    if kind != "homepage":
+        return final_result
+    if worktree is None or not worktree.exists():
+        return final_result
+    if (worktree / "index.html").exists():
+        return final_result
+
+    agent_label = agent or "unknown"
+    summary = (
+        f"Agent {agent_label} reported STATUS: complete for a homepage-class task, "
+        "but no index.html is present at the repo root."
+    )
+    next_step = (
+        "Re-dispatch after producing index.html at the repository root. Any markdown "
+        "copy-specs must be a supplement to the HTML file, not a substitute."
+    )
+    downgraded = dict(final_result)
+    downgraded["status"] = "partial"
+    downgraded["blocker_code"] = "no_web_artifact"
+    downgraded["summary"] = summary
+    downgraded["blockers"] = list(final_result.get("blockers") or []) + [
+        f"- Homepage task completed without index.html at repo root (agent={agent_label}).",
+    ]
+    downgraded["next_step"] = next_step
+    downgraded["unblock_notes"] = {
+        "blocking_cause": summary,
+        "next_action": next_step,
+    }
+    return downgraded
+
+
 def synthesize_exhausted_result(model_attempts: list[str]) -> dict:
     return {
         "status": "blocked",
@@ -3280,6 +3398,18 @@ def main():
                                 also_summary=True,
                                 queue_summary_log=QUEUE_SUMMARY_LOG,
                             )
+
+            if final_result is not None:
+                web_downgraded = downgrade_web_no_artifact(meta, body, final_result, final_agent, worktree)
+                if web_downgraded is not final_result:
+                    final_result = web_downgraded
+                    log(
+                        "Downgraded STATUS: complete → partial (no_web_artifact); "
+                        "homepage task shipped without index.html at repo root.",
+                        logfile,
+                        also_summary=True,
+                        queue_summary_log=QUEUE_SUMMARY_LOG,
+                    )
         except WorkflowValidationError as e:
             push_validation_error = str(e)
             final_result = {
