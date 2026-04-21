@@ -173,6 +173,34 @@ production_feedback:
       privacy: "public"
       privacy_note: "Service-level summary only; no customer-identifying logs"
 
+external_signals:
+  enabled: false
+  fetch_interval_minutes: 30       # Per-source minimum fetch cadence to avoid API quota burn
+  sources:
+    - name: "Sentry incidents"
+      enabled: false
+      type: "sentry_json"
+      repo: "owner/repo"
+      url: "https://ops.example.com/public/sentry-feed.json"
+      credential_env: "SENTRY_API_TOKEN"   # Optional; when unset the source is skipped with logging
+      auth_header: "Bearer {token}"
+      max_signals: 20
+    - name: "Untrusted GitHub mentions"
+      enabled: false
+      type: "github_mentions"
+      repo: "owner/repo"
+      query: "\"owner/repo\" type:issue type:pr"
+      max_signals: 20
+    - name: "Public support feed"
+      enabled: false
+      type: "rss"
+      repo: "owner/repo"
+      url: "https://status.example.com/support.xml"
+      kind: "support"
+      credential_env: "SUPPORT_FEED_TOKEN" # Optional; when unset the source is skipped with logging
+      auth_header: "Bearer {token}"
+      max_signals: 20
+
 outcome_attribution:
   enabled: true                        # Set true to enable post-merge outcome measurement
   max_source_chars: 4000

@@ -30,6 +30,7 @@ from pathlib import Path
 
 from orchestrator.paths import load_config
 from orchestrator.agent_scorer import load_recent_metrics, findings_path as scorer_findings_path
+from orchestrator.external_ingester import format_external_signals_for_prompt, load_external_signals, run_external_ingester
 from orchestrator.gh_project import (
     add_issue_comment,
     edit_issue_labels,
@@ -948,6 +949,7 @@ Rules:
   security/data-loss risks are high; tech-debt cleanup is normal; nice-to-haves are low
 - Product inspection includes a Coverage Boundary: "Inspected surfaces" have confirmed observations; "Uninspected surfaces" have NO health signal — do not generate issues based on assumed health of uninspected surfaces
 - Observations marked LOW CONFIDENCE (repeated fetch failures) should be down-weighted — do not treat them as confirmed regressions
+- When External Signals are present, treat `[high]` items as strong candidates for backlog generation, especially for user-visible failures, support pain, and public credibility risk
 
 Return ONLY a JSON array (no markdown fences, no commentary) of exactly {num_issues} objects.
 Each object must have:
@@ -1004,6 +1006,9 @@ call for.
 
 --- Production feedback artifact (PRODUCTION_FEEDBACK.md) ---
 {production_feedback}
+
+--- External Signals ---
+{external_signals}
 
 --- Live product inspection (PRODUCT_INSPECTION.md) ---
 {product_inspection}
@@ -1254,6 +1259,12 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
     strategy_context = read_strategy_context(repo_path, max_chars=1600)
     planning_principles = read_planning_principles(repo_path, max_chars=1400)
     production_feedback = read_production_feedback_artifact(repo_path, max_chars=1800)
+    run_external_ingester(cfg, github_slug, repo_path)
+    external_signals = format_external_signals_for_prompt(
+        load_external_signals(cfg, repo=github_slug, window_days=14),
+        max_items=6,
+        max_chars=1600,
+    )
     product_inspection = read_product_inspection_artifact(repo_path, max_chars=1600)
     research_context = read_planning_research_artifact(repo_path, max_chars=1600)
     objective = load_repo_objective(cfg, github_slug, repo_path)
@@ -1439,6 +1450,7 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
         sprint_directives=sprint_directives,
         planning_principles=planning_principles,
         production_feedback=production_feedback,
+        external_signals=external_signals,
         product_inspection=product_inspection,
         research_context=research_context,
         adoption_signals=adoption_signals,

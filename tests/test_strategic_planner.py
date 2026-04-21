@@ -694,6 +694,22 @@ def test_production_feedback_context_auto_generates_from_runtime_substrate(tmp_p
         + "\n",
         encoding="utf-8",
     )
+    (metrics_dir / "external_signals.jsonl").write_text(
+        json.dumps(
+            {
+                "source": "sentry",
+                "kind": "error",
+                "severity": "high",
+                "title": "Checkout crashes on submit",
+                "body": "Unhandled exception in payment flow.",
+                "url": "https://ops.example.com/issues/1",
+                "ts": (base + timedelta(hours=3, minutes=15)).isoformat(),
+                "repo": "owner/repo",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     cfg = {"root_dir": str(tmp_path)}
 
     context = _production_feedback_context(cfg, "owner/repo", repo)
@@ -703,9 +719,11 @@ def test_production_feedback_context_auto_generates_from_runtime_substrate(tmp_p
     assert "## Recent Failures" in context
     assert "## Blocked-Task Patterns" in context
     assert "## Repeat-Recovery Signals" in context
+    assert "## External Signals" in context
     assert "missing_credentials: 1" in context
     assert "completed after retry: 1" in context
     assert "improved: 1" in context
+    assert "Checkout crashes on submit" in context
 
 
 def test_production_feedback_context_writes_no_signals_artifact_when_substrate_empty(tmp_path):
