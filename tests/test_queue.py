@@ -1437,6 +1437,35 @@ def test_handle_telegram_callback_plan_approve():
         assert '"approval": "approved"' in stored
 
 
+def test_handle_telegram_callback_revert_approve(tmp_path, monkeypatch):
+    actions_dir = tmp_path / "telegram_actions"
+    actions_dir.mkdir()
+    action = {
+        "action_id": "abcdef123456",
+        "type": "deploy_watchdog_revert",
+        "status": "pending",
+        "approval": "pending",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+        "chat_id": "1",
+        "message_id": 10,
+        "repo": "owner/repo",
+        "source_pr_number": 77,
+        "revert_pr_number": 88,
+    }
+    save_telegram_action(actions_dir, action)
+    monkeypatch.setattr(
+        "orchestrator.deploy_watchdog.handle_revert_callback",
+        lambda cfg, saved_action, operation, logfile=None, queue_summary_log=None: f"{operation}:{saved_action['revert_pr_number']}",
+    )
+
+    outcome = handle_telegram_callback({}, actions_dir, "rvt:abcdef123456:approve")
+
+    assert outcome["text"] == "approve:88"
+    stored = actions_dir.joinpath("abcdef123456.json").read_text(encoding="utf-8")
+    assert '"approval": "approved"' in stored
+
+
 def test_handle_telegram_callback_blocked_task_retry(tmp_path, monkeypatch):
     actions_dir = tmp_path / "telegram_actions"
     actions_dir.mkdir()
