@@ -42,6 +42,18 @@
 
 ## Recent Changes
 
+### 2026-04-21 — [task-20260421-121633-add-severity-tiered-incident-response-escalation-l] (#285 kai-linux/agent-os)
+Implemented a shared severity-tiered incident router with configurable source rules, persistent incident tracking, `/ack` and `/resolve` commands, and routing integrations for queue, pr_monitor, agent_scorer, and deploy_watchdog while preserving existing Telegram button workflows.
+
+**Files:** `- .agent_result.md`, `- example.config.yaml`, `- orchestrator/agent_scorer.py`, `- orchestrator/deploy_watchdog.py`, `- orchestrator/incident_router.py`, `- orchestrator/paths.py`, `- orchestrator/pr_monitor.py`, `- orchestrator/queue.py`
+
+**Decisions:**
+  - - Kept the router file-based and JSONL-backed so incidents stay auditable and consistent with the rest of the orchestrator runtime artifacts.
+  - - Preserved existing Telegram callback/button flows by letting incident events carry optional `reply_markup` through the router instead of replacing the action store.
+  - - Made severity classification rule-based from source/event metadata with conservative defaults (`sev3` unless configured otherwise) so nothing becomes sev1 without explicit opt-in.
+  - - Stored incidents under `root_dir/runtime/incidents/incidents.jsonl` directly rather than depending on the module-level repo root, which keeps tests and multi-root configs deterministic.
+
+
 ### 2026-04-21 — [task-20260421-094629-add-deploy-watchdog-agent-that-auto-reverts-post-m] (#245 kai-linux/agent-os)
 Implemented an opt-in deploy watchdog that scans recent merged PRs against external production telemetry, opens labeled revert PRs on regression, routes operator approval through Telegram buttons, and logs both detection and operator decisions to a dedicated JSONL audit trail.
 
