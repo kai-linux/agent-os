@@ -1505,6 +1505,52 @@ def test_handle_telegram_command_repo_mode_writes_audit_record(tmp_path):
     assert any('"event_type":"mode_change"' in line for line in audit_lines)
 
 
+def test_handle_telegram_command_verify_override_writes_audit_record(tmp_path):
+    cfg = {"root_dir": str(tmp_path)}
+    paths = {"ROOT": tmp_path, "CONFIG": tmp_path / "config.yaml"}
+    operator = {"chat_id": "123", "username": "kai", "display_name": "Kai"}
+
+    verifier_dir = tmp_path / "runtime" / "work_verifier"
+    verifier_dir.mkdir(parents=True)
+    (verifier_dir / "reports.jsonl").write_text(
+        json.dumps(
+            {
+                "repo": "owner/repo",
+                "pr_number": 42,
+                "verdict": "block",
+                "summary": "deterministic anti-patterns found",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    reply = handle_telegram_command(
+        cfg,
+        paths,
+        "/verify-override owner/repo 42 approved for hotfix",
+        operator=operator,
+    )
+
+    assert "Override recorded for owner/repo PR #42 by kai." in reply
+    override_rows = [
+        json.loads(line)
+        for line in (verifier_dir / "overrides.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert override_rows[-1]["operator"]["username"] == "kai"
+    assert override_rows[-1]["overridden_verdict"] == "block"
+
+    audit_rows = [
+        json.loads(line)
+        for line in (tmp_path / "runtime" / "audit" / "audit.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert audit_rows[-1]["event_type"] == "work_verifier_override"
+    assert audit_rows[-1]["payload"]["pr_number"] == 42
+    assert audit_rows[-1]["payload"]["operator"]["username"] == "kai"
+
+
 def test_handle_telegram_callback_blocked_task_retry(tmp_path, monkeypatch):
     actions_dir = tmp_path / "telegram_actions"
     actions_dir.mkdir()

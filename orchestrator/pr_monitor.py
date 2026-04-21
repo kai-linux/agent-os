@@ -50,6 +50,7 @@ from orchestrator.quality_harness import (
 from orchestrator.adr_curator import curate_pr
 from orchestrator.review_signals import record_review_signal, generate_followup_issues
 from orchestrator.adr_curator import curate_pr
+from orchestrator.work_verifier import format_block_comment, send_block_telegram, verify_pull_request
 
 MAX_MERGE_ATTEMPTS = 3
 STATE_FILE_NAME = "pr_monitor_state.json"
@@ -1314,6 +1315,33 @@ def _quality_harness_gate(cfg: dict, repo: str, pr_number: int) -> tuple[bool, s
     )
 
 
+def _work_verifier_gate(cfg: dict, repo: str, pr: dict, pr_state: dict) -> tuple[bool, str]:
+    report = verify_pull_request(
+        cfg,
+        repo=repo,
+        pr_number=int(pr["number"]),
+        pr_body=str(pr.get("body") or ""),
+        worker_agent=str(pr_state.get("worker_agent") or ""),
+    )
+    pr_state["work_verifier_signature"] = report.signature
+    pr_state["work_verifier_verdict"] = report.verdict
+    if not report.blocked:
+        pr_state.pop("work_verifier_block_notified", None)
+        return True, report.summary
+
+    if pr_state.get("work_verifier_block_notified") != report.signature:
+        try:
+            add_issue_comment(repo, int(pr["number"]), format_block_comment(report))
+        except Exception as e:
+            print(f"Warning: failed to post work-verifier comment on PR #{pr['number']}: {e}")
+        try:
+            send_block_telegram(cfg, repo, int(pr["number"]), report)
+        except Exception as e:
+            print(f"Warning: failed to send work-verifier telegram for PR #{pr['number']}: {e}")
+        pr_state["work_verifier_block_notified"] = report.signature
+    return False, report.summary
+
+
 def _prompt_labeled_field_failures(cfg: dict, repo: str):
     token = str(cfg.get("telegram_bot_token", "")).strip()
     chat_id = str(cfg.get("telegram_chat_id", "")).strip()
@@ -1546,6 +1574,12 @@ def monitor_prs():
                     )
                 except Exception as e:
                     print(f"Warning: failed to post quality harness comment on PR #{pr_number}: {e}")
+                continue
+
+            verifier_ok, verifier_reason = _work_verifier_gate(cfg, repo, pr, pr_state)
+            _save_state(paths, state)
+            if not verifier_ok:
+                print(f"  PR #{pr_number}: work verifier blocked merge ({verifier_reason})")
                 continue
 
             if _try_merge(cfg, repo, pr_number):
