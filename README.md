@@ -6,14 +6,14 @@
 [![GitHub issues](https://img.shields.io/github/issues/kai-linux/agent-os)](https://github.com/kai-linux/agent-os/issues)
 [![License](https://img.shields.io/github/license/kai-linux/agent-os)](LICENSE)
 
-**A fully autonomous software organization — staffed by AI agents, managed by cron, and designed to run indefinitely without human input.**
+**An autonomous-first software organization: AI agents handle routine delivery loops, while humans stay in governance and escalation paths.**
 
 You give it a backlog. It ships product.
 
 **Public proof — everything is auditable:**
 [Reliability dashboard](docs/reliability/README.md) · [Case study](docs/case-study-agent-os.md) · [Live discussion](https://github.com/kai-linux/agent-os/discussions/167)
 
-### See it work — real task, zero human intervention
+### See it work - real task, end-to-end execution
 
 <p align="center">
   <img src="docs/demo.svg" alt="Agent OS autonomously completing issue #115: from dispatch to merged PR in 12 minutes" width="800">
@@ -21,14 +21,22 @@ You give it a backlog. It ships product.
 
 <p align="center"><em>Real execution: Issue <a href="https://github.com/kai-linux/agent-os/issues/115">#115</a> → agent dispatched → code written → tests pass → <a href="https://github.com/kai-linux/agent-os/pull/122">PR #122</a> merged → issue closed. No human touched it.</em></p>
 
-### Agent Performance — rolling 14 days
+### Agent Performance - rolling 14 days
 
-| Success rate | Median completion | Escalation rate | Tasks shipped |
+| Success rate | Mean completion | Escalation rate | Tasks executed |
 |:---:|:---:|:---:|:---:|
-| **91%** | **3.2 min** | **18%** | **146 total** |
+| **69%** (61/88) | **0.1h** | **11%** (10/88) | **88** |
 
-4 agents (Claude · Codex · Gemini · DeepSeek) — 103 issues closed · 79 PRs merged · 338 commits in 29 days.
+4 agents (Claude · Codex · Gemini · DeepSeek). Metrics above are from the public reliability dashboard updated on 2026-04-21.
 [Full reliability dashboard →](docs/reliability/README.md) · [Multi-agent case study →](docs/case-study-agent-os.md)
+
+---
+
+## Reality Check
+
+- Agent OS is autonomous in the happy path, not "no-human-ever." Escalations are a first-class path after bounded retries.
+- Results shown in this repo are for this repo's workload. A fresh external repo usually starts lower and needs tuning.
+- Use `automation_mode: dispatcher_only` first for new repos, then graduate to full automation after reliability is stable.
 
 ---
 
@@ -42,13 +50,13 @@ Make Agent OS the most credible autonomous software organization for technical f
 
 ## Why Agent OS?
 
-Most AI tools make individual developers faster. Agent OS asks a different question: **what if the developers were optional?**
+Most AI tools make individual developers faster. Agent OS asks a different question: **what if developers can focus on high-leverage decisions while agents handle routine execution?**
 
 Not because humans aren't valuable — but because most engineering work is structured, bounded, and repetitive enough that a well-orchestrated team of AI agents can handle it autonomously. The hard part was never the coding. It was the coordination: task state, routing, context preservation, failure recovery, quality gates, and institutional memory.
 
-Agent OS solves coordination. The agents do the rest.
+Agent OS solves coordination so agents can do more of the routine delivery work reliably.
 
-**It's not a copilot. It's not a chatbot. It's a team you deploy.**
+**It's not a copilot. It's not a chatbot. It's an execution system you supervise.**
 
 ---
 
@@ -297,37 +305,21 @@ The backlog is GitHub Issues. The sprint board is GitHub Projects. The standup i
 
 ---
 
-## Built with Agent OS
+## Historical Case Study Snapshot
 
-Agent OS manages its own development. In 29 days it shipped 79 merged PRs,
-closed 103 issues, and produced 338 commits — autonomously dispatching tasks,
-reviewing CI, and merging changes with zero human intervention per task.
+These are historical campaign snapshots from earlier runs, included for context.
+Use the reliability dashboard for current health.
 
 | Metric | Value |
 |---|---|
-| 14-day success rate | **91%** (42/46 tasks) |
-| Overall success rate | 62% (90/146 tasks) |
-| Median completion time | 3.2 min |
 | Issues closed | 103 |
 | PRs merged | 79 |
 | Commits | 338 in 29 days (~12/day) |
+| Overall success rate (campaign) | 62% (90/146 tasks) |
 
 **[Reliability dashboard →](docs/reliability/README.md)** ·
 **[Case study →](docs/case-study-agent-os.md)** ·
 [GitHub Discussion](https://github.com/kai-linux/agent-os/discussions/167)
-
-Agent OS manages its own development. In 23 days it shipped 59 merged PRs,
-closed 79 issues, and produced 275 commits — autonomously dispatching tasks,
-reviewing CI, and merging changes with zero human intervention per task.
-
-**[Read the full case study →](docs/case-study-agent-os.md)**
-
-| Metric | Value |
-|---|---|
-| Issues closed | 79 of 86 (92%) |
-| PRs merged | 59 of 65 (91%) |
-| Commits | 275 in 23 days (~12/day) |
-| Agent tasks executed | 122 (55.7% first-attempt success) |
 
 ---
 

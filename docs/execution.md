@@ -51,9 +51,11 @@ This file is what makes multi-agent collaboration work. When an agent is blocked
 
 ## 5. Retry & Escalation
 
+Escalation is an expected control path, not a system failure. Agent OS is autonomous-first with bounded retries and explicit handoff to a human operator when needed.
+
 If a task returns `partial` or `blocked`:
 - A **follow-up task** is created automatically with full prior context
 - The next agent in the **fallback chain** takes over (e.g., Codex failed → Claude tries)
 - After `max_attempts` (default 4), the system **escalates** — writes a structured note and stops
 
-The system never thrashes. It tries, it hands off, it escalates. Like a real team.
+The system never thrashes. It tries, it hands off, it escalates.
