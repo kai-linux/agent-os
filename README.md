@@ -205,6 +205,16 @@ crontab -l 2>/dev/null; echo "
 Once cron is running, the system dispatches, executes, reviews, and merges autonomously.
 </details>
 
+### Option C: Bootstrap From Scratch
+
+If you do not already have a repo, project board, Telegram bot, or cron installed for Agent OS, run the guided bootstrap:
+
+```bash
+bin/agentos init
+```
+
+It walks through product intake, creates a GitHub repo and Project v2 board, seeds the first backlog issues, pairs Telegram, writes `config.yaml`, and installs the required cron block.
+
 ---
 
 ## Pause & Resume

@@ -6,6 +6,7 @@ mailbox/*
 logs/*
 *.log
 runtime/*
+runtime/init_state/
 crontab.md
 
 # Byte-compiled / optimized / DLL files

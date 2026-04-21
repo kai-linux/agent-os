@@ -1,5 +1,7 @@
 # Configuration
 
+If you have not configured Agent OS yet, run `bin/agentos init` first. It bootstraps the repo, GitHub Project, Telegram control plane, `config.yaml`, and cron before the lower-level configuration in this document matters.
+
 ## Recursive Self-Improvement
 
 This is the part that makes Agent OS different from a task runner.
