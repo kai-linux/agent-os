@@ -40,6 +40,7 @@ from orchestrator.quality_harness import (
     resolve_repo_local_path,
     write_field_failure_fixture,
 )
+from orchestrator.work_verifier import record_override
 
 from orchestrator.task_formatter import format_goal_ancestry_block
 
@@ -1202,6 +1203,7 @@ def handle_telegram_command(
     cfg: dict,
     paths: dict,
     text: str,
+    operator: dict | None = None,
     logfile: Path | None = None,
     queue_summary_log: Path | None = None,
 ) -> str | None:
@@ -1261,6 +1263,33 @@ def handle_telegram_command(
             else f"Incident {args[0]} marked resolved."
         )
 
+    if command == "verify-override":
+        if len(args) < 2:
+            return "Usage: /verify-override <repo> <pr_number> [reason]"
+        repo = str(args[0]).strip()
+        try:
+            pr_number = int(args[1])
+        except ValueError:
+            return f"pr_number must be an integer, got {args[1]!r}."
+        reason = " ".join(args[2:]).strip()
+        applied = record_override(
+            cfg,
+            repo=repo,
+            pr_number=pr_number,
+            reason=reason,
+            operator=operator or {},
+        )
+        operator_name = (
+            str((operator or {}).get("username") or "").strip()
+            or str((operator or {}).get("display_name") or "").strip()
+            or str((operator or {}).get("chat_id") or "").strip()
+            or "unknown-operator"
+        )
+        return (
+            f"Override recorded for {repo} PR #{pr_number} by {operator_name}. "
+            f"Overridden verdict: {applied['overridden_verdict']}."
+        )
+
     if command == "repos":
         rows = cs.list_repos(cfg)
         if not rows:
@@ -1296,6 +1325,7 @@ def handle_telegram_command(
             "Agent-OS control:\n"
             "/on /off /status — global kill-switch\n"
             "/ack <incident_id> /resolve <incident_id> — update an incident in runtime/incidents/incidents.jsonl\n"
+            "/verify-override <repo> <pr_number> [reason] — unblock a work-verifier rejection with audit trail\n"
             "/repos — list repos\n"
             "/repo on|off <key> — pause/resume a single repo\n"
             "/repo mode <key> full|dispatcher — set parent project's automation_mode\n"
@@ -1545,7 +1575,26 @@ def process_telegram_callbacks(
         message_chat = str((message.get("chat") or {}).get("id", ""))
         if message_text.startswith("/") and message_chat == chat_id:
             try:
-                reply = handle_telegram_command(cfg, paths, message_text, logfile, queue_summary_log)
+                operator = {
+                    "chat_id": message_chat,
+                    "username": str((message.get("from") or {}).get("username") or "").strip(),
+                    "display_name": " ".join(
+                        part
+                        for part in [
+                            str((message.get("from") or {}).get("first_name") or "").strip(),
+                            str((message.get("from") or {}).get("last_name") or "").strip(),
+                        ]
+                        if part
+                    ).strip(),
+                }
+                reply = handle_telegram_command(
+                    cfg,
+                    paths,
+                    message_text,
+                    operator=operator,
+                    logfile=logfile,
+                    queue_summary_log=queue_summary_log,
+                )
                 if reply is not None:
                     send_telegram(cfg, reply, logfile, queue_summary_log)
             except Exception as e:
