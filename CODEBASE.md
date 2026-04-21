@@ -42,6 +42,16 @@
 
 ## Recent Changes
 
+### 2026-04-21 — [task-20260421-094340-add-dependency-cve-watcher-with-auto-bump-prs-and-] (#243 kai-linux/agent-os)
+Implemented a new dependency and CVE watcher module with weekly per-repo cadence gating, dispatcher-only skips, bounded weekly action limits, high-risk issue escalation, and low-risk npm devDependency patch auto-PR support, plus focused regression coverage and config examples.
+
+**Files:** `- .agent_result.md`, `- example.config.yaml`, `- orchestrator/dependency_watcher.py`, `- tests/test_dependency_watcher.py`
+
+**Decisions:**
+  - - Reused `scheduler_state` and `repo_modes` instead of threading the watcher through planner/groomer, keeping the feature as a standalone scheduled job with the same cadence semantics as the rest of the orchestrator.
+  - - Scoped automatic edits to npm `package.json` devDependency patch bumps in this first version; higher-risk findings and unsupported auto-edit cases escalate through GitHub issues instead of making unsafe manifest changes.
+
+
 ### 2026-04-21 — [task-20260421-094236-add-external-signal-ingester-for-production-teleme] (#242 kai-linux/agent-os)
 Added a pluggable external-signal ingester with opt-in source adapters, normalized JSONL persistence, and prompt integration so recent production/support/public signals now flow into both backlog grooming and planner evidence.
 
