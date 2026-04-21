@@ -1,0 +1,53 @@
+capabilities:
+  roles:
+    - strategic_planner
+    - backlog_groomer
+    - agent_scorer
+    - log_analyzer
+    - queue
+    - pr_monitor
+    - external_ingester
+    - quality_harness
+    - deploy_watchdog
+    - dependency_watcher
+    - slo_tracker
+    - adr_curator
+    - audit_log
+    - system_architect
+  jobs:
+    - strategic_planner
+    - backlog_groomer
+    - agent_scorer
+    - daily_digest
+    - deploy_watchdog
+    - dependency_watcher
+    - public_dashboard
+    - adr_curator
+    - system_architect
+  agents:
+    - codex
+    - claude
+    - gemini
+    - deepseek
+
+sensors:
+  signals:
+    - agent_stats
+    - outcome_attribution
+    - external_signals
+    - github_stars
+    - github_forks
+    - task_success_rate
+    - completion_time
+    - escalation_rate
+    - system_architect_report
+  schemas:
+    - agent_stats.jsonl
+    - outcome_attribution.jsonl
+    - external_signals.jsonl
+    - cost_records.jsonl
+    - slo_state.jsonl
+    - health_gate_decisions.jsonl
+    - system_architect_report.json
+
+accepted_omissions: []

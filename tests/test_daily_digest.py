@@ -192,5 +192,6 @@ def test_format_digest_message_stays_compact():
     assert "✅ Completed: 5" in message
     assert "- +2 more" in message
     assert "🔀 PR Activity" in message
+    assert "🏗️ system architect:" in message
     assert "audit chain status: OK" in message
     assert len(message.splitlines()) < 40
