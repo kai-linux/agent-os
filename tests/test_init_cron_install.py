@@ -6,6 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from orchestrator.init.cron_install import BLOCK_BEGIN, BLOCK_END, build_managed_block, merge_block, strip_managed_block
+from orchestrator.init.state import State
 
 
 def test_merge_block_appends_when_missing(tmp_path):
@@ -36,3 +37,15 @@ def test_strip_managed_block_preserves_other_entries(tmp_path):
     assert BLOCK_END not in remaining
     assert "echo hi" in remaining
 
+
+def test_run_supports_manual_mode(monkeypatch, tmp_path):
+    monkeypatch.setattr("orchestrator.init.state.ROOT", tmp_path)
+    state = State.for_slug("demo")
+    monkeypatch.setattr("orchestrator.init.cron_install.ui.choice", lambda *args, **kwargs: "1")
+
+    from orchestrator.init import cron_install as ci
+
+    mode = ci.run(state, dry_run=False)
+
+    assert mode == "manual"
+    assert state.get("cron_setup_mode") == "manual"

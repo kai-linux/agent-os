@@ -1,5 +1,7 @@
 # Cron Setup
 
+`bin/agentos init` can either point you here for manual setup or install/update the managed Agent OS block automatically. Manual setup leaves your existing crontab untouched until you decide to apply it.
+
 Add these to your crontab (`crontab -e`). Replace `/path/to/agent-os` with your actual install path.
 
 Make sure `PATH` includes the directories for `gh`, `codex`, `claude`, `gemini`, and `node`.

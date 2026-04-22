@@ -4,6 +4,8 @@ import argparse
 import traceback
 from pathlib import Path
 
+import yaml
+
 from orchestrator.init import ui
 from orchestrator.init import charter as charter_phase
 from orchestrator.init import config_emit, cron_install, dialogue, github_scaffold, preflight, telegram_pair
@@ -84,7 +86,7 @@ def _print_preflight_results(results: list[preflight.CheckResult]) -> None:
             ui.fail(f"{result.message} — {result.hint}")
 
 
-def _final_banner(state: State, telegram: dict[str, str]) -> None:
+def _final_banner(state: State, telegram: dict[str, str], cron_mode: str) -> None:
     ui.header("Step 7/7 — Done")
     github = state.get("github", {})
     print(f"  Repo:     {github.get('repo_url')}")
@@ -93,6 +95,10 @@ def _final_banner(state: State, telegram: dict[str, str]) -> None:
     print(f"  Telegram: @{telegram.get('bot_username')} — commands: /on /off /status /jobs /repos /help")
     print(f"\n  Config:   {state.get('config_written_path')}")
     print(f"  State:    {state.path}")
+    if cron_mode == "manual":
+        print(f"  Cron:     not installed automatically — see {ROOT / 'CRON.md'}")
+    else:
+        print("  Cron:     installed")
     print("\n  Expected first PR:     ~3-5 minutes from now")
     print("  Expected Telegram ping: within 1 minute")
     print("\n  To pause the whole system:  bin/agentos off")
@@ -121,6 +127,11 @@ def main() -> int:
 
     state = _select_resume_state() or State.for_slug("_pending")
     try:
+        existing_cfg = None
+        config_path = ROOT / "config.yaml"
+        if config_path.exists():
+            existing_cfg = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+
         ui.header("Step 1/7 — What are you building?")
         intake = dialogue.run(state.get("intake"))
         if not state.get("intake"):
@@ -140,18 +151,18 @@ def main() -> int:
         charter = charter_phase.run(state, intake, github, dry_run=args.dry_run)
 
         ui.header("Step 4/7 — Telegram control plane")
-        telegram = telegram_pair.run(state, github["repo_full_name"], dry_run=args.dry_run)
+        telegram = telegram_pair.run(state, github["repo_full_name"], existing_cfg=existing_cfg, dry_run=args.dry_run)
 
         ui.header("Step 5/7 — Writing config.yaml")
         config_path = config_emit.run(state, intake, github, charter, telegram, dry_run=args.dry_run)
         ui.ok(f"Wrote {config_path}")
         ui.ok(f"Wrote {state.path}")
 
-        ui.header("Step 6/7 — Installing cron")
-        cron_install.run(state, dry_run=args.dry_run)
+        ui.header("Step 6/7 — Cron setup")
+        cron_mode = cron_install.run(state, dry_run=args.dry_run)
         state.complete()
 
-        _final_banner(state, telegram)
+        _final_banner(state, telegram, cron_mode)
         return 0
     except Exception as exc:
         _log_error(traceback.format_exc())

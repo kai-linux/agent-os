@@ -74,7 +74,15 @@ def _choose_chat(chats: list[dict[str, str]]) -> dict[str, str]:
         ui.warn("Choose one of the listed chats.")
 
 
-def run(state: State, repo_full_name: str, *, dry_run: bool = False) -> dict[str, str]:
+def _username_for_existing_token(token: str) -> str:
+    try:
+        me = _api_request(token, "getMe")
+        return str(me.get("username", "")).strip()
+    except Exception:
+        return ""
+
+
+def run(state: State, repo_full_name: str, *, existing_cfg: dict | None = None, dry_run: bool = False) -> dict[str, str]:
     existing = state.get("telegram", {})
     if existing.get("chat_id"):
         print(f"  [1] Reuse @{existing.get('bot_username', 'bot')}  [2] Pair a different bot/chat")
@@ -85,6 +93,28 @@ def run(state: State, repo_full_name: str, *, dry_run: bool = False) -> dict[str
                 "token": token,
                 "chat_id": str(existing["chat_id"]),
                 "bot_username": existing.get("bot_username", ""),
+            }
+
+    cfg_token = str((existing_cfg or {}).get("telegram_bot_token", "")).strip()
+    cfg_chat_id = str((existing_cfg or {}).get("telegram_chat_id", "")).strip()
+    if cfg_token and cfg_chat_id:
+        username = _username_for_existing_token(cfg_token)
+        label = f"@{username}" if username else "existing Telegram control plane"
+        print(f"  [1] Reuse {label}  [2] Pair a different bot/chat")
+        reuse_cfg = ui.choice("", ["1", "2"], default="1")
+        if reuse_cfg == "1":
+            state.mark(
+                "telegram",
+                {
+                    "bot_username": username,
+                    "chat_id": cfg_chat_id,
+                    "verified_at": utc_now_iso(),
+                },
+            )
+            return {
+                "token": cfg_token,
+                "chat_id": cfg_chat_id,
+                "bot_username": username,
             }
 
     if dry_run:
@@ -136,4 +166,3 @@ def run(state: State, repo_full_name: str, *, dry_run: bool = False) -> dict[str
         },
     )
     return {"token": token, "chat_id": selected["id"], "bot_username": username}
-

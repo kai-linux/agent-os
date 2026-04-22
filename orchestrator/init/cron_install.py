@@ -95,12 +95,29 @@ def _wait_for_dispatcher_tick(log_path: Path, timeout_seconds: int = 90) -> bool
     return False
 
 
-def run(state: State, *, dry_run: bool = False) -> None:
+def _print_manual_instructions() -> None:
+    print(f"Manual cron setup selected. No crontab changes were made.")
+    print(f"See: {ROOT / 'CRON.md'}")
+    print(f"Use /path/to/agent-os = {ROOT}")
+    print("You can re-run `bin/agentos init` later and choose automatic install if you want.")
+
+
+def run(state: State, *, dry_run: bool = False) -> str:
+    print("How should cron be configured?")
+    print("  [1] Manual setup via CRON.md (Recommended)")
+    print("  [2] Install/update crontab automatically")
+    choice = ui.choice("", ["1", "2"], default="1")
+    if choice == "1":
+        state.mark("cron_setup_mode", "manual")
+        _print_manual_instructions()
+        return "manual"
+
     current = _current_crontab()
     new_block = build_managed_block()
     merged, changed = merge_block(current, new_block)
     if not changed and state.get("cron_installed_at"):
-        return
+        state.mark("cron_setup_mode", "automatic")
+        return "automatic"
 
     if BLOCK_BEGIN in current and changed:
         _, old_block = strip_managed_block(current)
@@ -116,15 +133,19 @@ def run(state: State, *, dry_run: bool = False) -> None:
         print("\n  [1] Replace  [2] Skip  [3] Abort")
         choice = ui.choice("", ["1", "2", "3"], default="1")
         if choice == "2":
-            return
+            state.mark("cron_setup_mode", "manual")
+            _print_manual_instructions()
+            return "manual"
         if choice == "3":
             raise RuntimeError("Aborted by user")
 
     if not dry_run:
         _install_crontab(merged)
     state.mark("cron_installed_at", utc_now_iso())
+    state.mark("cron_setup_mode", "automatic")
 
     if dry_run:
-        return
+        return "automatic"
     log_path = ROOT / "runtime" / "logs" / "dispatcher.log"
     _wait_for_dispatcher_tick(log_path, timeout_seconds=90)
+    return "automatic"
