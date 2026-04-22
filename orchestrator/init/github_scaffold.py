@@ -179,6 +179,18 @@ def _ensure_project(owner: str, repo_name: str) -> dict[str, str | int]:
             "project_url": existing["url"],
         }
     project = gh_json(["project", "create", "--owner", owner, "--title", repo_name, "--format", "json"], timeout=60)
+    gh_run(
+        [
+            "project",
+            "edit",
+            str(project["number"]),
+            "--owner",
+            owner,
+            "--visibility",
+            "PRIVATE",
+        ],
+        timeout=60,
+    )
     return {
         "project_id": project["id"],
         "project_number": project["number"],
