@@ -14,9 +14,11 @@ leave it for the operator.
 """
 from __future__ import annotations
 
+from copy import deepcopy
 from unittest.mock import MagicMock
 
 from orchestrator import pr_monitor
+from orchestrator.pr_risk_assessment import RiskAssessment
 
 
 def _make_pr(mergeable: str = "MERGEABLE", merge_state: str = "CLEAN") -> dict:
@@ -156,3 +158,70 @@ def test_stuck_pr_alert_is_deduped_per_stage():
         "dedup_key": "stuck-pr:r/x:32:escalate",
     }
     assert ev1["dedup_key"] != ev2["dedup_key"]
+
+
+def test_monitor_prs_work_verifier_block_clears_poisoned_attempts(monkeypatch, tmp_path):
+    pr = {
+        "number": 32,
+        "url": "https://github.com/owner/repo/pull/32",
+        "title": "Agent: task-123",
+        "body": "Automated changes from agent branch `agent/task-123`.\n\n## Original Task ID\ntask-123\n",
+        "headRefName": "agent/task-123",
+        "mergeable": "MERGEABLE",
+        "mergeStateStatus": "CLEAN",
+        "isDraft": False,
+    }
+    state = {pr["url"]: {"attempts": 3}}
+    saves: list[dict] = []
+    stuck_calls: list[int] = []
+    merge_calls: list[int] = []
+
+    monkeypatch.setattr(
+        pr_monitor,
+        "load_config",
+        lambda: {
+            "github_projects": {
+                "demo": {
+                    "repos": [{"github_repo": "owner/repo", "key": "demo"}],
+                }
+            }
+        },
+    )
+    monkeypatch.setattr(pr_monitor, "runtime_paths", lambda cfg: {"ROOT": tmp_path, "LOGS": tmp_path})
+    monkeypatch.setattr(pr_monitor, "_load_state", lambda paths: state)
+    monkeypatch.setattr(pr_monitor, "_save_state", lambda paths, current: saves.append(deepcopy(current)))
+    monkeypatch.setattr(pr_monitor, "_close_fork_prs", lambda repos: None)
+    monkeypatch.setattr(pr_monitor, "_close_stale_redundant_agent_prs", lambda repo: False)
+    monkeypatch.setattr(pr_monitor, "_create_prs_for_orphan_branches", lambda cfg, repos: None)
+    monkeypatch.setattr(pr_monitor, "_cleanup_stale_ci_remediation_issues", lambda cfg, repo, current: False)
+    monkeypatch.setattr(pr_monitor, "_list_agent_prs", lambda repo: [pr])
+    monkeypatch.setattr(pr_monitor, "_repo_has_active_workflows", lambda repo: True)
+    monkeypatch.setattr(pr_monitor, "_get_pr_checks", lambda repo, pr_number: [{"name": "test", "state": "SUCCESS", "bucket": "pass"}])
+    monkeypatch.setattr(pr_monitor, "_reconcile_open_pr_state", lambda cfg, repo, current_pr, checks, current: False)
+    monkeypatch.setattr(
+        pr_monitor,
+        "assess_pr_risk",
+        lambda repo, pr_number: RiskAssessment(
+            level="low",
+            files_changed=2,
+            lines_changed=8,
+            has_source_changes=True,
+            has_test_changes=True,
+        ),
+    )
+    monkeypatch.setattr(pr_monitor, "_post_risk_comment", lambda *args, **kwargs: None)
+    monkeypatch.setattr(pr_monitor, "_send_risk_telegram", lambda *args, **kwargs: None)
+    monkeypatch.setattr(pr_monitor, "_quality_harness_gate", lambda *args, **kwargs: (True, "passed"))
+    monkeypatch.setattr(pr_monitor, "_work_verifier_gate", lambda *args, **kwargs: (False, "missing linked issue"))
+    monkeypatch.setattr(pr_monitor, "_handle_stuck_merge_attempts", lambda *args, **kwargs: stuck_calls.append(1))
+    monkeypatch.setattr(pr_monitor, "_try_merge", lambda *args, **kwargs: merge_calls.append(1) or True)
+    monkeypatch.setattr(pr_monitor, "generate_followup_issues", lambda cfg, repo: [])
+    monkeypatch.setattr(pr_monitor, "_prompt_labeled_field_failures", lambda cfg, repo: None)
+    monkeypatch.setattr("orchestrator.control_state.is_repo_disabled", lambda *args, **kwargs: False)
+
+    pr_monitor.monitor_prs()
+
+    assert not stuck_calls
+    assert not merge_calls
+    assert "attempts" not in state[pr["url"]]
+    assert any(pr["url"] in snapshot and "attempts" not in snapshot[pr["url"]] for snapshot in saves)

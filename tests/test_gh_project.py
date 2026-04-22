@@ -394,19 +394,58 @@ def test_create_pr_for_branch_recovers_when_pr_already_exists(monkeypatch):
 
 def test_create_prs_for_orphan_branches_audits_opened_pr(monkeypatch):
     audit_calls = []
+    pr_calls = []
 
     monkeypatch.setattr(pm, "_list_agent_branches", lambda repo: ["agent/task-123"])
     monkeypatch.setattr(pm, "_open_pr_branches", lambda repo: [])
     monkeypatch.setattr(pm, "_branch_has_commits_ahead_of_main", lambda repo, branch: True)
     monkeypatch.setattr(pm, "_find_merged_pr_for_task", lambda repo, task_id: None)
     monkeypatch.setattr(pm, "_find_issue_for_task", lambda repo, task_id: 42)
-    monkeypatch.setattr(pm, "create_pr_for_branch", lambda repo, branch, title, body: "https://github.com/owner/repo/pull/7")
+    monkeypatch.setattr(
+        pm,
+        "create_pr_for_branch",
+        lambda repo, branch, title, body: pr_calls.append((repo, branch, title, body)) or "https://github.com/owner/repo/pull/7",
+    )
     monkeypatch.setattr(pm, "append_audit_event", lambda cfg, event_type, payload: audit_calls.append((event_type, payload)))
 
     pm._create_prs_for_orphan_branches({"root_dir": "/tmp/test-root"}, {"owner/repo"})
 
+    assert pr_calls == [
+        (
+            "owner/repo",
+            "agent/task-123",
+            "Agent: task-123",
+            "Automated changes for issue #42\n\n## Original Task ID\ntask-123\n",
+        )
+    ]
     assert audit_calls and audit_calls[0][0] == "autonomous_pr_opened"
     assert audit_calls[0][1]["issue_number"] == 42
+
+
+def test_find_issue_for_task_matches_dispatch_comment(monkeypatch):
+    calls = []
+
+    def fake_gh_json(cmd):
+        calls.append(cmd)
+        if "--search" in cmd:
+            return []
+        return [
+            {
+                "number": 42,
+                "body": "Issue body without task id.",
+                "comments": [
+                    {
+                        "body": "🤖 Dispatched to orchestrator.\n\nTask ID: `task-123`\nProject key: `agent-os`",
+                    }
+                ],
+                "updatedAt": "2026-04-21T10:23:49Z",
+            }
+        ]
+
+    monkeypatch.setattr(pm, "gh_json", fake_gh_json)
+
+    assert pm._find_issue_for_task("owner/repo", "task-123") == 42
+    assert len(calls) == 2
 
 
 def test_try_merge_audits_successful_merge(monkeypatch):

@@ -299,19 +299,50 @@ def _find_issue_for_task(repo: str, task_id: str) -> int | None:
     """Search for an open or recently closed issue that was dispatched for this task."""
     if not task_id:
         return None
+
+    def _matches_issue(issue: dict) -> bool:
+        body = str(issue.get("body") or "")
+        if task_id in body or f"agent/{task_id}" in body:
+            return True
+        for comment in issue.get("comments") or []:
+            comment_body = str((comment or {}).get("body") or "")
+            if task_id in comment_body or f"agent/{task_id}" in comment_body:
+                return True
+        return False
+
     try:
         issues = gh_json([
             "issue", "list", "-R", repo, "--state", "all",
-            "--search", task_id, "--json", "number,body",
+            "--search", task_id, "--json", "number,body,comments",
             "--limit", "10",
         ]) or []
     except Exception:
-        return None
+        issues = []
     for issue in issues:
-        body = issue.get("body", "")
-        if task_id in body or f"agent/{task_id}" in body:
+        if _matches_issue(issue):
+            return int(issue["number"])
+
+    try:
+        recent_issues = gh_json([
+            "issue", "list", "-R", repo, "--state", "all",
+            "--json", "number,body,comments,updatedAt",
+            "--limit", "200",
+        ]) or []
+    except Exception:
+        return None
+    for issue in recent_issues:
+        if _matches_issue(issue):
             return int(issue["number"])
     return None
+
+
+def _clear_merge_attempt_state(pr_state: dict) -> bool:
+    changed = False
+    for key in ("attempts", "auto_reset_used"):
+        if key in pr_state:
+            pr_state.pop(key, None)
+            changed = True
+    return changed
 
 
 def _find_merged_pr_for_task(repo: str, task_id: str) -> dict | None:
@@ -374,9 +405,15 @@ def _create_prs_for_orphan_branches(cfg: dict, repos: set[str]):
             # Try to find the linked issue number for proper cleanup on merge
             issue_number = _find_issue_for_task(repo, task_id)
             if issue_number:
-                body = f"Automated changes for issue #{issue_number}"
+                body = (
+                    f"Automated changes for issue #{issue_number}\n\n"
+                    f"## Original Task ID\n{task_id}\n"
+                )
             else:
-                body = f"Automated changes from agent branch `{branch}`."
+                body = (
+                    f"Automated changes from agent branch `{branch}`.\n\n"
+                    f"## Original Task ID\n{task_id}\n"
+                )
             pr_url = create_pr_for_branch(repo, branch, title, body)
             if pr_url:
                 append_audit_event(
@@ -1605,17 +1642,6 @@ def monitor_prs():
                 print(f"  PR #{pr_number}: checks pending, will retry next poll")
                 continue
 
-            if attempts >= MAX_MERGE_ATTEMPTS:
-                # Hitting max on a PR that is still CLEAN/MERGEABLE with no
-                # remediation issue almost always means pr_monitor itself died
-                # mid-poll before it could merge (e.g. the 2026-04-21
-                # work_verifier .format() crash on liminalconsultants#32).
-                # Self-heal: surface once via Telegram, auto-reset the counter
-                # one time so the next poll gets a clean shot, then escalate
-                # if it happens again.
-                _handle_stuck_merge_attempts(cfg, repo, pr, pr_state, paths, state)
-                continue
-
             mergeable = (pr.get("mergeable") or "").upper()
             if mergeable == "CONFLICTING":
                 print(f"  PR #{pr_number}: has merge conflicts, attempting auto-rebase...")
@@ -1643,6 +1669,8 @@ def monitor_prs():
             harness_ok, harness_reason = _quality_harness_gate(cfg, repo, pr_number)
             if not harness_ok:
                 print(f"  PR #{pr_number}: quality harness gate blocked merge ({harness_reason})")
+                if _clear_merge_attempt_state(pr_state):
+                    _save_state(paths, state)
                 try:
                     add_issue_comment(
                         repo,
@@ -1662,7 +1690,22 @@ def monitor_prs():
             _save_state(paths, state)
             if not verifier_ok:
                 print(f"  PR #{pr_number}: work verifier blocked merge ({verifier_reason})")
+                if _clear_merge_attempt_state(pr_state):
+                    _save_state(paths, state)
                 continue
+
+            merge_attempts = int(pr_state.get("attempts", 0) or 0)
+            if merge_attempts >= MAX_MERGE_ATTEMPTS:
+                # Hitting max only matters after every non-merge gate has
+                # passed. If the quality harness or work verifier is blocking,
+                # this is not a stuck-merge condition and should not page.
+                _handle_stuck_merge_attempts(cfg, repo, pr, pr_state, paths, state)
+                continue
+
+            new_attempts = merge_attempts + 1
+            state.setdefault(pr_url, {})["attempts"] = new_attempts
+            _save_state(paths, state)
+            print(f"  PR #{pr_number}: all checks passed, merging (attempt {new_attempts}/{MAX_MERGE_ATTEMPTS})")
 
             if _try_merge(cfg, repo, pr_number):
                 print(f"  PR #{pr_number}: merged successfully")
