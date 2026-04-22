@@ -18,13 +18,42 @@ def _log_error(message: str) -> None:
         handle.write(message.rstrip() + "\n")
 
 
+def _summarize_state(state: State) -> None:
+    intake = state.get("intake", {})
+    github = state.get("github", {})
+    label = github.get("repo_name", "pending repo")
+    print(f"Saved unfinished setup: {label}")
+    if intake:
+        print(f"  Idea: {intake.get('idea', '—')}")
+        print(f"  Kind: {intake.get('kind', '—')}")
+        print(f"  Stack pref: {intake.get('stack_preference', '—')}")
+        print(f"  Success: {intake.get('success_criteria', '—')}")
+    if github.get("inputs"):
+        print(f"  Repo draft: {github['inputs'].get('owner', '')}/{github['inputs'].get('repo_name', '')}")
+    print(f"  State file: {state.path}")
+
+
+def _decide_resume_action(state: State) -> str:
+    _summarize_state(state)
+    print("\n  [1] Resume saved setup")
+    print("  [2] Re-enter answers from Step 1")
+    print("  [3] Discard saved setup and start fresh")
+    return ui.choice("", ["1", "2", "3"], default="1")
+
+
 def _select_resume_state() -> State | None:
     states = resumable_states()
     if not states:
         return None
     if len(states) == 1:
-        ui.info(f"Resuming unfinished init for {states[0].get('github.repo_name', 'pending repo')}")
-        return states[0]
+        action = _decide_resume_action(states[0])
+        if action == "1":
+            return states[0]
+        if action == "2":
+            states[0].reset()
+            return states[0]
+        states[0].path.unlink(missing_ok=True)
+        return None
     print("Unfinished init runs found:")
     for idx, state in enumerate(states, start=1):
         label = state.get("github.repo_name", state.path.stem)
@@ -35,7 +64,15 @@ def _select_resume_state() -> State | None:
         if choice.lower() == "n":
             return None
         if choice.isdigit() and 1 <= int(choice) <= len(states):
-            return states[int(choice) - 1]
+            selected = states[int(choice) - 1]
+            action = _decide_resume_action(selected)
+            if action == "1":
+                return selected
+            if action == "2":
+                selected.reset()
+                return selected
+            selected.path.unlink(missing_ok=True)
+            return None
         ui.warn("Choose one of the listed states or 'n'.")
 
 

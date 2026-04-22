@@ -110,6 +110,10 @@ class State:
     def complete(self) -> None:
         self.mark("completed_at", utc_now_iso())
 
+    def reset(self) -> None:
+        self.data = _new_state()
+        self.save()
+
 
 def list_state_paths() -> list[Path]:
     return sorted(init_state_dir().glob("*.json"))
@@ -133,4 +137,3 @@ def delete_state(slug: str) -> Path:
     if path.exists():
         path.unlink()
     return path
-

@@ -42,3 +42,16 @@ def test_delete_state_uses_slugified_repo_name(monkeypatch, tmp_path):
     assert deleted.name == f"{slug}.json"
     assert not deleted.exists()
 
+
+def test_state_reset_replaces_saved_answers(monkeypatch, tmp_path):
+    monkeypatch.setattr("orchestrator.init.state.ROOT", tmp_path)
+    state = State.for_slug("demo")
+    state.mark("intake.idea", "old idea")
+    state.mark("github.repo_name", "demo")
+
+    state.reset()
+
+    reloaded = State.for_slug("demo")
+    assert reloaded.get("intake") is None
+    assert reloaded.get("github") is None
+    assert reloaded.get("completed_at") is None
