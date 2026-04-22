@@ -506,6 +506,53 @@ def test_sync_result_complete_without_pr_closes_issue(monkeypatch):
     assert project_status_calls == ["opt-done"]
 
 
+def test_sync_result_rescued_complete_marks_issue_done_without_pr(monkeypatch):
+    monkeypatch.setattr("orchestrator.github_sync.load_config", lambda: _cfg())
+    monkeypatch.setattr("orchestrator.github_sync.add_issue_comment", lambda repo, issue, body: None)
+    label_calls = []
+    monkeypatch.setattr(
+        "orchestrator.github_sync.edit_issue_labels",
+        lambda repo, issue, add=None, remove=None: label_calls.append({"add": add, "remove": remove}),
+    )
+    create_pr_calls = []
+    monkeypatch.setattr(
+        "orchestrator.github_sync.create_pr_for_branch",
+        lambda *args, **kwargs: create_pr_calls.append((args, kwargs)) or "https://github.com/kai-linux/agent-os/pull/71",
+    )
+    gh_calls = []
+    monkeypatch.setattr("orchestrator.github_sync.gh", lambda args: gh_calls.append(args))
+    monkeypatch.setattr(
+        "orchestrator.github_sync.query_project",
+        lambda project_number, owner: {
+            "project_id": "proj",
+            "status_field_id": "field",
+            "status_options": {"In Progress": "opt-in-progress", "Done": "opt-done", "Blocked": "opt-blocked"},
+            "items": [{"url": "https://github.com/kai-linux/agent-os/issues/64", "item_id": "item-64"}],
+        },
+    )
+    project_status_calls = []
+    monkeypatch.setattr(
+        "orchestrator.github_sync.set_item_status",
+        lambda project_id, item_id, field_id, option_id: project_status_calls.append(option_id),
+    )
+
+    github_sync.sync_result(
+        _meta(),
+        {"status": "complete", "summary": "ok", "next_step": "none", "rescued_by_orchestrator": True},
+        "abc123",
+    )
+
+    assert create_pr_calls == []
+    assert label_calls == [
+        {
+            "add": ["done"],
+            "remove": ["in-progress", "ready", "blocked", "agent-dispatched"],
+        }
+    ]
+    assert gh_calls == [["issue", "close", "64", "-R", "kai-linux/agent-os"]]
+    assert project_status_calls == ["opt-done"]
+
+
 def test_sync_result_partial_skips_terminal_issue_and_reconciles_done(monkeypatch):
     monkeypatch.setattr("orchestrator.github_sync.load_config", lambda: _cfg())
     comments = []

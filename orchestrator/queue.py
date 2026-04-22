@@ -2465,6 +2465,7 @@ def rescue_git_progress(
 
     rescued = dict(result)
     rescued["status"] = "complete"
+    rescued["rescued_by_orchestrator"] = True
     summary = result.get("summary", "Recovered worktree changes.")
     rescued["summary"] = f"{summary} Orchestrator rescued and pushed the worktree changes."
     rescued["next_step"] = "Monitor the pushed branch and rerun CI/PR checks."

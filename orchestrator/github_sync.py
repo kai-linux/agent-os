@@ -497,9 +497,11 @@ def sync_result(meta: dict, result: dict, commit_hash: str | None):
     if followup_issue_url:
         comment += f"\n### Follow-up issue\n{followup_issue_url}\n"
 
+    rescued_complete = status == "complete" and bool(result.get("rescued_by_orchestrator"))
+
     pr_url = None
     has_commits = bool(commit_hash)
-    if has_commits:
+    if has_commits and not rescued_complete:
         pr_url = create_pr_for_branch(
             repo,
             branch,

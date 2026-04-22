@@ -1478,6 +1478,7 @@ def test_rescue_git_progress_marks_result_complete(tmp_path, monkeypatch):
     assert rescued is not None
     assert pushed is True
     assert rescued["status"] == "complete"
+    assert rescued["rescued_by_orchestrator"] is True
     assert "rescued and pushed" in rescued["summary"]
 
 
