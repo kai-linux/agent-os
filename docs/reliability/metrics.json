@@ -1,45 +1,45 @@
 {
-  "generated_at": "2026-04-21T03:00:01.580955+00:00",
+  "generated_at": "2026-04-22T03:00:01.658445+00:00",
   "github": {
     "forks": 0,
-    "open_issues": 18,
+    "open_issues": 39,
     "repo": "kai-linux/agent-os",
     "stars": 2
   },
   "momentum": {
     "current_week": {
-      "escalation_rate": 0.16666666666666666,
-      "mean_completion_hours": 0.09720238095238096,
-      "success_rate": 0.5833333333333334,
-      "successes": 35,
-      "total": 60
+      "escalation_rate": 0.17777777777777778,
+      "mean_completion_hours": 0.09921455938697318,
+      "success_rate": 0.6444444444444445,
+      "successes": 58,
+      "total": 90
     },
     "prior_week": {
       "escalation_rate": 0.0,
-      "mean_completion_hours": 0.12698397435897435,
-      "success_rate": 0.9285714285714286,
-      "successes": 26,
-      "total": 28
+      "mean_completion_hours": 0.11288374485596708,
+      "success_rate": 0.9310344827586207,
+      "successes": 27,
+      "total": 29
     }
   },
   "per_agent": [
     {
       "agent": "claude",
-      "rate": 0.7681159420289855,
-      "successes": 53,
-      "total": 69
+      "rate": 0.7746478873239436,
+      "successes": 55,
+      "total": 71
+    },
+    {
+      "agent": "codex",
+      "rate": 0.6666666666666666,
+      "successes": 24,
+      "total": 36
     },
     {
       "agent": "deepseek",
       "rate": 0.625,
       "successes": 5,
       "total": 8
-    },
-    {
-      "agent": "codex",
-      "rate": 0.2857142857142857,
-      "successes": 2,
-      "total": 7
     },
     {
       "agent": "gemini",
@@ -49,14 +49,6 @@
     }
   ],
   "rolling_14_day": [
-    {
-      "blocked": 0,
-      "date": "2026-04-08",
-      "escalation_rate": 0.0,
-      "success_rate": 1.0,
-      "successes": 5,
-      "total": 5
-    },
     {
       "blocked": 0,
       "date": "2026-04-09",
@@ -154,8 +146,16 @@
       "total": 0
     },
     {
-      "blocked": 0,
+      "blocked": 6,
       "date": "2026-04-21",
+      "escalation_rate": 0.1714,
+      "success_rate": 0.8,
+      "successes": 28,
+      "total": 35
+    },
+    {
+      "blocked": 0,
+      "date": "2026-04-22",
       "escalation_rate": null,
       "success_rate": null,
       "successes": 0,
@@ -165,9 +165,9 @@
   "sources": {
     "agent_stats": {
       "available": true,
-      "latest_timestamp": "2026-04-19T15:02:43.659451+00:00",
+      "latest_timestamp": "2026-04-21T13:54:21.951086+00:00",
       "path": "runtime/metrics/agent_stats.jsonl",
-      "records": 88
+      "records": 119
     },
     "production_feedback": {
       "available": true,
@@ -177,15 +177,15 @@
   },
   "summary": {
     "escalation_rate": {
-      "escalated": 10,
-      "rate": 0.11363636363636363,
-      "total": 88
+      "escalated": 16,
+      "rate": 0.13445378151260504,
+      "total": 119
     },
-    "mean_completion_time_hours": 0.10989617486338799,
+    "mean_completion_time_hours": 0.10355653594771243,
     "task_success_rate": {
-      "rate": 0.6931818181818182,
-      "successes": 61,
-      "total": 88
+      "rate": 0.7142857142857143,
+      "successes": 85,
+      "total": 119
     }
   },
   "top_blockers": [
@@ -198,16 +198,16 @@
       "count": 8
     },
     {
+      "code": "no_diff_produced",
+      "count": 8
+    },
+    {
       "code": "quota_limited",
       "count": 7
     },
     {
-      "code": "no_diff_produced",
-      "count": 7
-    },
-    {
-      "code": "runner_failure",
-      "count": 3
+      "code": "prompt_too_large",
+      "count": 6
     }
   ],
   "window_days": 14
