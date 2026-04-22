@@ -161,16 +161,35 @@ def _preview(payload: dict[str, Any]) -> None:
         print(f"    #{idx}  {issue['title']}")
 
 
+def build_revision_prompt(intake: dict[str, str], payload: dict[str, Any], feedback: str) -> str:
+    return (
+        build_prompt(intake)
+        + "\nThe last proposal was:\n"
+        + json.dumps(payload, indent=2)
+        + "\n\nThe operator wants changes. Revise the proposal accordingly.\n"
+        + f"Operator feedback:\n{feedback}\n\n"
+        + "Keep any good parts that still fit, but update the stack, rationale, NORTH_STAR.md, and seed issues where needed. "
+        + "Output the same JSON schema only."
+    )
+
+
 def _confirm_payload(initial_payload: dict[str, Any], intake: dict[str, str]) -> dict[str, Any]:
     payload = initial_payload
     regen_count = 0
     while True:
         _preview(payload)
-        print("\n  [1] Looks good, proceed  [2] Regenerate  [3] Edit manually  [4] Abort")
-        choice = ui.choice("", ["1", "2", "3", "4"], default="1")
+        print("\n  [1] Looks good, proceed  [2] Revise with feedback  [3] Regenerate  [4] Edit manually  [5] Abort")
+        choice = ui.choice("", ["1", "2", "3", "4", "5"], default="1")
         if choice == "1":
             return payload
         if choice == "2":
+            feedback = ui.prompt("What should change? Say it in plain language.")
+            if not feedback.strip():
+                ui.warn("Please describe what you want changed.")
+                continue
+            payload = parse_charter_response(call_architect(build_revision_prompt(intake, payload, feedback)))
+            continue
+        if choice == "3":
             if regen_count >= 1:
                 ui.warn("Automatic regeneration is capped at one retry.")
                 continue
@@ -178,7 +197,7 @@ def _confirm_payload(initial_payload: dict[str, Any], intake: dict[str, str]) ->
             payload = parse_charter_response(call_architect(prompt))
             regen_count += 1
             continue
-        if choice == "3":
+        if choice == "4":
             payload = _edit_payload(payload)
             continue
         raise CharterError("Aborted by user")

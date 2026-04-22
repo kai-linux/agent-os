@@ -10,7 +10,14 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from orchestrator.init.charter import CharterError, call_architect, parse_charter_response, strip_code_fences, validate_charter_payload
+from orchestrator.init.charter import (
+    CharterError,
+    build_revision_prompt,
+    call_architect,
+    parse_charter_response,
+    strip_code_fences,
+    validate_charter_payload,
+)
 
 
 def _payload():
@@ -88,3 +95,14 @@ def test_call_architect_raises_combined_error_when_both_agents_fail(monkeypatch)
         call_architect("Return JSON")
     assert "claude call failed" in str(exc.value)
     assert "codex call failed" in str(exc.value)
+
+
+def test_build_revision_prompt_includes_plain_language_feedback():
+    prompt = build_revision_prompt(
+        {"idea": "a game", "kind": "other", "stack_preference": "auto", "success_criteria": "for a toddler"},
+        _payload(),
+        "I don't want Netlify. Keep it browser-based but use simpler deployment assumptions.",
+    )
+    assert "Operator feedback" in prompt
+    assert "I don't want Netlify" in prompt
+    assert '"stack_decision": "Quart + SQLite"' in prompt
