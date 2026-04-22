@@ -425,7 +425,7 @@ def _meta() -> dict:
     }
 
 
-def test_sync_result_complete_with_pr_keeps_issue_in_progress(monkeypatch):
+def test_sync_result_complete_with_pr_marks_issue_done_without_closing(monkeypatch):
     monkeypatch.setattr("orchestrator.github_sync.load_config", lambda: _cfg())
     comments = []
     monkeypatch.setattr("orchestrator.github_sync.add_issue_comment", lambda repo, issue, body: comments.append(body))
@@ -460,12 +460,12 @@ def test_sync_result_complete_with_pr_keeps_issue_in_progress(monkeypatch):
     assert comments and "https://github.com/kai-linux/agent-os/pull/71" in comments[0]
     assert label_calls == [
         {
-            "add": ["in-progress", "agent-dispatched"],
-            "remove": ["ready", "blocked", "done"],
+            "add": ["done"],
+            "remove": ["in-progress", "ready", "blocked", "agent-dispatched"],
         }
     ]
     assert gh_calls == []
-    assert project_status_calls == ["opt-in-progress"]
+    assert project_status_calls == ["opt-done"]
 
 
 def test_sync_result_complete_without_pr_closes_issue(monkeypatch):

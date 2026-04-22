@@ -534,24 +534,18 @@ def sync_result(meta: dict, result: dict, commit_hash: str | None):
         )
         if resolved_dependents:
             comment += f"\n### Resolved dependents\n{resolved_dependents} dependent debug issue(s) closed by transitive fix.\n"
-        if pr_url:
-            edit_issue_labels(
-                repo,
-                issue_number,
-                add=["in-progress", "agent-dispatched"],
-                remove=["ready", "blocked", "done"],
-            )
-            status_value = project_cfg["in_progress_value"]
-        else:
-            edit_issue_labels(
-                repo,
-                issue_number,
-                add=["done"],
-                remove=["in-progress", "ready", "blocked", "agent-dispatched"],
-            )
-            status_value = project_cfg["done_value"]
+        edit_issue_labels(
+            repo,
+            issue_number,
+            add=["done"],
+            remove=["in-progress", "ready", "blocked", "agent-dispatched"],
+        )
+        status_value = project_cfg["done_value"]
 
-            # Close the GitHub issue only when there is no PR left to validate/merge.
+        # Only close the issue automatically when no PR was created. When a PR
+        # exists, leave the issue open for human review/merge while still
+        # reflecting that the implementation task is complete.
+        if not pr_url:
             try:
                 gh(["issue", "close", str(issue_number), "-R", repo])
             except Exception as e:
