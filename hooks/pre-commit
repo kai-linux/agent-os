@@ -16,26 +16,31 @@ yellow(){ printf '\033[33m%s\033[0m\n' "$*" >&2; }
 
 fail=0
 
-mapfile -t staged < <(git diff --cached --name-only --diff-filter=ACMR)
+staged=()
+while IFS= read -r line; do
+  staged+=("$line")
+done < <(git diff --cached --name-only --diff-filter=ACMR)
 
-for f in "${staged[@]}"; do
-  case "$f" in
-    config.yaml|config.yml)
-      red "✖ refusing to commit $f — secrets file (rotate via .gitignore + local-only)."
-      fail=1
-      ;;
-    objectives/*.yaml|objectives/*.yml)
-      if [[ "$f" != "objectives/example.yaml" && "$f" != "objectives/example.yml" ]]; then
-        red "✖ refusing to commit $f — objectives carry repo tokens. Only objectives/example.yaml is allowed."
+if [[ ${#staged[@]} -gt 0 ]]; then
+  for f in "${staged[@]}"; do
+    case "$f" in
+      config.yaml|config.yml)
+        red "✖ refusing to commit $f — secrets file (rotate via .gitignore + local-only)."
         fail=1
-      fi
-      ;;
-    .agent_result.md)
-      red "✖ refusing to commit .agent_result.md — worktree-local agent artifact, gitignored. Tracking it pollutes PRs (see #229)."
-      fail=1
-      ;;
-  esac
-done
+        ;;
+      objectives/*.yaml|objectives/*.yml)
+        if [[ "$f" != "objectives/example.yaml" && "$f" != "objectives/example.yml" ]]; then
+          red "✖ refusing to commit $f — objectives carry repo tokens. Only objectives/example.yaml is allowed."
+          fail=1
+        fi
+        ;;
+      .agent_result.md)
+        red "✖ refusing to commit .agent_result.md — worktree-local agent artifact, gitignored. Tracking it pollutes PRs (see #229)."
+        fail=1
+        ;;
+    esac
+  done
+fi
 
 # Token-shape scan over the staged diff itself. -U0 keeps the diff small and
 # avoids matching unchanged context lines.
