@@ -106,18 +106,35 @@ def validate_charter_payload(payload: dict[str, Any]) -> None:
                 raise CharterError(f"Missing issue field: {field}")
 
 
-def call_claude(prompt: str) -> str:
+def call_architect(prompt: str) -> str:
+    errors: list[str] = []
+
+    claude_bin = os.environ.get("CLAUDE_BIN", "claude")
     result = subprocess.run(
-        ["claude", "-p", prompt],
+        [claude_bin, "-p", prompt],
         capture_output=True,
         text=True,
         timeout=300,
         check=False,
     )
-    if result.returncode != 0:
-        stderr = result.stderr.strip() or result.stdout.strip()
-        raise CharterError(f"claude call failed: {stderr}")
-    return result.stdout.strip()
+    if result.returncode == 0:
+        return result.stdout.strip()
+    detail = (result.stderr or result.stdout or "").strip()
+    errors.append(f"claude call failed: {detail}")
+
+    codex_bin = os.environ.get("CODEX_BIN", "codex")
+    result = subprocess.run(
+        [codex_bin, "exec", "--skip-git-repo-check", prompt],
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=False,
+    )
+    if result.returncode == 0:
+        return result.stdout.strip()
+    detail = (result.stderr or result.stdout or "").strip()
+    errors.append(f"codex call failed: {detail}")
+    raise CharterError(" | ".join(errors))
 
 
 def _edit_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -158,7 +175,7 @@ def _confirm_payload(initial_payload: dict[str, Any], intake: dict[str, str]) ->
                 ui.warn("Automatic regeneration is capped at one retry.")
                 continue
             prompt = build_prompt(intake) + f"\nThe last attempt proposed this stack: {payload['stack_decision']}. Try a meaningfully different angle."
-            payload = parse_charter_response(call_claude(prompt))
+            payload = parse_charter_response(call_architect(prompt))
             regen_count += 1
             continue
         if choice == "3":
@@ -273,7 +290,7 @@ def run(state: State, intake: dict[str, str], github: dict[str, Any], *, dry_run
     charter_data = state.get("charter")
     if not charter_data or "seed_issues" not in charter_data:
         ui.info("Asking claude to propose a stack and draft the first issues...")
-        payload = parse_charter_response(call_claude(build_prompt(intake)))
+        payload = parse_charter_response(call_architect(build_prompt(intake)))
         payload = _confirm_payload(payload, intake)
         state.mark("charter", payload)
         charter_data = payload
