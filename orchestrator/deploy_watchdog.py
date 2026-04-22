@@ -238,10 +238,15 @@ def _signal_window(
     merged_at: datetime,
     window_minutes: int,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    raw_signals = load_external_signals(cfg, repo=github_slug, window_days=max(1, int((window_minutes * 2) / 1440) + 1))
     start = merged_at
     end = merged_at + timedelta(minutes=window_minutes)
     baseline_start = merged_at - timedelta(minutes=window_minutes)
+    raw_signals = load_external_signals(
+        cfg,
+        repo=github_slug,
+        window_days=max(1, int((window_minutes * 2) / 1440) + 1),
+        now=end,
+    )
     post_merge: list[dict[str, Any]] = []
     baseline: list[dict[str, Any]] = []
     for signal in raw_signals:

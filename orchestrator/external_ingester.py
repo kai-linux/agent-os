@@ -487,11 +487,18 @@ def run_external_ingester(cfg: dict, github_slug: str, repo_path: Path | None = 
     return fetched
 
 
-def load_external_signals(cfg: dict, *, repo: str | None = None, window_days: int = 7) -> list[dict]:
+def load_external_signals(
+    cfg: dict,
+    *,
+    repo: str | None = None,
+    window_days: int = 7,
+    now: datetime | None = None,
+) -> list[dict]:
     path = external_signals_path(cfg)
     if not path.exists():
         return []
-    cutoff = datetime.now(tz=timezone.utc) - timedelta(days=max(1, window_days))
+    reference = now or datetime.now(tz=timezone.utc)
+    cutoff = reference - timedelta(days=max(1, window_days))
     records: list[dict] = []
     with path.open(encoding="utf-8") as handle:
         for line in handle:
