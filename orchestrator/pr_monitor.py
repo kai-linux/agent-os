@@ -161,6 +161,34 @@ def _try_union_resolve(worktree_path: Path, conflict_files: list[str]) -> bool:
     return True
 
 
+def _detect_post_rebase_test_command(worktree_path: Path) -> list[str] | None:
+    """Pick the right test runner for post-rebase validation based on the repo layout.
+
+    Hardcoding ``python3 -m pytest tests/`` previously caused every conflicting
+    PR on a JS or static-content repo (eigendark-website, liminalconsultants)
+    to be force-reset, never recovered, because pytest exits non-zero when
+    there is no ``tests/`` directory. Returns ``None`` when no test runner is
+    available so the caller can skip validation rather than spuriously revert.
+    """
+    has_pytest = (worktree_path / "tests").is_dir() and (
+        (worktree_path / "pyproject.toml").exists() or (worktree_path / "setup.py").exists()
+    )
+    if has_pytest:
+        return ["python3", "-m", "pytest", "tests/", "-x", "-q", "--tb=no"]
+
+    package_json = worktree_path / "package.json"
+    if package_json.exists():
+        try:
+            data = json.loads(package_json.read_text(encoding="utf-8"))
+            scripts = data.get("scripts") or {}
+            if isinstance(scripts, dict) and "test" in scripts:
+                return ["npm", "test", "--silent", "--", "--passWithNoTests"]
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    return None
+
+
 def _rebase_pr_onto_main(repo: str, pr: dict) -> bool:
     """Rebase a conflicting agent PR branch onto main and force-push. Returns True on success."""
     branch = pr.get("headRefName", "")
@@ -232,19 +260,26 @@ def _rebase_pr_onto_main(repo: str, pr: dict) -> bool:
                 return False
 
             if step > 0:
-                # Validate with tests after conflict resolution
-                test_result = subprocess.run(
-                    ["python3", "-m", "pytest", "tests/", "-x", "-q", "--tb=no"],
-                    capture_output=True, text=True, cwd=str(worktree_path), timeout=120,
-                )
-                if test_result.returncode != 0:
-                    print(f"  Tests failed after auto-resolved rebase, reverting")
-                    # Can't abort after rebase completed — reset branch to pre-rebase state
-                    subprocess.run(
-                        ["git", "-C", str(worktree_path), "reset", "--hard", f"origin/{branch}"],
-                        capture_output=True,
+                # Validate with tests after conflict resolution. The runner
+                # depends on the project type — this script previously hardcoded
+                # pytest, which always failed on JS/static-content repos and
+                # caused every conflicting PR to be reset, never recovered.
+                test_cmd = _detect_post_rebase_test_command(worktree_path)
+                if test_cmd:
+                    test_result = subprocess.run(
+                        test_cmd,
+                        capture_output=True, text=True, cwd=str(worktree_path), timeout=180,
                     )
-                    return False
+                    if test_result.returncode != 0:
+                        print(f"  Tests failed after auto-resolved rebase, reverting")
+                        # Can't abort after rebase completed — reset branch to pre-rebase state
+                        subprocess.run(
+                            ["git", "-C", str(worktree_path), "reset", "--hard", f"origin/{branch}"],
+                            capture_output=True,
+                        )
+                        return False
+                else:
+                    print(f"  No test runner detected for {repo} — skipping post-rebase validation")
 
             # Force-push rebased branch
             subprocess.run(
