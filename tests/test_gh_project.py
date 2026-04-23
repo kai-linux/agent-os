@@ -191,6 +191,7 @@ def test_cleanup_stale_ci_remediation_issues_for_merged_pr(monkeypatch):
 def test_reconcile_open_pr_state_keeps_source_issue_in_progress(monkeypatch):
     calls = []
     monkeypatch.setattr(pm, "_extract_issue_number", lambda body: 64)
+    monkeypatch.setattr(pm, "_issue_done_or_closed", lambda repo, issue_number: False)
     monkeypatch.setattr(
         pm,
         "_mark_issue_in_progress",
@@ -210,10 +211,34 @@ def test_reconcile_open_pr_state_keeps_source_issue_in_progress(monkeypatch):
     assert calls == [("owner/repo", 64, True)]
 
 
+def test_reconcile_open_pr_state_does_not_reopen_done_source_issue(monkeypatch):
+    calls = []
+    monkeypatch.setattr(pm, "_extract_issue_number", lambda body: 64)
+    monkeypatch.setattr(pm, "_issue_done_or_closed", lambda repo, issue_number: True)
+    monkeypatch.setattr(
+        pm,
+        "_mark_issue_in_progress",
+        lambda cfg, repo, issue_number, reopen_issue, comment=None: calls.append((repo, issue_number, reopen_issue)),
+    )
+    monkeypatch.setattr(pm, "_find_issue_by_title", lambda repo, title, state="open": None)
+
+    changed = pm._reconcile_open_pr_state(
+        {},
+        "owner/repo",
+        {"number": 71, "url": "https://github.com/owner/repo/pull/71", "body": "Fixes #64"},
+        [{"name": "test", "state": "SUCCESS", "bucket": "pass"}],
+        {},
+    )
+
+    assert changed is False
+    assert calls == []
+
+
 def test_reconcile_open_pr_state_reopens_closed_remediation_and_clears_attempts(monkeypatch):
     source_calls = []
     ready_calls = []
     monkeypatch.setattr(pm, "_extract_issue_number", lambda body: 64)
+    monkeypatch.setattr(pm, "_issue_done_or_closed", lambda repo, issue_number: False)
     monkeypatch.setattr(
         pm,
         "_mark_issue_in_progress",

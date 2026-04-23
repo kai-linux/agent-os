@@ -734,6 +734,24 @@ def _mark_issue_in_progress(cfg: dict, repo: str, issue_number: int, *, reopen_i
         _set_project_issue_status(cfg, repo, issue_number, project_cfg.get("in_progress_value", "In Progress"))
 
 
+def _issue_done_or_closed(repo: str, issue_number: int) -> bool:
+    try:
+        issue = gh_json([
+            "issue", "view", str(issue_number), "-R", repo,
+            "--json", "state,labels",
+        ]) or {}
+    except Exception as e:
+        print(f"Warning: failed to inspect {repo}#{issue_number}: {e}")
+        return False
+    state = str(issue.get("state") or "").upper()
+    labels = {
+        str(label.get("name", "")).strip().lower()
+        for label in issue.get("labels", [])
+        if isinstance(label, dict)
+    }
+    return state == "CLOSED" or "done" in labels
+
+
 def _mark_issue_ready(cfg: dict, repo: str, issue_number: int, *, reopen_issue: bool, comment: str | None = None):
     _project_key, project_cfg, _repo_cfg = _find_repo_project(cfg, repo)
     if reopen_issue:
@@ -871,7 +889,7 @@ def _reconcile_open_pr_state(cfg: dict, repo: str, pr: dict, checks: list[dict],
     issue_number = _extract_issue_number(pr.get("body", ""))
     remediation_title = f"Fix CI failure on PR #{pr_number}"
 
-    if issue_number:
+    if issue_number and not _issue_done_or_closed(repo, issue_number):
         _mark_issue_in_progress(
             cfg,
             repo,
@@ -1152,40 +1170,41 @@ def _handle_ci_failure(cfg: dict, repo: str, pr: dict, checks: list[dict], attem
         except Exception as e:
             print(f"Warning: failed to post comment on #{issue_number}: {e}")
 
-        try:
-            edit_issue_labels(repo, issue_number, add=["in-progress", "agent-dispatched"], remove=["blocked", "ready", "done"])
-        except Exception as e:
-            print(f"Warning: failed to update labels on #{issue_number}: {e}")
+        if not _issue_done_or_closed(repo, issue_number):
+            try:
+                edit_issue_labels(repo, issue_number, add=["in-progress", "agent-dispatched"], remove=["blocked", "ready", "done"])
+            except Exception as e:
+                print(f"Warning: failed to update labels on #{issue_number}: {e}")
 
-        # Keep source issue in progress while its PR is still active.
-        owner = cfg.get("github_owner", "")
-        for project_cfg in cfg.get("github_projects", {}).values():
-            for repo_cfg in project_cfg.get("repos", []):
-                if repo_cfg.get("github_repo") != repo:
-                    continue
-                in_progress_value = project_cfg.get("in_progress_value", "In Progress")
-                try:
-                    info = query_project(project_cfg["project_number"], owner)
-                    option_id = info["status_options"].get(in_progress_value)
-                    if not info["status_field_id"] or not option_id:
-                        print(f"Warning: status option '{in_progress_value}' not found in project")
-                        break
-                    issue_url_prefix = f"https://github.com/{repo}/issues/{issue_number}"
-                    for item in info["items"]:
-                        if item["url"].startswith(issue_url_prefix):
-                            set_item_status(
-                                info["project_id"],
-                                item["item_id"],
-                                info["status_field_id"],
-                                option_id,
-                            )
-                            print(f"Project status set to '{in_progress_value}' for #{issue_number}")
+            # Keep source issue in progress while its PR is still active.
+            owner = cfg.get("github_owner", "")
+            for project_cfg in cfg.get("github_projects", {}).values():
+                for repo_cfg in project_cfg.get("repos", []):
+                    if repo_cfg.get("github_repo") != repo:
+                        continue
+                    in_progress_value = project_cfg.get("in_progress_value", "In Progress")
+                    try:
+                        info = query_project(project_cfg["project_number"], owner)
+                        option_id = info["status_options"].get(in_progress_value)
+                        if not info["status_field_id"] or not option_id:
+                            print(f"Warning: status option '{in_progress_value}' not found in project")
                             break
-                    else:
-                        print(f"Warning: issue #{issue_number} not found in project")
-                except Exception as e:
-                    print(f"Warning: failed to update project status: {e}")
-                break
+                        issue_url_prefix = f"https://github.com/{repo}/issues/{issue_number}"
+                        for item in info["items"]:
+                            if item["url"].startswith(issue_url_prefix):
+                                set_item_status(
+                                    info["project_id"],
+                                    item["item_id"],
+                                    info["status_field_id"],
+                                    option_id,
+                                )
+                                print(f"Project status set to '{in_progress_value}' for #{issue_number}")
+                                break
+                        else:
+                            print(f"Warning: issue #{issue_number} not found in project")
+                    except Exception as e:
+                        print(f"Warning: failed to update project status: {e}")
+                    break
 
     token = str(cfg.get("telegram_bot_token", "")).strip()
     chat_id = str(cfg.get("telegram_chat_id", "")).strip()
