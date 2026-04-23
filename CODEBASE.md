@@ -42,6 +42,17 @@
 
 ## Recent Changes
 
+### 2026-04-23 — [task-20260423-144637-review-follow-up-pr-313-high-risk] (#315 kai-linux/agent-os)
+Reviewed the PR #313 export/import shell entry points and project bundle import path. The shell wrappers correctly resolve the repository root, choose the local virtualenv Python when available, preserve arguments, and now have regression coverage exercising real `bin/aos-export` and `bin/aos-import` execution from a non-repo working directory. During validation, a narrow import archive path-boundary issue was found and fixed.
+
+**Files:** `- orchestrator/project_bundle.py`, `- tests/test_project_bundle.py`, `- .agent_result.md`
+
+**Decisions:**
+  - - Kept the shell scripts unchanged because review found their quoting, root resolution, Python selection, and argument forwarding correct.
+  - - Fixed only the discovered extraction boundary bug because it directly affects import safety and fits the high-risk review scope.
+  - - Added entry-point coverage rather than broad refactoring so future changes to the flagged shell wrappers are validated through the real commands.
+
+
 ### 2026-04-23 — [task-20260423-144539-review-follow-up-pr-312-high-risk] (#322 kai-linux/agent-os)
 Reviewed the PR #312 high-risk budget enforcement paths and fixed a dispatcher assignment gap where a specifically requested hard-stopped agent could still be persisted into mailbox frontmatter when a compliant fallback existed.
 
