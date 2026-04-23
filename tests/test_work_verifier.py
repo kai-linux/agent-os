@@ -142,6 +142,25 @@ def test_scope_findings_only_warns_when_source_changes_lack_tests_unless_issue_r
     assert any(item.category == "scope_mismatch" and item.severity == "high" for item in required)
 
 
+def test_scope_findings_does_not_block_docs_only_pr_when_issue_mentions_verify():
+    """Regression: liminalconsultants PRs #53–56 (docs/HTML/SVG only) were blocked
+    repeatedly because issue bodies casually mentioned "verify" or "test", but
+    the repo has no test infrastructure and the PR has no source changes to test.
+    The high-severity scope_mismatch must require has_source_changes=True."""
+    docs_only = RiskAssessment(
+        level="low",
+        files_changed=3,
+        lines_changed=200,
+        has_source_changes=False,
+        has_test_changes=False,
+    )
+
+    issue_body = "## Goal\nVerify that the breadcrumb infrastructure is discoverable and accessible."
+    findings = _scope_findings(docs_only, issue_body=issue_body)
+    assert not any(item.category == "scope_mismatch" and item.severity == "high" for item in findings)
+    assert not any(item.category == "missing_tests" for item in findings)
+
+
 def test_verify_pull_request_blocks_on_stub_without_llm(monkeypatch, tmp_path):
     cfg = {"root_dir": str(tmp_path)}
 

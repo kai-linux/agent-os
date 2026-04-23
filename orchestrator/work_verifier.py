@@ -381,7 +381,7 @@ def _scope_findings(risk: RiskAssessment, *, issue_body: str) -> list[Verificati
                 severity="medium",
             )
         )
-    if expects_tests and not risk.has_test_changes:
+    if expects_tests and risk.has_source_changes and not risk.has_test_changes:
         findings.append(
             VerificationFinding(
                 category="scope_mismatch",
