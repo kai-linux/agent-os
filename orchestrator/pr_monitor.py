@@ -5,6 +5,7 @@ import functools
 import json
 import re
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
 from orchestrator.paths import load_config, runtime_paths
@@ -54,6 +55,14 @@ from orchestrator.work_verifier import format_block_comment, send_block_telegram
 
 MAX_MERGE_ATTEMPTS = 3
 STATE_FILE_NAME = "pr_monitor_state.json"
+
+# E2E PR health: when a PR has been blocked by the same root cause for this
+# many hours with no progress, close the PR + delete the branch so the
+# dispatcher can re-spawn the task from a clean state. Set to 4h: with the
+# 5-min cron that's ~48 retry cycles per blocker, plenty of room for the
+# normal remediation paths (auto-rebase, CI re-trigger, verifier re-eval) to
+# succeed before terminal action.
+_STUCK_PR_TERMINAL_HOURS = 4
 _CI_REMEDIATION_RE = re.compile(r"^Fix CI failure on PR #(\d+)$")
 _FOLLOWUP_TITLE_RE = re.compile(r"^Follow up partial debug for root issue #(\d+)$")
 _ROOT_ISSUE_RE = re.compile(r"^## Root Issue Number\s*\n(\d+)\s*$", re.MULTILINE)
@@ -541,7 +550,7 @@ def _list_agent_prs(repo: str) -> list[dict]:
         prs = gh_json([
             "pr", "list", "-R", repo,
             "--state", "open",
-            "--json", "number,title,headRefName,baseRefName,isDraft,mergeable,mergeStateStatus,url,body,isCrossRepository",
+            "--json", "number,title,headRefName,baseRefName,isDraft,mergeable,mergeStateStatus,url,body,isCrossRepository,createdAt",
         ]) or []
     except Exception as e:
         print(f"Warning: failed to list PRs for {repo}: {e}")
@@ -1479,6 +1488,143 @@ def _handle_stuck_merge_attempts(
         print(f"  PR #{pr_number}: stuck again after auto-reset — leaving for operator")
 
 
+def _pr_blocker_signature(pr: dict, checks: list[dict], verifier_signature: str | None) -> str:
+    """Stable key for *why* a PR is currently blocked.
+
+    A new signature resets the stuck-time clock; an unchanged signature across
+    polls means the existing remediation paths are not making progress and the
+    e2e health step should escalate.
+    """
+    mergeable = (pr.get("mergeable") or "").upper()
+    merge_state = (pr.get("mergeStateStatus") or "").upper()
+    if mergeable == "CONFLICTING" or merge_state in ("DIRTY", "CONFLICTING"):
+        return "merge_conflict"
+    failed = sorted({
+        (c.get("name") or c.get("context") or "?")
+        for c in (checks or [])
+        if (c.get("conclusion") or c.get("state") or "").upper() in ("FAILURE", "ERROR", "CANCELLED", "TIMED_OUT")
+    })
+    if failed:
+        return f"ci_failure:{','.join(failed[:3])}"
+    if not checks:
+        # Repos with no workflows hit this every poll but they merge regardless;
+        # only treat as a blocker if the PR is also not mergeable.
+        if merge_state in ("BLOCKED", "BEHIND"):
+            return "missing_checks"
+    if verifier_signature:
+        return f"verifier_block:{verifier_signature}"
+    return ""
+
+
+def _hours_since(iso_ts: str | None) -> float:
+    if not iso_ts:
+        return 0.0
+    try:
+        dt = datetime.fromisoformat(iso_ts.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return 0.0
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - dt).total_seconds() / 3600
+
+
+def _e2e_pr_health_terminal_close(
+    cfg: dict,
+    repo: str,
+    pr: dict,
+    pr_state: dict,
+    paths: dict,
+    state: dict,
+    signature: str,
+    hours_stuck: float,
+) -> bool:
+    """Close a PR + delete its branch when stuck on the same blocker for too long.
+
+    Returns True when terminal action was taken so the caller can `continue` to
+    the next PR. The linked issue is left open so the dispatcher will re-spawn
+    the task from a clean state on its next cycle. This is the autonomous
+    self-heal that makes pr_monitor manage PR health end-to-end without an
+    operator in the loop.
+    """
+    pr_number = int(pr["number"])
+    pr_url = pr["url"]
+    body = (
+        f"## Closed automatically by pr_monitor (e2e health)\n\n"
+        f"This PR has been blocked by `{signature}` for {hours_stuck:.1f}h with no "
+        f"forward progress despite the standard remediation paths "
+        f"(auto-rebase, CI retry, verifier re-eval). To break the loop, the PR "
+        f"is being closed and its branch deleted. The linked issue remains open, "
+        f"so the dispatcher will re-spawn this task on its next cycle from a "
+        f"clean checkout of main.\n\n"
+        f"If you want this branch preserved (e.g. to inspect the failing diff), "
+        f"recreate the PR manually before the dispatcher re-runs the task."
+    )
+    try:
+        gh(["pr", "comment", str(pr_number), "-R", repo, "--body", body], check=False)
+        gh(["pr", "close", str(pr_number), "-R", repo, "--delete-branch"], check=False)
+    except Exception as e:
+        print(f"Warning: failed e2e terminal close for PR #{pr_number} in {repo}: {e}")
+        return False
+    pr_state["e2e_terminal_close_count"] = pr_state.get("e2e_terminal_close_count", 0) + 1
+    pr_state.pop("blocker_signature", None)
+    pr_state.pop("blocker_first_seen", None)
+    _save_state(paths, state)
+    try:
+        append_audit_event(
+            cfg,
+            "pr_e2e_terminal_close",
+            {
+                "repo": repo,
+                "pr_number": pr_number,
+                "pr_url": pr_url,
+                "blocker_signature": signature,
+                "hours_stuck": round(hours_stuck, 2),
+            },
+        )
+    except Exception:
+        pass
+    print(f"  PR #{pr_number}: e2e health closed (stuck {hours_stuck:.1f}h on '{signature}')")
+    return True
+
+
+def _e2e_pr_health_track_and_remediate(
+    cfg: dict,
+    repo: str,
+    pr: dict,
+    pr_state: dict,
+    paths: dict,
+    state: dict,
+    checks: list[dict],
+) -> bool:
+    """Track per-PR blocker continuity and take terminal action when threshold hit.
+
+    Returns True if terminal action was taken (caller should `continue`).
+    """
+    verifier_sig = pr_state.get("work_verifier_signature") if pr_state.get("work_verifier_verdict") == "block" else None
+    signature = _pr_blocker_signature(pr, checks, verifier_sig)
+    if not signature:
+        # Not blocked — clear stuck tracking so future blocks restart the clock.
+        if pr_state.pop("blocker_signature", None) is not None:
+            pr_state.pop("blocker_first_seen", None)
+            _save_state(paths, state)
+        return False
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    if pr_state.get("blocker_signature") != signature:
+        pr_state["blocker_signature"] = signature
+        pr_state["blocker_first_seen"] = now_iso
+        _save_state(paths, state)
+        return False
+
+    hours_stuck = _hours_since(pr_state.get("blocker_first_seen"))
+    if hours_stuck < _STUCK_PR_TERMINAL_HOURS:
+        return False
+
+    return _e2e_pr_health_terminal_close(
+        cfg, repo, pr, pr_state, paths, state, signature, hours_stuck,
+    )
+
+
 def _send_quality_harness_telegram(cfg: dict, repo: str, pr_number: int, failing_fixtures: list[str], score: float, threshold: float):
     event = {
         "source": "pr_monitor",
@@ -1699,6 +1845,13 @@ def monitor_prs():
                     _save_state(paths, state)
             if _reconcile_open_pr_state(cfg, repo, pr, checks, state):
                 _save_state(paths, state)
+
+            # E2E health: if this PR has been blocked on the same root cause
+            # for too long, close + delete branch so the dispatcher re-spawns
+            # the task from a clean state. Runs BEFORE the per-block-type
+            # remediation so a wedged loop is broken instead of re-tried.
+            if _e2e_pr_health_track_and_remediate(cfg, repo, pr, pr_state, paths, state, checks):
+                continue
 
             no_ci_merge_ok = False
             if not checks:
