@@ -42,6 +42,17 @@
 
 ## Recent Changes
 
+### 2026-04-23 — [task-20260423-144539-review-follow-up-pr-312-high-risk] (#322 kai-linux/agent-os)
+Reviewed the PR #312 high-risk budget enforcement paths and fixed a dispatcher assignment gap where a specifically requested hard-stopped agent could still be persisted into mailbox frontmatter when a compliant fallback existed.
+
+**Files:** `- orchestrator/github_dispatcher.py`, `- tests/test_github_dispatcher.py`, `- .agent_result.md`
+
+**Decisions:**
+  - - Kept queue.py unchanged because the queue-side hard-stop gate already runs after health-gate fallback relaxation and existing regressions cover sole-candidate and requested-agent fallback behavior.
+  - - Kept example.config.yaml unchanged because its documented UTC monthly hard-stop semantics match the implementation.
+  - - Fixed only the dispatcher assignment edge case rather than refactoring budget filtering or health gates, preserving the review-driven follow-up scope.
+
+
 ### 2026-04-23 — [task-20260423-135838-review-follow-up-pr-312-high-risk] (#320 kai-linux/agent-os)
 Reviewed the PR #312 high-risk budget enforcement paths in orchestrator/queue.py, orchestrator/github_dispatcher.py, and example.config.yaml; the production logic matches the intended monthly hard-stop behavior, and a focused queue regression now verifies an explicitly requested over-budget agent is skipped in favor of a compliant fallback.
 
