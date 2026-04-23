@@ -325,8 +325,29 @@ def _open_pr_branches(repo: str) -> set[str]:
         return set()
 
 
-def _branch_has_commits_ahead_of_main(repo: str, branch: str, base: str = "main") -> bool:
+@functools.lru_cache(maxsize=64)
+def _remote_default_branch(repo: str) -> str:
+    """Return the default branch reported by GitHub for `repo`.
+
+    Cached per process. Falls back to "main" only if the API call itself
+    fails (network error / auth). The previous hardcoded "main" silently
+    treated every eigendark agent branch as fully merged because the
+    compare against a non-existent main returns 404 — so the orphan
+    cleanup would have erroneously deleted valid agent branches there.
+    """
+    try:
+        out = gh(["api", f"repos/{repo}", "--jq", ".default_branch"], check=False)
+        candidate = (out or "").strip()
+        if candidate:
+            return candidate
+    except Exception:
+        pass
+    return "main"
+
+
+def _branch_has_commits_ahead_of_main(repo: str, branch: str, base: str | None = None) -> bool:
     """Return True if the branch has at least one commit not on base."""
+    base = base or _remote_default_branch(repo)
     try:
         out = gh(["api", f"repos/{repo}/compare/{base}...{branch}",
                   "--jq", ".ahead_by"], check=False)
