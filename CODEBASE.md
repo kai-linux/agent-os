@@ -42,6 +42,18 @@
 
 ## Recent Changes
 
+### 2026-04-23 — [task-20260423-070235-validate-and-test-missing-context-blocker-reductio] (#216 kai-linux/agent-os)
+Validated that the task-20260409-070520 intake-validation fixes are already wired into `write_prompt()` (git state, objective alignment, sprint directives) and that `log_analyzer.check_blocker_regression_alerts` already fires a Telegram alert when `missing_context` exceeds 5 in a rolling 24h window. Added four regression tests in `tests/test_queue.py` that lock the dispatch-context injection contract: sprint-directives inclusion, sprint-directives fallback-omission, empty-git-state fallback-omission, and a parametrized per-agent (claude, codex, deepseek) agent-agnostic check.
+
+**Files:** `- tests/test_queue.py`
+
+**Decisions:**
+  - - Did not modify `orchestrator/queue.py` or `orchestrator/log_analyzer.py` because the task's success criteria — structured dispatch context injection and >5 blockers/24h alert threshold — are already implemented. The task goal is "validate and test"; the scope boundary is regression coverage, not re-implementing working code.
+  - - Exercised the real `read_sprint_directives()` helper (writing a real `runtime/next_sprint_focus.json` artifact under `worktree/`) instead of monkeypatching it, because the live code path is what regresses if the filter that drops `(no sprint directives…)` is changed. Monkeypatching that helper would let a regression slip through.
+  - - Parametrized the per-agent test over `claude`, `codex`, `deepseek` (the three agents called out in the task brief) using `@pytest.mark.parametrize` to keep the diff small and explicitly lock that prompt assembly is agent-agnostic.
+  - - Chose four focused tests rather than one combined mega-test so a future regression reports the exact broken assertion (sprint directives? git state? agent branching?) instead of a single noisy failure.
+
+
 ### 2026-04-21 — [task-20260421-133214-phase-1-tailscale-secret-key-auth-layer-retry-2] (#269 kai-linux/agent-os)
 Verified the dashboard auth layer requested by the original task is already present on this branch and added a small integration-focused diff by exporting the auth contract from `orchestrator.dashboard` with regression coverage, leaving a concrete code change tied to the feature instead of another no-op retry.
 
