@@ -136,6 +136,35 @@ def test_sev3_dedups_within_configured_window(tmp_path, monkeypatch):
     assert second["deduped_to"] == first["id"]
 
 
+def test_force_notify_sends_sev3_before_digest_window(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    sent: list[str] = []
+    monkeypatch.setattr(
+        "orchestrator.queue.send_telegram",
+        lambda cfg, text, logfile=None, queue_summary_log=None, reply_markup=None, chat_id=None, bypass_kill_switch=False: sent.append(text) or 201,
+    )
+
+    incident = ir.escalate(
+        "sev3",
+        {
+            "source": "queue",
+            "type": "task_blocked",
+            "repo": "eigendark",
+            "task_id": "task-123",
+            "summary": "Claude quota-limited before writing a result.",
+            "blocker_code": "quota_limited",
+            "force_notify": True,
+            "dedup_key": "queue:task-123:quota",
+        },
+        cfg=cfg,
+        now=datetime(2026, 4, 21, 10, 0, tzinfo=timezone.utc),
+    )
+
+    assert len(sent) == 1
+    assert f"Incident: {incident['id']}" in sent[0]
+    assert ir.list_incidents(cfg)[0]["notified_at"]
+
+
 def test_ack_and_resolve_commands_update_persisted_incident(tmp_path):
     cfg = _cfg(tmp_path)
     incident = ir.escalate(
@@ -160,3 +189,66 @@ def test_ack_and_resolve_commands_update_persisted_incident(tmp_path):
     assert "resolved" in resolved_reply
     assert updated["ack_at"]
     assert updated["resolved_at"]
+
+
+def test_resolve_already_resolved_incident_is_idempotent(tmp_path):
+    cfg = _cfg(tmp_path)
+    incident = ir.escalate(
+        "sev3",
+        {
+            "source": "queue",
+            "type": "task_blocked",
+            "repo": "eigendark",
+            "summary": "Blocked once.",
+            "dedup_key": "queue:resolved",
+        },
+        cfg=cfg,
+        now=datetime(2026, 4, 21, 10, 0, tzinfo=timezone.utc),
+    )
+    paths = {"ROOT": tmp_path, "CONFIG": tmp_path / "config.yaml"}
+
+    first_reply = handle_telegram_command(cfg, paths, f"/resolve {incident['id']}")
+    second_reply = handle_telegram_command(cfg, paths, f"/resolve {incident['id']}")
+
+    updated = ir.list_incidents(cfg)[0]
+    assert "marked resolved" in first_reply
+    assert "already resolved" in second_reply
+    assert updated["ack_at"] == updated["resolved_at"]
+
+
+def test_status_and_incidents_exclude_resolved_incidents(tmp_path):
+    cfg = _cfg(tmp_path)
+    resolved = ir.escalate(
+        "sev3",
+        {
+            "source": "queue",
+            "type": "task_blocked",
+            "repo": "eigendark",
+            "summary": "Old blocked task.",
+            "dedup_key": "queue:old",
+        },
+        cfg=cfg,
+        now=datetime(2026, 4, 21, 10, 0, tzinfo=timezone.utc),
+    )
+    ir.update_incident_status(resolved["id"], action="resolve", cfg=cfg)
+    ir.escalate(
+        "sev3",
+        {
+            "source": "queue",
+            "type": "task_blocked",
+            "repo": "eigendark",
+            "task_id": "task-open",
+            "summary": "Current blocked task.",
+            "dedup_key": "queue:open",
+        },
+        cfg=cfg,
+        now=datetime(2026, 4, 21, 10, 1, tzinfo=timezone.utc),
+    )
+    paths = {"ROOT": tmp_path, "CONFIG": tmp_path / "config.yaml"}
+
+    status_reply = handle_telegram_command(cfg, paths, "/status")
+    incidents_reply = handle_telegram_command(cfg, paths, "/incidents")
+
+    assert "Open incidents: 1 (SEV3 1)" in status_reply
+    assert "task-open" in incidents_reply
+    assert resolved["id"] not in incidents_reply

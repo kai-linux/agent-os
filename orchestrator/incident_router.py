@@ -190,6 +190,19 @@ def list_incidents(cfg: dict | None = None) -> list[dict[str, Any]]:
     return _load_incidents(incidents_path(cfg))
 
 
+def open_incidents(cfg: dict | None = None, *, severity: str | None = None) -> list[dict[str, Any]]:
+    """Return incidents that still require operator action."""
+    severity_filter = str(severity or "").strip().lower()
+    rows: list[dict[str, Any]] = []
+    for incident in list_incidents(cfg):
+        if incident.get("resolved_at") or incident.get("deduped_to"):
+            continue
+        if severity_filter and str(incident.get("sev") or "").lower() != severity_filter:
+            continue
+        rows.append(incident)
+    return rows
+
+
 def _tier_cfg(cfg: dict, severity: str) -> dict[str, Any]:
     router = _router_cfg(cfg)
     if severity not in VALID_SEVERITIES:
@@ -377,7 +390,8 @@ def escalate(
                 break
 
     incidents.append(incident)
-    if not incident.get("deduped_to") and _incident_due(router_cfg, incident, current):
+    force_notify = bool(event.get("force_notify"))
+    if not incident.get("deduped_to") and (force_notify or _incident_due(router_cfg, incident, current)):
         _send_incident(cfg, incident, tier_cfg, logfile=logfile, queue_summary_log=queue_summary_log)
     _write_incidents(path, incidents)
     return incident
@@ -398,6 +412,8 @@ def update_incident_status(
     for incident in incidents:
         if incident.get("id") != incident_id:
             continue
+        incident["_already_acknowledged"] = bool(incident.get("ack_at"))
+        incident["_already_resolved"] = bool(incident.get("resolved_at"))
         if action == "ack" and not incident.get("ack_at"):
             incident["ack_at"] = current
         elif action == "resolve":
@@ -409,5 +425,11 @@ def update_incident_status(
         break
     if updated is None:
         return None
-    _write_incidents(path, incidents)
+    persisted = []
+    for incident in incidents:
+        clean = dict(incident)
+        clean.pop("_already_acknowledged", None)
+        clean.pop("_already_resolved", None)
+        persisted.append(clean)
+    _write_incidents(path, persisted)
     return updated

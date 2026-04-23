@@ -24,7 +24,7 @@ from orchestrator.gh_project import gh_json as _gh_json
 from orchestrator.codebase_memory import read_codebase_context, update_codebase_memory
 from orchestrator.commit_signature import with_agent_os_trailer
 from orchestrator.gh_project import add_issue_comment, gh, gh_json, query_project, set_item_status
-from orchestrator.incident_router import classify_severity, escalate as route_incident, update_incident_status
+from orchestrator.incident_router import classify_severity, escalate as route_incident, open_incidents, update_incident_status
 from orchestrator.repo_context import build_execution_context, gather_recent_git_state, gather_objective_alignment, read_sprint_directives
 from orchestrator.repo_modes import is_dispatcher_only_repo
 from orchestrator.agent_scorer import filter_healthy_agents, log_gate_decision, ADAPTIVE_HEALTH_WINDOW_DAYS, ADAPTIVE_HEALTH_THRESHOLD
@@ -1216,6 +1216,31 @@ def _kill_switch_state(paths: dict) -> tuple[bool, str]:
         since = ""
     return True, since
 
+def _format_open_incident_counts(cfg: dict) -> str:
+    rows = open_incidents(cfg)
+    if not rows:
+        return "Open incidents: 0"
+    counts = {sev: 0 for sev in ("sev1", "sev2", "sev3")}
+    for row in rows:
+        sev = str(row.get("sev") or "").lower()
+        if sev in counts:
+            counts[sev] += 1
+    parts = [f"{sev.upper()} {count}" for sev, count in counts.items() if count]
+    return f"Open incidents: {len(rows)} ({', '.join(parts)})"
+
+def _format_open_incidents(cfg: dict, *, limit: int = 10) -> str:
+    rows = open_incidents(cfg)
+    if not rows:
+        return "No open incidents."
+    lines = [_format_open_incident_counts(cfg) + ":"]
+    for row in rows[:limit]:
+        event = row.get("event") or {}
+        subject = event.get("task_id") or event.get("repo") or event.get("github_repo") or event.get("summary") or "incident"
+        lines.append(f"• {row.get('id')} — {str(row.get('sev') or '').upper()} {row.get('source')}: {subject}")
+    if len(rows) > limit:
+        lines.append(f"...and {len(rows) - limit} more.")
+    return "\n".join(lines)
+
 def handle_telegram_command(
     cfg: dict,
     paths: dict,
@@ -1263,10 +1288,14 @@ def handle_telegram_command(
 
     if command == "status":
         disabled, since = _kill_switch_state(paths)
+        incident_summary = _format_open_incident_counts(cfg)
         if disabled:
             since_txt = f" since {since}" if since else ""
-            return f"🔴 Agent-OS OFF{since_txt}."
-        return "🟢 Agent-OS ON."
+            return f"🔴 Agent-OS OFF{since_txt}. {incident_summary}."
+        return f"🟢 Agent-OS ON. {incident_summary}."
+
+    if command == "incidents":
+        return _format_open_incidents(cfg)
 
     if command in {"ack", "resolve"}:
         if not args:
@@ -1274,6 +1303,10 @@ def handle_telegram_command(
         updated = update_incident_status(args[0], action=command, cfg=cfg)
         if not updated:
             return f"Incident not found: {args[0]}"
+        if command == "ack" and updated.get("_already_acknowledged"):
+            return f"Incident {args[0]} already acknowledged at {updated.get('ack_at')}."
+        if command == "resolve" and updated.get("_already_resolved"):
+            return f"Incident {args[0]} already resolved at {updated.get('resolved_at')}."
         return (
             f"Incident {args[0]} marked acknowledged."
             if command == "ack"
@@ -1341,6 +1374,7 @@ def handle_telegram_command(
         return (
             "Agent-OS control:\n"
             "/on /off /status — global kill-switch\n"
+            "/incidents — list unresolved incidents only\n"
             "/ack <incident_id> /resolve <incident_id> — update an incident in runtime/incidents/incidents.jsonl\n"
             "/verify-override <repo> <pr_number> [reason] — unblock a work-verifier rejection with audit trail\n"
             "/repos — list repos\n"
@@ -1483,6 +1517,7 @@ def _queue_incident_event(
         "models_tried": list(model_attempts),
         "blocker_code": result.get("blocker_code"),
         "summary": summary,
+        "force_notify": True,
         "dedup_key": (
             f"{event_type}:{meta.get('task_id')}:{result.get('blocker_code') or 'none'}:{extra_line or ''}"
         ),
@@ -3974,6 +4009,13 @@ def main():
                         branch_has_prior_work = False
 
                     if branch_has_prior_work and final_result.get("status") == "complete":
+                        if not commit_hash:
+                            commit_hash = run(
+                                ["git", "rev-parse", "HEAD"],
+                                cwd=worktree,
+                                logfile=logfile,
+                                queue_summary_log=QUEUE_SUMMARY_LOG,
+                            ).stdout.strip()
                         log(
                             f"Branch {branch} already has commits ahead of {repo_default}; treating no-diff complete as legitimate (prior-run work).",
                             logfile,
