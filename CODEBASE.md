@@ -42,6 +42,17 @@
 
 ## Recent Changes
 
+### 2026-04-23 — [task-20260423-135151-review-follow-up-pr-312-high-risk] (#318 kai-linux/agent-os)
+Reviewed the PR #312 high-risk budget enforcement paths in orchestrator/queue.py, orchestrator/github_dispatcher.py, and example.config.yaml; production logic matched the intended monthly hard-stop behavior, and a focused queue regression test now verifies that an explicitly requested over-budget agent cannot bypass the hard-stop while a compliant fallback remains available.
+
+**Files:** `- tests/test_budgets.py`, `- .agent_result.md`
+
+**Decisions:**
+  - - Kept production code unchanged because the flagged queue, dispatcher, and config paths already matched the intended hard-stop behavior.
+  - - Added a narrow regression test rather than refactoring, preserving the review-driven follow-up scope.
+  - - Tested the dispatcher suite as a guard against regressing the previously added all-candidates-over-budget validation.
+
+
 ### 2026-04-23 — [task-20260423-130938-review-follow-up-pr-312-high-risk] (#316 kai-linux/agent-os)
 Reviewed the PR #312 high-risk budget enforcement paths in orchestrator/queue.py, orchestrator/github_dispatcher.py, and example.config.yaml; the queue hard-stop ordering and config semantics are correct, and a focused dispatcher regression test now locks the all-candidates-over-budget rejection behavior.
 
