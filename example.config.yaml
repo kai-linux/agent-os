@@ -312,6 +312,13 @@ quality_harness:
                                        # multimodal_eval, llm_judge_eval, bot_conversation_eval
   suite_commands: {}                   # Optional per-suite command; may print JSON {"score": 0.95, "failing_fixtures": [...]}
 
+semantic_dedup:
+  enabled: true                         # Groomer suppresses near-duplicate issues before filing them
+  threshold: 0.82                       # Per-repo override: semantic_dedup_threshold or semantic_dedup.threshold
+  recently_closed_days: 90              # Compare proposed issues against recently closed work too
+  model: "sentence-transformers/all-MiniLM-L6-v2"
+  fallback: "simhash"                   # Local deterministic fallback when sentence-transformers/model load fails
+
 system_architect:
   enabled: true                        # Compares current agent-os topology against target_operating_model.yaml
   cadence_days: 30                     # Monthly default; capability/sensor topology shifts slower than sprint work
