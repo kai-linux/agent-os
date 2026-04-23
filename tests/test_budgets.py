@@ -11,7 +11,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from orchestrator import budgets
 
-
 def _cfg(tmp_path: Path, **overrides) -> dict:
     cfg: dict = {
         "root_dir": str(tmp_path),
@@ -27,7 +26,6 @@ def _cfg(tmp_path: Path, **overrides) -> dict:
     cfg.update(overrides)
     return cfg
 
-
 def _seed_cost_events(metrics_dir: Path, entries: list[dict]) -> Path:
     metrics_dir.mkdir(parents=True, exist_ok=True)
     path = metrics_dir / budgets.COST_EVENTS_FILENAME
@@ -36,12 +34,10 @@ def _seed_cost_events(metrics_dir: Path, entries: list[dict]) -> Path:
             handle.write(json.dumps(entry, sort_keys=True) + "\n")
     return path
 
-
 def test_current_month_key_returns_utc_ym():
     from datetime import datetime, timezone
     key = budgets.current_month_key(datetime(2026, 4, 23, 12, 0, tzinfo=timezone.utc))
     assert key == "2026-04"
-
 
 def test_record_cost_events_writes_required_fields(tmp_path):
     cfg = _cfg(tmp_path)
@@ -73,7 +69,6 @@ def test_record_cost_events_writes_required_fields(tmp_path):
     assert row["task_id"] == "task-1"
     assert row["month_key"] == "2026-04"
     assert row["usd_estimate"] > 0
-
 
 def test_monthly_spend_by_agent_sums_only_requested_month(tmp_path):
     cfg = _cfg(tmp_path)
@@ -111,24 +106,20 @@ def test_monthly_spend_by_agent_sums_only_requested_month(tmp_path):
     totals = budgets.monthly_spend_by_agent(cfg, month_key="2026-04")
     assert totals == {"codex": 4.25, "claude": 7.5}
 
-
 def test_budget_for_agent_falls_back_to_default(tmp_path):
     cfg = _cfg(tmp_path)
     entry = budgets.budget_for_agent(cfg, "gemini")
     assert entry == {"soft_warn_usd": 1.0, "hard_stop_usd": 2.0}
 
-
 def test_budget_for_agent_returns_none_when_missing():
     assert budgets.budget_for_agent({}, "codex") is None
     assert budgets.budget_for_agent({"budgets": {}}, "codex") is None
-
 
 def test_filter_budget_compliant_returns_input_when_no_config(tmp_path):
     cfg = {"root_dir": str(tmp_path)}
     passing, skipped = budgets.filter_budget_compliant_agents(["codex", "claude"], cfg)
     assert passing == ["codex", "claude"]
     assert skipped == {}
-
 
 def test_filter_budget_compliant_removes_hard_stopped_agent(tmp_path):
     cfg = _cfg(tmp_path)
@@ -150,7 +141,6 @@ def test_filter_budget_compliant_removes_hard_stopped_agent(tmp_path):
     assert skipped["codex"]["spend_usd"] == 5.0
     assert passing == ["claude"]
 
-
 def test_filter_budget_compliant_passes_agent_below_hard_stop(tmp_path):
     cfg = _cfg(tmp_path)
     metrics_dir = Path(cfg["root_dir"]) / "runtime" / "metrics"
@@ -167,7 +157,6 @@ def test_filter_budget_compliant_passes_agent_below_hard_stop(tmp_path):
     passing, skipped = budgets.filter_budget_compliant_agents(["codex"], cfg)
     assert passing == ["codex"]
     assert skipped == {}
-
 
 def test_hard_stopped_agent_excluded_even_as_sole_candidate(tmp_path, monkeypatch):
     """Regression: a hard-stopped agent must not be routed to, even when it is
@@ -188,7 +177,6 @@ def test_hard_stopped_agent_excluded_even_as_sole_candidate(tmp_path, monkeypatc
     passing, skipped = budgets.filter_budget_compliant_agents(["codex"], cfg)
     assert passing == [], "sole over-budget candidate must be removed"
     assert "codex" in skipped
-
 
 def test_check_budget_alerts_fires_once_per_threshold(tmp_path):
     cfg = _cfg(tmp_path)
@@ -215,7 +203,6 @@ def test_check_budget_alerts_fires_once_per_threshold(tmp_path):
     assert fired_second == []
     assert len(sent) == 2
 
-
 def test_soft_warn_alert_does_not_filter_agent(tmp_path):
     cfg = _cfg(tmp_path)
     metrics_dir = Path(cfg["root_dir"]) / "runtime" / "metrics"
@@ -236,7 +223,6 @@ def test_soft_warn_alert_does_not_filter_agent(tmp_path):
     passing, _ = budgets.filter_budget_compliant_agents(["codex"], cfg)
     assert passing == ["codex"]
 
-
 def test_warn_if_budgets_missing_logs_once(tmp_path):
     budgets.reset_missing_warning_for_tests()
     messages: list[str] = []
@@ -246,14 +232,12 @@ def test_warn_if_budgets_missing_logs_once(tmp_path):
     assert "Budget enforcement disabled" in messages[0]
     budgets.reset_missing_warning_for_tests()
 
-
 def test_warn_skipped_when_budgets_configured(tmp_path):
     budgets.reset_missing_warning_for_tests()
     messages: list[str] = []
     budgets.warn_if_budgets_missing(_cfg(tmp_path), logger=messages.append)
     assert messages == []
     budgets.reset_missing_warning_for_tests()
-
 
 def test_budget_snapshot_includes_per_agent_remaining(tmp_path):
     cfg = _cfg(tmp_path)
@@ -275,7 +259,6 @@ def test_budget_snapshot_includes_per_agent_remaining(tmp_path):
     assert entries["codex"]["spend_usd"] == 1.5
     assert entries["codex"]["remaining_usd"] == 0.5
     assert entries["codex"]["hard_stopped"] is False
-
 
 def test_record_cost_events_and_monthly_spend_round_trip(tmp_path):
     """End-to-end: write events via record_cost_events, read via monthly_spend_by_agent."""
@@ -301,7 +284,6 @@ def test_record_cost_events_and_monthly_spend_round_trip(tmp_path):
     spend = budgets.monthly_spend_by_agent(cfg, month_key="2026-04")
     # codex pricing: $15/M input + $60/M output → $15 + $30 = $45
     assert spend["codex"] == pytest.approx(45.0, abs=1e-3)
-
 
 def test_get_agent_chain_excludes_hard_stopped_sole_candidate(tmp_path, monkeypatch):
     """Integration regression: the queue's dispatch chain must drop a
@@ -335,11 +317,15 @@ def test_get_agent_chain_excludes_hard_stopped_sole_candidate(tmp_path, monkeypa
     assert chain == [], "hard-stopped sole candidate must be removed from dispatch chain"
     assert queue.get_next_agent({"task_type": "implementation", "agent": "auto"}, cfg, []) is None
 
-
 def test_get_agent_chain_skips_requested_hard_stopped_agent_and_keeps_fallback(tmp_path, monkeypatch):
     """A requested agent must not bypass the monthly hard-stop, but a compliant
     fallback should still be available for dispatch.
     """
+
+def test_get_agent_chain_skips_hard_stopped_requested_agent_and_uses_fallback(tmp_path, monkeypatch):
+    """Regression: an explicit agent preference must not bypass the monthly
+    hard-stop when a compliant fallback is available."""
+
     from orchestrator import queue
 
     cfg = _cfg(
@@ -365,3 +351,9 @@ def test_get_agent_chain_skips_requested_hard_stopped_agent_and_keeps_fallback(t
     chain = queue.get_agent_chain({"task_type": "implementation", "agent": "codex"}, cfg)
     assert chain == ["claude"], "requested over-budget agent must be removed while fallback remains"
     assert queue.get_next_agent({"task_type": "implementation", "agent": "codex"}, cfg, []) == "claude"
+
+    meta = {"task_type": "implementation", "agent": "codex"}
+    chain = queue.get_agent_chain(meta, cfg)
+    assert chain == ["claude"], "over-budget requested agent must not be selected"
+    assert queue.get_next_agent(meta, cfg, []) == "claude"
+
