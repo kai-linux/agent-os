@@ -176,6 +176,24 @@ def test_filter_budget_compliant_passes_agent_below_hard_stop(tmp_path):
     assert passing == ["codex"]
     assert skipped == {}
 
+def test_filter_budget_compliant_applies_default_hard_stop_to_unlisted_agent(tmp_path):
+    cfg = _cfg(tmp_path)
+    metrics_dir = Path(cfg["root_dir"]) / "runtime" / "metrics"
+    month_key = budgets.current_month_key()
+    _seed_cost_events(metrics_dir, [
+        {
+            "timestamp": "2026-04-20T00:00:00+00:00",
+            "month_key": month_key,
+            "task_id": "t1",
+            "agent": "gemini",
+            "usd_estimate": 5.0,
+        },
+    ])
+    passing, skipped = budgets.filter_budget_compliant_agents(["gemini"], cfg)
+    assert passing == []
+    assert skipped["gemini"]["hard_stop_usd"] == 2.0
+    assert skipped["gemini"]["hard_stopped"] is True
+
 def test_hard_stopped_agent_excluded_even_as_sole_candidate(tmp_path, monkeypatch):
     """Regression: a hard-stopped agent must not be routed to, even when it is
     the only candidate. This protects the budget invariant against the
