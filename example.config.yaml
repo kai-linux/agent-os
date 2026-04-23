@@ -147,6 +147,31 @@ cost_tracking:
                                      #   input_per_million_tokens: 12.0
                                      #   output_per_million_tokens: 48.0
 
+budgets:
+  # Per-agent monthly USD budget caps. Missing agents are treated as unlimited.
+  # soft_warn_usd  — fires a one-time Telegram warning for the month.
+  # hard_stop_usd  — removes the agent from healthy-agent selection for the
+  #                  remainder of the calendar month (UTC).
+  # The helper in orchestrator/budgets.py aggregates spend from
+  # runtime/metrics/cost_events.jsonl so the reset boundary matches the
+  # UTC calendar month every operator sees.
+  default:
+    soft_warn_usd: 40.0
+    hard_stop_usd: 50.0
+  per_agent:
+    claude:
+      soft_warn_usd: 80.0
+      hard_stop_usd: 100.0
+    codex:
+      soft_warn_usd: 40.0
+      hard_stop_usd: 50.0
+    gemini:
+      soft_warn_usd: 10.0
+      hard_stop_usd: 20.0
+    deepseek:
+      soft_warn_usd: 10.0
+      hard_stop_usd: 20.0
+
 planning_research:
   enabled: false
   max_age_hours: 72                # Refresh stale research every 72h before planning

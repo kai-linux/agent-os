@@ -31,6 +31,12 @@ from orchestrator.agent_scorer import filter_healthy_agents, log_gate_decision, 
 from orchestrator.scheduler_state import is_due, job_lock, record_run
 
 from orchestrator.cost_tracker import rebuild_cost_records, resolve_attempt_model, resolve_attempt_provider, estimate_text_tokens
+from orchestrator.budgets import (
+    check_budget_alerts,
+    filter_budget_compliant_agents,
+    record_cost_events,
+    warn_if_budgets_missing,
+)
 
 from orchestrator.quality_harness import (
     FIXED_SUITE_TAXONOMY,
@@ -2665,11 +2671,30 @@ def get_agent_chain(meta: dict, cfg: dict) -> list[str]:
     if not healthy:
         if after_7d:
             print(f"24h gate would empty the chain; relaxing and keeping {after_7d}")
-            return after_7d
-        if available_chain:
+            healthy = after_7d
+        elif available_chain:
             print(f"both gates would empty the chain; falling back to credential-available {available_chain}")
-            return available_chain
-    return healthy
+            healthy = available_chain
+    # Budget hard-stop gate runs last so the health-gate safety net above
+    # cannot resurrect an agent that has already blown its monthly spend cap.
+    after_budget, budget_skipped = filter_budget_compliant_agents(healthy, cfg)
+    if budget_skipped:
+        for agent, stats in budget_skipped.items():
+            print(
+                f"agent={agent} skipped: monthly spend ${stats['spend_usd']:.2f} "
+                f">= hard-stop ${stats['hard_stop_usd']:.2f} ({stats['month_key']})"
+            )
+        log_gate_decision(
+            metrics_file.parent,
+            gate="budget_hard_stop_monthly",
+            skipped={
+                agent: {"total": 0, "successes": 0, "rate": 0.0, **stats}
+                for agent, stats in budget_skipped.items()
+            },
+            passed=after_budget,
+            context=f"queue:get_agent_chain task_type={meta.get('task_type', 'unknown')}",
+        )
+    return after_budget
 
 def get_next_agent(meta: dict, cfg: dict, model_attempts: list[str]) -> str | None:
     chain = get_agent_chain(meta, cfg)
@@ -3193,6 +3218,25 @@ def record_metrics(
         rebuild_cost_records(cfg)
     except Exception as exc:
         log(f"Cost tracking warning: {exc}", logfile, queue_summary_log=queue_summary_log)
+    try:
+        record_cost_events(
+            cfg,
+            task_id=str(record.get("task_id", "unknown")),
+            timestamp=str(record.get("timestamp") or ""),
+            github_repo=str(record.get("github_repo") or ""),
+            model_attempt_details=list(record.get("model_attempt_details") or []),
+        )
+        warn_if_budgets_missing(
+            cfg,
+            logger=lambda msg: log(msg, logfile, queue_summary_log=queue_summary_log),
+        )
+        check_budget_alerts(
+            cfg,
+            lambda c, text: send_telegram(c, text, logfile, queue_summary_log),
+            logger=lambda msg: log(msg, logfile, queue_summary_log=queue_summary_log),
+        )
+    except Exception as exc:
+        log(f"Budget tracking warning: {exc}", logfile, queue_summary_log=queue_summary_log)
 
 FALLBACK_COOLDOWN_MINUTES = 120
 FALLBACK_COOLDOWN_FILE = "fallback_cooldown_until.txt"
