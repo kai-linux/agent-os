@@ -2121,6 +2121,160 @@ def test_write_prompt_omits_enhanced_context_without_worktree(tmp_path):
     assert "Dispatch Context (structured)" not in text
 
 
+def _write_prompt_env(tmp_path, monkeypatch, *, git_state: str, sprint_payload: dict | None):
+    """Shared fixture for write_prompt dispatch-context regression tests.
+
+    Creates a worktree, stubs gather_recent_git_state and gather_objective_alignment,
+    and optionally writes runtime/next_sprint_focus.json so read_sprint_directives
+    resolves a real artifact (we exercise the real helper for sprint directives to
+    catch regressions in the filter logic that drops the "(no sprint directives...)"
+    fallback string).
+    """
+    root = tmp_path / "root"
+    worktree = tmp_path / "repo"
+    root.mkdir()
+    worktree.mkdir()
+    (worktree / "README.md").write_text("## Goal\n\nShip.\n", encoding="utf-8")
+    (worktree / "CODEBASE.md").write_text("# Codebase Memory\n\nCtx.\n", encoding="utf-8")
+    if sprint_payload is not None:
+        (worktree / "runtime").mkdir(exist_ok=True)
+        (worktree / "runtime" / "next_sprint_focus.json").write_text(
+            json.dumps(sprint_payload), encoding="utf-8",
+        )
+
+    monkeypatch.setattr("orchestrator.queue.gather_recent_git_state", lambda *a, **kw: git_state)
+    monkeypatch.setattr(
+        "orchestrator.queue.gather_objective_alignment",
+        lambda *a, **kw: (
+            "Primary outcome: Adoption\n"
+            "Tracked metrics (id / weight / direction):\n"
+            "  - stars: weight=0.5, direction=increase"
+        ),
+    )
+    return root, worktree
+
+
+def test_write_prompt_injects_sprint_directives_when_available(tmp_path, monkeypatch):
+    """Sprint directives artifact content must surface in the Dispatch Context block."""
+    root, worktree = _write_prompt_env(
+        tmp_path,
+        monkeypatch,
+        git_state="abc1234 feat: add widget",
+        sprint_payload={
+            "generated_at": "2026-04-21T09:00:00+00:00",
+            "headline": "Carry goal context into dispatched work",
+            "next_sprint_focus": ["Reduce missing_context blockers below 3/14d"],
+            "risks_and_gaps": ["Prompt context injection regressions go undetected"],
+        },
+    )
+
+    prompt_file = write_prompt(
+        "task-ctx-sprint",
+        {"task_type": "implementation", "base_branch": "main", "github_repo": "owner/repo"},
+        "Implement the feature.",
+        "claude",
+        [],
+        root,
+        worktree=worktree,
+    )
+
+    text = prompt_file.read_text(encoding="utf-8")
+    assert "## Sprint Directives" in text
+    assert "Carry goal context into dispatched work" in text
+    assert "Reduce missing_context blockers below 3/14d" in text
+    assert "Prompt context injection regressions go undetected" in text
+
+
+def test_write_prompt_omits_sprint_section_when_artifact_missing(tmp_path, monkeypatch):
+    """The '(no sprint directives...)' fallback must not leak into the prompt as a section."""
+    root, worktree = _write_prompt_env(
+        tmp_path,
+        monkeypatch,
+        git_state="abc1234 feat: add widget",
+        sprint_payload=None,
+    )
+
+    prompt_file = write_prompt(
+        "task-ctx-no-sprint",
+        {"task_type": "implementation", "base_branch": "main", "github_repo": "owner/repo"},
+        "Do work.",
+        "claude",
+        [],
+        root,
+        worktree=worktree,
+    )
+
+    text = prompt_file.read_text(encoding="utf-8")
+    assert "## Sprint Directives" not in text
+    assert "(no sprint directives" not in text
+    assert "Dispatch Context (structured)" in text
+    assert "Recent Git State" in text
+
+
+def test_write_prompt_omits_git_state_section_when_unavailable(tmp_path, monkeypatch):
+    """The '(recent git state unavailable)' fallback must not surface as a Dispatch Context section."""
+    root, worktree = _write_prompt_env(
+        tmp_path,
+        monkeypatch,
+        git_state="(recent git state unavailable)",
+        sprint_payload=None,
+    )
+
+    prompt_file = write_prompt(
+        "task-ctx-empty-git",
+        {"task_type": "implementation", "base_branch": "main", "github_repo": "owner/repo"},
+        "Do work.",
+        "claude",
+        [],
+        root,
+        worktree=worktree,
+    )
+
+    text = prompt_file.read_text(encoding="utf-8")
+    assert "## Recent Git State" not in text
+    assert "(recent git state unavailable)" not in text
+    assert "Objective Alignment" in text
+
+
+@pytest.mark.parametrize("agent_name", ["claude", "codex", "deepseek"])
+def test_write_prompt_dispatch_context_is_agent_agnostic(tmp_path, monkeypatch, agent_name):
+    """Dispatch Context injection must be identical across claude, codex, and deepseek.
+
+    Regression guard: if a future change starts branching prompt assembly per agent,
+    ensure the structured context sections remain present for every dispatched agent
+    so none of them loses visibility into git state / objectives / sprint directives.
+    """
+    root, worktree = _write_prompt_env(
+        tmp_path,
+        monkeypatch,
+        git_state="abc1234 feat: add widget",
+        sprint_payload={
+            "generated_at": "2026-04-21T09:00:00+00:00",
+            "headline": "H",
+            "next_sprint_focus": ["Keep context injection wired"],
+        },
+    )
+
+    prompt_file = write_prompt(
+        f"task-ctx-{agent_name}",
+        {"task_type": "implementation", "base_branch": "main", "github_repo": "owner/repo"},
+        "Implement feature.",
+        agent_name,
+        [],
+        root,
+        worktree=worktree,
+    )
+
+    text = prompt_file.read_text(encoding="utf-8")
+    assert f"Current agent:\n{agent_name}" in text
+    assert "Dispatch Context (structured)" in text
+    assert "Recent Git State" in text
+    assert "abc1234 feat: add widget" in text
+    assert "Objective Alignment" in text
+    assert "## Sprint Directives" in text
+    assert "Keep context injection wired" in text
+
+
 # ---------------------------------------------------------------------------
 # create_escalation_note includes prompt snapshot path
 # ---------------------------------------------------------------------------
