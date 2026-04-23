@@ -1362,6 +1362,14 @@ def test_format_runner_failure_classifies_usage_limit():
     assert any("stderr tail" in item for item in blockers)
 
 
+def test_codex_runner_avoids_nested_sandbox():
+    runner = Path(__file__).parent.parent / "bin" / "agent_runner.sh"
+    text = runner.read_text(encoding="utf-8")
+
+    assert "--dangerously-bypass-approvals-and-sandbox" in text
+    assert "--full-auto" not in text
+
+
 def test_validate_workflow_files_rejects_runner_context_in_job_env(tmp_path):
     workflow_dir = tmp_path / ".github" / "workflows"
     workflow_dir.mkdir(parents=True)

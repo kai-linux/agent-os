@@ -19,7 +19,7 @@ export DEEPSEEK_OPENROUTER_MODEL="${DEEPSEEK_OPENROUTER_MODEL:-deepseek/deepseek
 cd "$WORKDIR"
 
 if [ "$AGENT" = "codex" ]; then
-    "$CODEX_BIN" exec --full-auto --skip-git-repo-check "$(cat "$PROMPT")"
+    "$CODEX_BIN" exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check "$(cat "$PROMPT")"
 elif [ "$AGENT" = "claude" ]; then
     "$CLAUDE_BIN" --dangerously-skip-permissions -p "$(cat "$PROMPT")"
 elif [ "$AGENT" = "gemini" ]; then
