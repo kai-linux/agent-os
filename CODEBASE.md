@@ -44,6 +44,8 @@
 
 ### 2026-04-23 — [task-20260423-165940-review-follow-up-pr-312-high-risk] (#327 kai-linux/agent-os)
 Reviewed the PR #312 monthly budget hard-stop surface and found the production enforcement path still correct; fixed stale operator-facing config wording for `budgets.default`, removed a no-op duplicate test stub, and added a focused regression proving default hard-stops apply during budget filtering.
+### 2026-04-23 — [task-20260423-152340-review-follow-up-pr-312-high-risk] (#324 kai-linux/agent-os)
+Reviewed the PR #312 budget hard-stop paths again and tightened the documented default-budget semantics. The enforcement code already applies `budgets.default` to agents omitted from `per_agent`; a focused regression now locks that default hard-stop behavior, and the example config comment no longer implies omitted agents are always unlimited.
 
 **Files:** `- example.config.yaml`, `- tests/test_budgets.py`, `- .agent_result.md`
 
@@ -62,6 +64,9 @@ Reviewed the high-risk PR #312 budget hard-stop paths and found the production e
   - - Kept production code unchanged because queue and dispatcher hard-stop filtering already enforce the intended invariant after prior follow-ups.
   - - Fixed the config documentation because operator-facing budget semantics are part of the high-risk safety surface.
   - - Added the narrowest regression for the documented `budgets.default` behavior instead of broad refactoring.
+  - - Kept production budget enforcement unchanged because queue and dispatcher hard-stop filtering matched the intended invariant after prior follow-ups.
+  - - Treated the mismatch as a high-risk operator-documentation issue because budget config comments are part of the hard-stop safety contract.
+  - - Removed a no-op duplicate budget test stub that created false coverage signal without asserting behavior.
 
 
 ### 2026-04-23 — [task-20260423-150549-review-follow-up-pr-313-high-risk] (#326 kai-linux/agent-os)
