@@ -69,6 +69,7 @@ VALID_BLOCKER_CODES = set(BLOCKER_CODE_DESCRIPTIONS)
 # to the next fallback model. Short-circuit the fallback chain for these so we
 # stop burning credits on deterministic environmental or human-gated failures.
 PERMANENT_INFRA_BLOCKERS = frozenset({"manual_intervention_required", "prompt_too_large"})
+NON_RETRYABLE_FOLLOWUP_BLOCKERS = PERMANENT_INFRA_BLOCKERS | frozenset({"quota_limited"})
 # Linux caps a single argv string at PAGE_SIZE * 32 = 128 KiB (MAX_ARG_STRLEN).
 # Keep prompts well under that so we never hit E2BIG during execve.
 PROMPT_SIZE_LIMIT_BYTES = 100_000
@@ -280,7 +281,7 @@ def _classify_runner_failure(text: str) -> str | None:
         return None
     if "argument list too long" in lowered or "e2big" in lowered:
         return "prompt too large"
-    if any(token in lowered for token in ["rate limit", "rate-limit", "too many requests", "429", "usage limit", "quota"]):
+    if any(token in lowered for token in ["rate limit", "rate-limit", "too many requests", "429", "usage limit", "quota", "hit your limit"]):
         return "usage limit / rate limit"
     if any(token in lowered for token in ["authentication", "unauthorized", "forbidden", "invalid api key", "not authenticated", "login required"]):
         return "authentication failure"
@@ -2651,6 +2652,11 @@ def get_agent_chain(meta: dict, cfg: dict) -> list[str]:
     for agent in chain:
         if agent not in VALID_FALLBACK_AGENTS:
             continue
+        cooldown_left = agent_cooldown_remaining(cfg, agent)
+        if cooldown_left > 0:
+            mins = (cooldown_left + 59) // 60
+            print(f"agent={agent} skipped: quota cooldown active ({mins} min remaining)")
+            continue
         available, _reason = agent_available(agent)
         if available:
             available_chain.append(agent)
@@ -2830,9 +2836,9 @@ def create_followup_task(
         return None
 
     blocker_code = str(result.get("blocker_code") or "").strip()
-    if blocker_code in PERMANENT_INFRA_BLOCKERS:
+    if blocker_code in NON_RETRYABLE_FOLLOWUP_BLOCKERS:
         log(
-            f"Not creating follow-up: blocker_code={blocker_code!r} is a permanent infra failure.",
+            f"Not creating follow-up: blocker_code={blocker_code!r} is a non-retryable infrastructure failure.",
             logfile,
             also_summary=True,
             queue_summary_log=queue_summary_log,
@@ -3221,11 +3227,67 @@ def record_metrics(
 
 FALLBACK_COOLDOWN_MINUTES = 120
 FALLBACK_COOLDOWN_FILE = "fallback_cooldown_until.txt"
+AGENT_COOLDOWN_FILE = "agent_cooldowns.json"
 
 def _cooldown_path(cfg: dict) -> Path:
     state_dir = Path(cfg.get("root_dir", ".")).expanduser() / "runtime" / "state"
     state_dir.mkdir(parents=True, exist_ok=True)
     return state_dir / FALLBACK_COOLDOWN_FILE
+
+def _agent_cooldown_path(cfg: dict) -> Path:
+    state_dir = Path(cfg.get("root_dir", ".")).expanduser() / "runtime" / "state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    return state_dir / AGENT_COOLDOWN_FILE
+
+def _read_agent_cooldowns(cfg: dict) -> dict[str, str]:
+    path = _agent_cooldown_path(cfg)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {str(k).strip().lower(): str(v) for k, v in data.items() if str(k).strip()}
+
+def agent_cooldown_remaining(cfg: dict, agent: str) -> int:
+    """Return seconds remaining for an agent-specific quota cooldown."""
+    agent_key = str(agent or "").strip().lower()
+    if not agent_key:
+        return 0
+    raw_until = _read_agent_cooldowns(cfg).get(agent_key)
+    if not raw_until:
+        return 0
+    try:
+        until = datetime.fromisoformat(raw_until)
+    except ValueError:
+        return 0
+    if until.tzinfo is None:
+        until = until.replace(tzinfo=timezone.utc)
+    delta = (until - datetime.now(timezone.utc)).total_seconds()
+    return max(0, int(delta))
+
+def start_agent_cooldown(cfg: dict, agent: str, minutes: int = FALLBACK_COOLDOWN_MINUTES) -> datetime:
+    """Pause dispatch to one quota-limited agent without stopping other agents."""
+    agent_key = str(agent or "").strip().lower()
+    if not agent_key:
+        return datetime.now(timezone.utc)
+    path = _agent_cooldown_path(cfg)
+    now = datetime.now(timezone.utc)
+    cooldowns = _read_agent_cooldowns(cfg)
+    existing_raw = cooldowns.get(agent_key)
+    if existing_raw:
+        try:
+            existing = datetime.fromisoformat(existing_raw)
+            if existing.tzinfo is None:
+                existing = existing.replace(tzinfo=timezone.utc)
+            if existing > now:
+                return existing
+        except ValueError:
+            pass
+    until = now + timedelta(minutes=minutes)
+    cooldowns[agent_key] = until.isoformat()
+    path.write_text(json.dumps(cooldowns, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    return until
 
 def fallback_cooldown_remaining(cfg: dict) -> int:
     """Return seconds remaining in the fallback-exhausted cooldown, or 0."""
@@ -3680,6 +3742,15 @@ def main():
                 log(f"{current_agent} runner failure: {e}", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
                 for blocker in failure_blockers:
                     log(blocker, logfile, queue_summary_log=QUEUE_SUMMARY_LOG)
+
+                if runner_result["blocker_code"] == "quota_limited":
+                    until = start_agent_cooldown(cfg, current_agent)
+                    log(
+                        f"Agent {current_agent} quota-limited; cooling down until {until.isoformat()}.",
+                        logfile,
+                        also_summary=True,
+                        queue_summary_log=QUEUE_SUMMARY_LOG,
+                    )
 
                 next_agent = get_next_agent(meta, cfg, model_attempts)
                 if next_agent is not None:

@@ -25,6 +25,7 @@ from orchestrator.queue import (
     _format_runner_failure,
     _parse_unblock_notes,
     _validate_workflow_files,
+    agent_cooldown_remaining,
     agent_available,
     build_escalation_message,
     create_followup_task,
@@ -45,6 +46,7 @@ from orchestrator.queue import (
     should_attempt_git_rescue,
     split_section,
     start_fallback_cooldown,
+    start_agent_cooldown,
     telegram_action_expired,
     parse_task,
     verify_pr_ci_debug_completion,
@@ -1362,6 +1364,19 @@ def test_format_runner_failure_classifies_usage_limit():
     assert any("stderr tail" in item for item in blockers)
 
 
+def test_format_runner_failure_classifies_claude_hit_limit_stdout():
+    exc = CommandExecutionError(
+        ["/bin/agent_runner.sh", "claude"],
+        1,
+        "You've hit your limit · resets 8am (Europe/Berlin)",
+        "",
+    )
+    summary, blockers, detail = _format_runner_failure(exc)
+    assert "usage limit / rate limit" in summary
+    assert "hit your limit" in detail
+    assert any("stdout tail" in item for item in blockers)
+
+
 def test_codex_runner_avoids_nested_sandbox():
     runner = Path(__file__).parent.parent / "bin" / "agent_runner.sh"
     text = runner.read_text(encoding="utf-8")
@@ -1979,6 +1994,36 @@ def test_create_followup_task_propagates_failed_checks(tmp_path):
     assert "lint" in content
 
 
+def test_create_followup_task_suppresses_quota_limited_retries(tmp_path):
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    meta = {
+        "task_id": "task-orig",
+        "repo": "/tmp/repo",
+        "base_branch": "main",
+        "branch": "agent/task-orig",
+        "allow_push": True,
+        "task_type": "implementation",
+        "attempt": 1,
+        "max_attempts": 4,
+        "max_runtime_minutes": 40,
+    }
+    result = {
+        "status": "blocked",
+        "blocker_code": "quota_limited",
+        "next_step": "Try the next fallback model.",
+        "summary": "Claude usage limit reached.",
+    }
+    logfile = tmp_path / "log.txt"
+    logfile.touch()
+    summary_log = tmp_path / "summary.log"
+    summary_log.touch()
+
+    path = create_followup_task(meta, "original body", result, logfile, 4, ["claude"], inbox, summary_log)
+    assert path is None
+    assert list(inbox.glob("*.md")) == []
+
+
 # --- Enhanced dispatch context tests ---
 
 
@@ -2257,6 +2302,25 @@ def test_fallback_cooldown_expires(tmp_path):
     state_file.write_text((datetime.now(timezone.utc) - timedelta(seconds=30)).isoformat(),
                           encoding="utf-8")
     assert fallback_cooldown_remaining(cfg) == 0
+
+
+def test_agent_cooldown_arm_and_read(tmp_path):
+    cfg = {"root_dir": str(tmp_path)}
+    until = start_agent_cooldown(cfg, "claude", minutes=5)
+    remaining = agent_cooldown_remaining(cfg, "claude")
+    assert 4 * 60 < remaining <= 5 * 60
+    assert until > datetime.now(timezone.utc)
+
+
+def test_get_agent_chain_skips_agent_on_quota_cooldown(tmp_path, monkeypatch):
+    cfg = _cfg({"implementation": ["claude", "codex"]})
+    cfg["root_dir"] = str(tmp_path)
+    start_agent_cooldown(cfg, "claude", minutes=5)
+    monkeypatch.setattr("orchestrator.queue.agent_available", lambda agent: (True, None))
+
+    chain = get_agent_chain({"agent": "claude", "task_type": "implementation"}, cfg)
+
+    assert chain == ["codex"]
 
 
 # ---------------------------------------------------------------------------
