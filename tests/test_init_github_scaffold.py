@@ -41,3 +41,34 @@ def test_ensure_project_keeps_existing_project_without_edit(monkeypatch):
     project = gs._ensure_project("kai-linux", "new-game")
 
     assert project["project_number"] == 3
+
+
+def test_ensure_agent_result_ignored_creates_new_gitignore(tmp_path):
+    gi = tmp_path / ".gitignore"
+    assert gs._ensure_agent_result_ignored(gi) is True
+    assert ".agent_result.md" in gi.read_text()
+
+
+def test_ensure_agent_result_ignored_appends_when_missing(tmp_path):
+    gi = tmp_path / ".gitignore"
+    gi.write_text("node_modules/\n.env\n")
+    assert gs._ensure_agent_result_ignored(gi) is True
+    body = gi.read_text()
+    assert "node_modules/" in body
+    assert ".agent_result.md" in body
+
+
+def test_ensure_agent_result_ignored_idempotent(tmp_path):
+    gi = tmp_path / ".gitignore"
+    gi.write_text("node_modules/\n.agent_result.md\n.env\n")
+    assert gs._ensure_agent_result_ignored(gi) is False
+    assert gi.read_text() == "node_modules/\n.agent_result.md\n.env\n"
+
+
+def test_ensure_agent_result_ignored_handles_missing_trailing_newline(tmp_path):
+    gi = tmp_path / ".gitignore"
+    gi.write_text("node_modules/")
+    gs._ensure_agent_result_ignored(gi)
+    body = gi.read_text()
+    assert body.startswith("node_modules/\n")
+    assert ".agent_result.md" in body
