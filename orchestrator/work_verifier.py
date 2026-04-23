@@ -40,6 +40,22 @@ _SMALL_DIFF_LINES = 12
 _SMALL_DIFF_FILES = 1
 _LARGE_DIFF_LINES = 1200
 _LARGE_DIFF_FILES = 30
+_CODELIKE_EXTENSIONS = {
+    ".py",
+    ".js",
+    ".jsx",
+    ".ts",
+    ".tsx",
+    ".go",
+    ".rs",
+    ".sh",
+    ".bash",
+    ".zsh",
+    ".yml",
+    ".yaml",
+    ".json",
+    ".toml",
+}
 
 # NOTE: kept as a static string (no ``str.format`` templating) because the
 # literal JSON schema below contains ``{``/``}`` characters that ``.format``
@@ -192,10 +208,23 @@ def _current_diff_path(line: str) -> str | None:
     return match.group(1).strip() if match else None
 
 
+def _is_codelike_path(path: str | None) -> bool:
+    if not path:
+        return False
+    suffix = Path(path).suffix.lower()
+    return suffix in _CODELIKE_EXTENSIONS or path.startswith(("bin/", ".github/workflows/"))
+
+
+def _is_immediate_function_body(previous_line: str) -> bool:
+    lowered = previous_line.strip().lower()
+    return bool(re.match(r"^(async\s+def|def)\s+.+:\s*$", lowered))
+
+
 def _deterministic_pattern_findings(diff_text: str) -> list[VerificationFinding]:
     findings: list[VerificationFinding] = []
     seen: set[tuple[str, str | None, str]] = set()
     current_path: str | None = None
+    previous_added_line = ""
 
     def add(category: str, detail: str, *, path: str | None = None) -> None:
         key = (category, path, detail)
@@ -208,6 +237,7 @@ def _deterministic_pattern_findings(diff_text: str) -> list[VerificationFinding]
         path = _current_diff_path(raw_line)
         if path:
             current_path = path
+            previous_added_line = ""
             continue
         if not raw_line.startswith("+") or raw_line.startswith("+++"):
             continue
@@ -215,23 +245,33 @@ def _deterministic_pattern_findings(diff_text: str) -> list[VerificationFinding]
         stripped = line.strip()
         lowered = stripped.lower()
 
-        if "notimplementederror" in stripped.replace(" ", "").lower():
+        is_codelike = _is_codelike_path(current_path)
+        previous_lowered = previous_added_line.strip().lower()
+
+        if is_codelike and "notimplementederror" in stripped.replace(" ", "").lower():
             add("stub", "Added `NotImplementedError` stub", path=current_path)
-        if re.search(r"\b(todo|fixme|xxx)\b", lowered):
+        if is_codelike and re.search(r"\b(todo|fixme|xxx)\b", lowered):
             add("todo", f"Added TODO-style placeholder: `{stripped[:120]}`", path=current_path)
-        if re.search(r"(^|[\s(])pass($|[\s#])", stripped) or stripped == "...":
+        if is_codelike and (re.search(r"(^|[\s(])pass($|[\s#])", stripped) or stripped == "...") and _is_immediate_function_body(previous_added_line):
             add("stub", f"Added placeholder no-op: `{stripped}`", path=current_path)
-        if re.match(r"return(\s+None|\s+\[\]|\s+\{\}|\s+\"\"|\s+''|\s+False|\s+True)?\s*$", stripped):
+        if (
+            is_codelike
+            and re.match(r"return(\s+None|\s+\[\]|\s+\{\}|\s+\"\"|\s+''|\s+False|\s+True)?\s*$", stripped)
+            and _is_immediate_function_body(previous_added_line)
+        ):
             add("bare_return", f"Added bare return stub: `{stripped}`", path=current_path)
-        if re.search(r"@pytest\.mark\.skip|@unittest\.skip|\.skip\(|\bit\.skip\(", lowered):
+        if is_codelike and re.search(r"@pytest\.mark\.skip|@unittest\.skip|\.skip\(|\bit\.skip\(", lowered):
             add("skipped_test", f"Added skipped test marker: `{stripped[:120]}`", path=current_path)
-        if re.search(r"\b(mock|magicmock|mocker|jest\.mock|mockimplementation|sinon)\b|patch\(", lowered):
+        if is_codelike and re.search(r"\b(mock|magicmock|mocker|jest\.mock|mockimplementation|sinon)\b|\bpatch\(", lowered):
             add("mock", f"Added mock construct: `{stripped[:120]}`", path=current_path)
-        if stripped.startswith(("#", "//", "/*", "*")) and re.search(
+        suffix = Path(current_path or "").suffix.lower()
+        if is_codelike and suffix not in {".yml", ".yaml", ".toml"} and stripped.startswith(("#", "//", "/*")) and re.search(
             r"\b(if|for|while|return|def|class|const|let|var|function|await|try|except)\b",
             lowered,
         ):
             add("commented_code", f"Added commented-out code: `{stripped[:120]}`", path=current_path)
+        if stripped:
+            previous_added_line = stripped
     return findings
 
 
@@ -316,7 +356,7 @@ def _scope_findings(risk: RiskAssessment, *, issue_body: str) -> list[Verificati
             VerificationFinding(
                 category="missing_tests",
                 detail="Source changes landed without accompanying test changes",
-                severity="high",
+                severity="medium",
             )
         )
     if success_criteria_count >= 2 and risk.files_changed <= _SMALL_DIFF_FILES and risk.lines_changed <= _SMALL_DIFF_LINES:

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from unittest.mock import patch, MagicMock
-import subprocess
+import json
 
 from orchestrator.pr_risk_assessment import (
     assess_pr_risk,
@@ -14,21 +14,35 @@ from orchestrator.pr_risk_assessment import (
 
 def _mock_diff_stat(lines: str):
     """Return a patch that makes _get_pr_diff_stat return parsed lines."""
+    files = []
+    for raw in lines.strip().splitlines():
+        if "files changed" in raw:
+            continue
+        if "|" not in raw:
+            continue
+        path, count = raw.split("|", 1)
+        files.append({"path": path.strip(), "additions": int(count.strip().split()[0]), "deletions": 0})
     result = MagicMock()
     result.returncode = 0
-    result.stdout = lines
+    result.stdout = json.dumps({"files": files})
     return patch("orchestrator.pr_risk_assessment.subprocess.run", return_value=result)
 
 
 class TestGetPrDiffStat:
-    def test_parses_stat_output(self):
-        stat = (
-            " orchestrator/queue.py | 42 +++---\n"
-            " tests/test_queue.py   | 18 +++\n"
-            " 2 files changed, 45 insertions(+), 15 deletions(-)\n"
+    def test_parses_pr_view_files_payload(self):
+        result = MagicMock()
+        result.returncode = 0
+        result.stdout = json.dumps(
+            {
+                "files": [
+                    {"path": "orchestrator/queue.py", "additions": 30, "deletions": 12},
+                    {"path": "tests/test_queue.py", "additions": 18, "deletions": 0},
+                ]
+            }
         )
-        with _mock_diff_stat(stat):
+        with patch("orchestrator.pr_risk_assessment.subprocess.run", return_value=result) as run:
             files, total = _get_pr_diff_stat("owner/repo", 1)
+        assert run.call_args.args[0] == ["gh", "pr", "view", "1", "-R", "owner/repo", "--json", "files"]
         assert files == ["orchestrator/queue.py", "tests/test_queue.py"]
         assert total == 60
 

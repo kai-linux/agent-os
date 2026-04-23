@@ -24,6 +24,7 @@ from orchestrator.queue import (
     CommandExecutionError,
     _format_runner_failure,
     _parse_unblock_notes,
+    _runner_environment_failure_from_log,
     _validate_workflow_files,
     agent_cooldown_remaining,
     agent_available,
@@ -36,6 +37,7 @@ from orchestrator.queue import (
     handle_telegram_command,
     has_unpushed_commits,
     maybe_requeue_prompt_inspection_recovery,
+    move_processing_task,
     parse_agent_result,
     parse_bullets,
     record_metrics,
@@ -1377,6 +1379,48 @@ def test_format_runner_failure_classifies_claude_hit_limit_stdout():
     assert any("stdout tail" in item for item in blockers)
 
 
+def test_format_runner_failure_classifies_bwrap_environment_failure():
+    exc = CommandExecutionError(
+        ["/bin/agent_runner.sh", "codex"],
+        1,
+        "",
+        "bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted",
+    )
+    summary, blockers, detail = _format_runner_failure(exc)
+    assert "runner environment failure" in summary
+    assert "Operation not permitted" in detail
+    assert any("stderr tail" in item for item in blockers)
+
+
+def test_runner_environment_failure_from_log_converts_missing_contract_context(tmp_path):
+    logfile = tmp_path / "task.log"
+    logfile.write_text(
+        "codex\n"
+        "Blocked by the local execution environment.\n"
+        "bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted\n"
+        "Failed to write file /srv/worktrees/demo/.agent_result.md\n",
+        encoding="utf-8",
+    )
+
+    result = _runner_environment_failure_from_log(logfile)
+
+    assert result is not None
+    assert result["status"] == "blocked"
+    assert result["blocker_code"] == "environment_failure"
+    assert "sandbox" in result["unblock_notes"]["blocking_cause"].lower()
+
+
+def test_format_runner_failure_classifies_model_capacity_as_quota():
+    exc = CommandExecutionError(
+        ["/bin/agent_runner.sh", "codex"],
+        1,
+        "",
+        "ERROR: Selected model is at capacity. Please try a different model.",
+    )
+    summary, _blockers, _detail = _format_runner_failure(exc)
+    assert "usage limit / rate limit" in summary
+
+
 def test_codex_runner_avoids_nested_sandbox():
     runner = Path(__file__).parent.parent / "bin" / "agent_runner.sh"
     text = runner.read_text(encoding="utf-8")
@@ -2022,6 +2066,51 @@ def test_create_followup_task_suppresses_quota_limited_retries(tmp_path):
     path = create_followup_task(meta, "original body", result, logfile, 4, ["claude"], inbox, summary_log)
     assert path is None
     assert list(inbox.glob("*.md")) == []
+
+
+def test_create_followup_task_suppresses_environment_failure_retries(tmp_path):
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    meta = {
+        "task_id": "task-orig",
+        "repo": "/tmp/repo",
+        "base_branch": "main",
+        "branch": "agent/task-orig",
+        "allow_push": True,
+        "task_type": "implementation",
+        "attempt": 1,
+        "max_attempts": 4,
+        "max_runtime_minutes": 40,
+    }
+    result = {
+        "status": "blocked",
+        "blocker_code": "environment_failure",
+        "next_step": "Fix the sandbox and rerun.",
+        "summary": "Runner sandbox failed.",
+    }
+    logfile = tmp_path / "log.txt"
+    logfile.touch()
+    summary_log = tmp_path / "summary.log"
+    summary_log.touch()
+
+    path = create_followup_task(meta, "original body", result, logfile, 4, ["codex"], inbox, summary_log)
+    assert path is None
+    assert list(inbox.glob("*.md")) == []
+
+
+def test_move_processing_task_is_idempotent_when_destination_exists(tmp_path):
+    processing_dir = tmp_path / "processing"
+    blocked_dir = tmp_path / "blocked"
+    processing_dir.mkdir()
+    blocked_dir.mkdir()
+    processing = processing_dir / "task-1.md"
+    destination = blocked_dir / "task-1.md"
+    destination.write_text("already moved", encoding="utf-8")
+    logfile = tmp_path / "log.txt"
+    summary_log = tmp_path / "summary.log"
+
+    assert move_processing_task(processing, blocked_dir, logfile, summary_log, state_label="blocked") is True
+    assert destination.read_text(encoding="utf-8") == "already moved"
 
 
 # --- Enhanced dispatch context tests ---

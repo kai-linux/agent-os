@@ -75,7 +75,14 @@ VALID_BLOCKER_CODES = set(BLOCKER_CODE_DESCRIPTIONS)
 # to the next fallback model. Short-circuit the fallback chain for these so we
 # stop burning credits on deterministic environmental or human-gated failures.
 PERMANENT_INFRA_BLOCKERS = frozenset({"manual_intervention_required", "prompt_too_large"})
-NON_RETRYABLE_FOLLOWUP_BLOCKERS = PERMANENT_INFRA_BLOCKERS | frozenset({"quota_limited"})
+NON_RETRYABLE_FOLLOWUP_BLOCKERS = PERMANENT_INFRA_BLOCKERS | frozenset({"environment_failure", "quota_limited"})
+RUNNER_ENVIRONMENT_FAILURE_MARKERS = (
+    "bwrap:",
+    "bubblewrap",
+    "failed rtm_newaddr",
+    "operation not permitted",
+    "failed to write file",
+)
 # Linux caps a single argv string at PAGE_SIZE * 32 = 128 KiB (MAX_ARG_STRLEN).
 # Keep prompts well under that so we never hit E2BIG during execve.
 PROMPT_SIZE_LIMIT_BYTES = 100_000
@@ -287,10 +294,12 @@ def _classify_runner_failure(text: str) -> str | None:
         return None
     if "argument list too long" in lowered or "e2big" in lowered:
         return "prompt too large"
-    if any(token in lowered for token in ["rate limit", "rate-limit", "too many requests", "429", "usage limit", "quota", "hit your limit"]):
+    if any(token in lowered for token in ["rate limit", "rate-limit", "too many requests", "429", "usage limit", "quota", "hit your limit", "model is at capacity"]):
         return "usage limit / rate limit"
     if any(token in lowered for token in ["authentication", "unauthorized", "forbidden", "invalid api key", "not authenticated", "login required"]):
         return "authentication failure"
+    if any(token in lowered for token in RUNNER_ENVIRONMENT_FAILURE_MARKERS):
+        return "runner environment failure"
     if any(token in lowered for token in ["command not found", "no such file or directory", "unknown option", "unrecognized option"]):
         return "runner/cli configuration failure"
     return None
@@ -323,7 +332,7 @@ def _blocker_code_from_runner_failure(summary: str, detail: str | None = None) -
         return "quota_limited"
     if classification == "authentication failure":
         return "missing_credentials"
-    if classification == "runner/cli configuration failure":
+    if classification in {"runner/cli configuration failure", "runner environment failure"}:
         return "environment_failure"
     return "runner_failure"
 
@@ -2364,6 +2373,35 @@ def run_agent(agent: str, worktree: Path, prompt_file: Path, logfile: Path, time
     timeout_seconds = max(60, int(timeout_minutes) * 60)
     run([runner, agent, worktree, prompt_file], logfile=logfile, timeout=timeout_seconds, queue_summary_log=queue_summary_log)
 
+def _runner_environment_failure_from_log(logfile: Path | None) -> dict | None:
+    if logfile is None or not logfile.exists():
+        return None
+    try:
+        tail = "\n".join(logfile.read_text(encoding="utf-8", errors="replace").splitlines()[-160:])
+    except OSError:
+        return None
+    lowered = tail.lower()
+    if not any(marker in lowered for marker in RUNNER_ENVIRONMENT_FAILURE_MARKERS):
+        return None
+    return {
+        "status": "blocked",
+        "blocker_code": "environment_failure",
+        "summary": "Agent runner environment failed before it could produce a result contract.",
+        "done": ["- Agent runner started but could not access or write the worktree reliably."],
+        "blockers": [f"- Runner environment failure detected in task log: {_tail_text(tail, max_lines=8, max_chars=500)}"],
+        "next_step": "Restore the runner sandbox/worktree read-write path, then rerun the original task.",
+        "files_changed": ["- None"],
+        "tests_run": ["- None"],
+        "decisions": ["- Classified missing .agent_result.md as environment_failure because the log contains runner sandbox/write failures."],
+        "risks": ["- Retrying the same task without fixing the runner environment will only create retry storms."],
+        "attempted_approaches": ["- Inspected task log after missing result contract."],
+        "unblock_notes": {
+            "blocking_cause": "Runner sandbox or worktree write path failed before .agent_result.md could be created.",
+            "next_action": "Fix the runner environment, then rerun the task.",
+        },
+        "raw": "",
+    }
+
 def has_changes(worktree: Path):
     result = subprocess.run(
         ["git", "status", "--porcelain"],
@@ -3101,6 +3139,32 @@ def cleanup_worktree(repo: Path, worktree: Path, logfile: Path, queue_summary_lo
     except Exception as e:
         log(f"Worktree cleanup warning: {e}", logfile, queue_summary_log=queue_summary_log)
 
+def move_processing_task(processing: Path, destination_dir: Path, logfile: Path, queue_summary_log: Path, *, state_label: str) -> bool:
+    """Move a processing task to its terminal mailbox without re-failing if it was already moved.
+
+    Historical runs showed a task could finish its blocked transition, then the
+    final move raised ``FileNotFoundError`` and the outer exception handler
+    converted a legitimate blocked outcome into a noisy infrastructure
+    failure. Treat a missing processing file as an idempotent transition.
+    """
+    destination = destination_dir / processing.name
+    if not processing.exists():
+        if destination.exists():
+            log(
+                f"Task file already present in {state_label}; treating mailbox move as idempotent.",
+                logfile,
+                queue_summary_log=queue_summary_log,
+            )
+            return True
+        log(
+            f"Task file missing before move to {state_label}; skipping mailbox move without raising.",
+            logfile,
+            queue_summary_log=queue_summary_log,
+        )
+        return False
+    shutil.move(str(processing), str(destination))
+    return True
+
 def run_tests(cfg: dict, repo: Path, worktree: Path, logfile: Path, queue_summary_log: Path) -> None:
     """Run configured test suite in worktree. Modifies .agent_result.md in-place."""
     repo_configs = cfg.get("repo_configs", {})
@@ -3814,6 +3878,10 @@ def main():
             run_tests(cfg, repo, worktree, logfile, QUEUE_SUMMARY_LOG)
 
             result = parse_agent_result(worktree)
+            if result.get("blocker_code") == "invalid_result_contract":
+                environment_result = _runner_environment_failure_from_log(logfile)
+                if environment_result is not None:
+                    result = environment_result
             result["agent"] = current_agent
             model_attempts.append(current_agent)
             output_text = result.get("raw", "") or ""
@@ -4018,7 +4086,7 @@ def main():
 
         if final_result["status"] == "complete":
             log("Final queue state: done", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
-            shutil.move(str(processing), str(DONE / processing.name))
+            move_processing_task(processing, DONE, logfile, QUEUE_SUMMARY_LOG, state_label="done")
             send_telegram(
                 cfg,
                 f"✅ Complete\nTask: {task_id}\nRepo: {repo.name}\nBranch: {branch}\nModel: {final_agent}\nCommit: {commit_hash or 'none'}\nSummary: {final_result['summary']}"
@@ -4043,7 +4111,7 @@ def main():
             github_followup_url = sync_info.get("followup_issue_url")
             if github_followup_url:
                 log("Final queue state: blocked", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
-                shutil.move(str(processing), str(BLOCKED / processing.name))
+                move_processing_task(processing, BLOCKED, logfile, QUEUE_SUMMARY_LOG, state_label="blocked")
                 if not suppress_partial_telegram:
                     event = _queue_incident_event(
                         "task_blocked",
@@ -4064,7 +4132,7 @@ def main():
                     queue_summary_log=QUEUE_SUMMARY_LOG,
                 )
                 log("Final queue state: blocked", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
-                shutil.move(str(processing), str(BLOCKED / processing.name))
+                move_processing_task(processing, BLOCKED, logfile, QUEUE_SUMMARY_LOG, state_label="blocked")
                 if not suppress_partial_telegram:
                     event = _queue_incident_event(
                         "task_blocked",
@@ -4090,7 +4158,7 @@ def main():
                 )
                 if followup is not None:
                     log("Final queue state: blocked", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
-                    shutil.move(str(processing), str(BLOCKED / processing.name))
+                    move_processing_task(processing, BLOCKED, logfile, QUEUE_SUMMARY_LOG, state_label="blocked")
                     if not suppress_partial_telegram:
                         event = _queue_incident_event(
                             "task_blocked",
@@ -4106,7 +4174,7 @@ def main():
                 else:
                     esc = create_escalation_note(meta, body, final_result, logfile, model_attempts, ESCALATED, QUEUE_SUMMARY_LOG)
                     log("No follow-up created. Final queue state: escalated", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
-                    shutil.move(str(processing), str(ESCALATED / processing.name))
+                    move_processing_task(processing, ESCALATED, logfile, QUEUE_SUMMARY_LOG, state_label="escalated")
                     chat_id = str(cfg.get("telegram_chat_id", "")).strip()
                     action = None
                     reply_markup = None
@@ -4137,7 +4205,7 @@ def main():
                         save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
         else:
             log("Final queue state: failed", logfile, also_summary=True, queue_summary_log=QUEUE_SUMMARY_LOG)
-            shutil.move(str(processing), str(FAILED / processing.name))
+            move_processing_task(processing, FAILED, logfile, QUEUE_SUMMARY_LOG, state_label="failed")
             event = _queue_incident_event(
                 "task_failed",
                 meta,

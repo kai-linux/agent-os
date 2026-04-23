@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+import json
 from dataclasses import dataclass, field
 
 
@@ -79,23 +80,25 @@ def _get_pr_diff_stat(repo: str, pr_number: int) -> tuple[list[str], int]:
     """Return (changed_file_paths, total_lines_changed) from PR diff stat."""
     try:
         result = subprocess.run(
-            ["gh", "pr", "diff", str(pr_number), "-R", repo, "--stat"],
+            ["gh", "pr", "view", str(pr_number), "-R", repo, "--json", "files"],
             capture_output=True, text=True, timeout=30,
         )
         if result.returncode != 0:
             return [], 0
+        payload = json.loads(result.stdout or "{}")
     except Exception:
         return [], 0
 
     files: list[str] = []
     total_lines = 0
-    for line in result.stdout.strip().splitlines():
-        # diff stat lines look like: " path/to/file | 42 ++---"
-        # summary line looks like: " 5 files changed, 120 insertions(+), 30 deletions(-)"
-        m = re.match(r"^\s*(.+?)\s+\|\s+(\d+)", line)
-        if m:
-            files.append(m.group(1).strip())
-            total_lines += int(m.group(2))
+    for item in payload.get("files") or []:
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path") or "").strip()
+        if not path:
+            continue
+        files.append(path)
+        total_lines += int(item.get("additions") or 0) + int(item.get("deletions") or 0)
     return files, total_lines
 
 

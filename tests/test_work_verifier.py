@@ -6,6 +6,7 @@ from orchestrator.pr_risk_assessment import RiskAssessment
 from orchestrator.work_verifier import (
     _call_independent_judge,
     _deterministic_pattern_findings,
+    _scope_findings,
     verify_pull_request,
 )
 
@@ -56,6 +57,7 @@ def test_deterministic_pattern_findings_detects_blocking_antipatterns():
 @@
 +def run():
 +    raise NotImplementedError("stub")
++def later():
 +    return None
 +# return real_value()
 diff --git a/tests/test_app.py b/tests/test_app.py
@@ -76,6 +78,68 @@ diff --git a/tests/test_app.py b/tests/test_app.py
     assert "skipped_test" in categories
     assert "mock" in categories
     assert "todo" in categories
+
+
+def test_deterministic_pattern_findings_ignores_markdown_headings_and_script_copy():
+    diff = """diff --git a/docs/promotion/video-walkthrough-script.md b/docs/promotion/video-walkthrough-script.md
++++ b/docs/promotion/video-walkthrough-script.md
++### 4:20-4:50 - How to try it
++**Screen:** Actions tab -> show the CI run for PR #122 (all green).
++Then the operator says: return to the dashboard and verify the result.
+"""
+    assert _deterministic_pattern_findings(diff) == []
+
+
+def test_deterministic_pattern_findings_does_not_treat_dispatch_as_patch_mock():
+    diff = """diff --git a/tests/test_project_bundle.py b/tests/test_project_bundle.py
++++ b/tests/test_project_bundle.py
++def test_import_restores_bundle_validates_config_and_writes_noop_dispatch(tmp_path):
++    assert tmp_path.exists()
+"""
+    assert _deterministic_pattern_findings(diff) == []
+
+
+def test_deterministic_pattern_findings_allows_empty_exception_class():
+    diff = """diff --git a/orchestrator/project_bundle.py b/orchestrator/project_bundle.py
++++ b/orchestrator/project_bundle.py
++class BundleError(RuntimeError):
++    pass
+"""
+    assert _deterministic_pattern_findings(diff) == []
+
+
+def test_deterministic_pattern_findings_allows_guard_clause_returns_and_config_comments():
+    diff = """diff --git a/example.config.yaml b/example.config.yaml
++++ b/example.config.yaml
++# hard_stop_usd removes the agent from selection for the month.
+diff --git a/orchestrator/budgets.py b/orchestrator/budgets.py
++++ b/orchestrator/budgets.py
++def load_budget(path):
++    if not path.exists():
++        return None
++    values = []
++    if not values:
++        return []
++    return values
+"""
+    assert _deterministic_pattern_findings(diff) == []
+
+
+def test_scope_findings_only_warns_when_source_changes_lack_tests_unless_issue_requires_tests():
+    risk = RiskAssessment(
+        level="medium",
+        files_changed=2,
+        lines_changed=40,
+        has_source_changes=True,
+        has_test_changes=False,
+    )
+
+    general = _scope_findings(risk, issue_body="Fix the blank page.")
+    assert any(item.category == "missing_tests" and item.severity == "medium" for item in general)
+    assert not any(item.severity == "high" for item in general)
+
+    required = _scope_findings(risk, issue_body="Fix the blank page and add regression test coverage.")
+    assert any(item.category == "scope_mismatch" and item.severity == "high" for item in required)
 
 
 def test_verify_pull_request_blocks_on_stub_without_llm(monkeypatch, tmp_path):
