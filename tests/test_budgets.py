@@ -334,3 +334,34 @@ def test_get_agent_chain_excludes_hard_stopped_sole_candidate(tmp_path, monkeypa
     chain = queue.get_agent_chain({"task_type": "implementation", "agent": "auto"}, cfg)
     assert chain == [], "hard-stopped sole candidate must be removed from dispatch chain"
     assert queue.get_next_agent({"task_type": "implementation", "agent": "auto"}, cfg, []) is None
+
+
+def test_get_agent_chain_skips_requested_hard_stopped_agent_and_keeps_fallback(tmp_path, monkeypatch):
+    """A requested agent must not bypass the monthly hard-stop, but a compliant
+    fallback should still be available for dispatch.
+    """
+    from orchestrator import queue
+
+    cfg = _cfg(
+        tmp_path,
+        default_task_type="implementation",
+        default_agent="auto",
+        agent_fallbacks={"implementation": ["codex", "claude"]},
+    )
+    metrics_dir = Path(cfg["root_dir"]) / "runtime" / "metrics"
+    month_key = budgets.current_month_key()
+    _seed_cost_events(metrics_dir, [
+        {
+            "timestamp": f"{month_key}-15T00:00:00+00:00",
+            "month_key": month_key,
+            "task_id": "t1",
+            "agent": "codex",
+            "usd_estimate": 9999.0,
+        },
+    ])
+
+    monkeypatch.setattr(queue, "agent_available", lambda agent: (True, ""))
+
+    chain = queue.get_agent_chain({"task_type": "implementation", "agent": "codex"}, cfg)
+    assert chain == ["claude"], "requested over-budget agent must be removed while fallback remains"
+    assert queue.get_next_agent({"task_type": "implementation", "agent": "codex"}, cfg, []) == "claude"
