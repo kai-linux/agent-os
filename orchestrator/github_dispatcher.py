@@ -543,6 +543,8 @@ def _validated_agent_assignment(cfg: dict, project_key: str, task_type: str, req
                 "All configured candidates have exceeded their monthly hard-stop "
                 "budget for " + next(iter(budget_skipped.values()))["month_key"] + "."
             )
+        if requested_agent != "auto" and requested_agent in budget_skipped:
+            return after_budget[0]
 
     return requested_agent
 

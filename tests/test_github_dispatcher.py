@@ -870,6 +870,58 @@ def test_build_mailbox_task_rejects_when_all_candidates_hard_stopped(tmp_path, m
         gd.build_mailbox_task(cfg, "proj", repo_cfg, issue)
 
 
+def test_build_mailbox_task_reassigns_requested_hard_stopped_agent_to_fallback(tmp_path, monkeypatch):
+    metrics_dir = tmp_path / "runtime" / "metrics"
+    metrics_dir.mkdir(parents=True)
+    month_key = budgets.current_month_key()
+    (metrics_dir / budgets.COST_EVENTS_FILENAME).write_text(
+        json.dumps(
+            {
+                "timestamp": f"{month_key}-15T00:00:00+00:00",
+                "month_key": month_key,
+                "task_id": "task-1",
+                "agent": "codex",
+                "usd_estimate": 5.0,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    cfg = {
+        "root_dir": str(tmp_path),
+        "default_agent": "auto",
+        "default_task_type": "implementation",
+        "default_base_branch": "main",
+        "default_allow_push": True,
+        "default_max_attempts": 4,
+        "max_runtime_minutes": 40,
+        "formatter_model": None,
+        "agent_fallbacks": {"implementation": ["codex", "claude"]},
+        "budgets": {
+            "per_agent": {
+                "codex": {"hard_stop_usd": 2.0},
+                "claude": {"hard_stop_usd": 10.0},
+            },
+        },
+    }
+    repo_cfg = {"local_repo": "/tmp/repo", "github_repo": "owner/repo"}
+    issue = {
+        "number": 43,
+        "title": "Respect requested-agent budget hard stop",
+        "url": "https://github.com/owner/repo/issues/43",
+        "labels": [{"name": "codex"}],
+        "body": "## Goal\nRespect requested-agent budget hard stop.\n",
+    }
+
+    monkeypatch.setattr(gd, "format_task", lambda title, body, model=None: None)
+
+    _task_id, task_md = gd.build_mailbox_task(cfg, "proj", repo_cfg, issue)
+
+    assert "agent: claude" in task_md
+    assert "agent: codex" not in task_md
+
+
 def test_build_mailbox_task_skips_agent_below_adaptive_threshold(tmp_path, monkeypatch):
     """Agents with <25% success over 7 days are skipped by the adaptive gate."""
     metrics_dir = tmp_path / "runtime" / "metrics"
