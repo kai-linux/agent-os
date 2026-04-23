@@ -15,6 +15,8 @@ from orchestrator.agent_scorer import (
     compute_success_rates,
     load_recent_metrics,
 )
+from orchestrator.budgets import budget_snapshot
+from orchestrator.paths import load_config
 
 
 WINDOW_DAYS = 14
@@ -305,8 +307,19 @@ def build_dashboard_snapshot(root: Path) -> dict:
             "forks": github_metrics.get("forks"),
             "open_issues": github_metrics.get("open_issues"),
         },
+        "budgets": _budget_snapshot_safe(root, [item["agent"] for item in per_agent]),
     }
     return snapshot
+
+
+def _budget_snapshot_safe(root: Path, agents: list[str]) -> dict:
+    """Best-effort budget snapshot — returns an empty record when config is absent."""
+    try:
+        cfg = load_config()
+        cfg.setdefault("root_dir", str(root))
+    except Exception:
+        return {"month_key": None, "enabled": False, "per_agent": [], "total_spend_usd": 0.0}
+    return budget_snapshot(cfg, agents=agents)
 
 
 def _text_bar(value: float | None, width: int = 12) -> str:
@@ -389,6 +402,27 @@ def render_markdown(snapshot: dict) -> str:
             lines.append(f"- `{item['code']}`: {item['count']}")
     else:
         lines.append("- No blocker categories in the current window.")
+
+    budgets = snapshot.get("budgets") or {}
+    if budgets.get("enabled") and budgets.get("per_agent"):
+        lines.extend([
+            "",
+            f"## Monthly Spend — {budgets.get('month_key', 'n/a')}",
+            "",
+            "| Agent | Spend | Hard-stop | Remaining | Status |",
+            "|---|---|---|---|---|",
+        ])
+        for item in budgets["per_agent"]:
+            hard = item.get("hard_stop_usd")
+            remaining = item.get("remaining_usd")
+            status = "hard-stopped" if item.get("hard_stopped") else "ok"
+            lines.append(
+                f"| {item['agent']} "
+                f"| ${item['spend_usd']:.2f} "
+                f"| {'unlimited' if hard is None else f'${float(hard):.2f}'} "
+                f"| {'n/a' if remaining is None else f'${float(remaining):.2f}'} "
+                f"| {status} |"
+            )
 
     lines.extend([
         "",

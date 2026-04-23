@@ -32,6 +32,7 @@ from orchestrator.task_formatter import (
 from orchestrator.task_decomposer import decompose_issue, create_sub_issues
 from orchestrator.outcome_attribution import parse_outcome_check_ids
 from orchestrator.agent_scorer import filter_healthy_agents, log_gate_decision, ADAPTIVE_HEALTH_WINDOW_DAYS, ADAPTIVE_HEALTH_THRESHOLD
+from orchestrator.budgets import filter_budget_compliant_agents
 from orchestrator.trust import is_trusted
 from orchestrator.queue import (
     send_telegram,
@@ -523,6 +524,25 @@ def _validated_agent_assignment(cfg: dict, project_key: str, task_type: str, req
             passed=original_chain,
             context=f"dispatcher:resolve_agent task_type={task_type}",
         )
+
+    after_budget, budget_skipped = filter_budget_compliant_agents(healthy_chain or chain or original_chain, cfg)
+    if budget_skipped:
+        log_gate_decision(
+            metrics_file.parent,
+            gate="budget_hard_stop_monthly",
+            skipped={
+                agent: {"total": 0, "successes": 0, "rate": 0.0, **stats}
+                for agent, stats in budget_skipped.items()
+            },
+            passed=after_budget,
+            context=f"dispatcher:resolve_agent task_type={task_type}",
+        )
+        if not after_budget:
+            raise ValueError(
+                f"No healthy agents available for task_type={task_type!r}. "
+                "All configured candidates have exceeded their monthly hard-stop "
+                "budget for " + next(iter(budget_skipped.values()))["month_key"] + "."
+            )
 
     return requested_agent
 
