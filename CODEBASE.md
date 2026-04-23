@@ -42,6 +42,18 @@
 
 ## Recent Changes
 
+### 2026-04-23 — [task-20260423-070430-add-project-bundle-export-import-for-portable-agen] (#238 kai-linux/agent-os)
+Implemented portable agent-os project bundle export/import commands with deterministic archives, secret placeholder documentation, aggregate-only metrics, import-time secret restoration, config validation, and an optional no-op dispatch smoke task.
+
+**Files:** `- bin/aos-export`, `- bin/aos-import`, `- orchestrator/project_bundle.py`, `- tests/test_project_bundle.py`, `- .agent_result.md`
+
+**Decisions:**
+  - - Kept raw runtime artifacts out of the bundle and exported only aggregate task counts, success rate, and mean completion time from `agent_stats.jsonl`.
+  - - Used deterministic tar/gzip metadata with sorted entries and zero mtimes so repeated exports of unchanged state are byte-reproducible.
+  - - Made import fail on non-empty target repos unless `--force` is supplied to avoid accidental collision overwrites.
+  - - Implemented no-op dispatch verification as an explicit `--smoke-dispatch` import option so normal imports do not enqueue unexpected work.
+
+
 ### 2026-04-23 — [task-20260423-070235-validate-and-test-missing-context-blocker-reductio] (#216 kai-linux/agent-os)
 Validated that the task-20260409-070520 intake-validation fixes are already wired into `write_prompt()` (git state, objective alignment, sprint directives) and that `log_analyzer.check_blocker_regression_alerts` already fires a Telegram alert when `missing_context` exceeds 5 in a rolling 24h window. Added four regression tests in `tests/test_queue.py` that lock the dispatch-context injection contract: sprint-directives inclusion, sprint-directives fallback-omission, empty-git-state fallback-omission, and a parametrized per-agent (claude, codex, deepseek) agent-agnostic check.
 
