@@ -1033,6 +1033,116 @@ def test_dispatch_item_blocks_publish_task_when_push_not_ready(tmp_path, monkeyp
     }
 
 
+def test_dispatch_item_transfers_public_website_issue_from_backend_repo(tmp_path, monkeypatch):
+    cfg = {"github_owner": "owner"}
+    paths = {"INBOX": tmp_path}
+    info = {"project_id": "project-1", "status_field_id": "status-field", "status_options": {}}
+    project_cfg = {
+        "repos": [
+            {
+                "key": "eigendark",
+                "github_repo": "owner/eigendark",
+                "local_repo": "/tmp/eigendark",
+                "website_repo_key": "eigendark-website",
+            },
+            {
+                "key": "eigendark-website",
+                "github_repo": "owner/eigendark-website",
+                "local_repo": "/tmp/eigendark-website",
+            },
+        ],
+        "required_labels": ["ready"],
+    }
+    repo_cfg = project_cfg["repos"][0]
+    ready_items = [{
+        "item_id": "item-1",
+        "number": 71,
+        "title": "Make the /organizations page visually more appealing",
+        "body": "Current page: https://www.eigendark.com/organizations",
+        "url": "https://github.com/owner/eigendark/issues/71",
+        "labels": {"ready"},
+        "repo": "owner/eigendark",
+        "author": "trusted-user",
+        "state": "OPEN",
+    }]
+    repo_to_project = {"owner/eigendark": ("proj", project_cfg, repo_cfg)}
+    comments = []
+    gh_calls = []
+
+    monkeypatch.setattr(gd, "is_trusted", lambda author, _cfg: True)
+    monkeypatch.setattr(gd, "add_issue_comment", lambda repo, number, body: comments.append((repo, number, body)))
+    monkeypatch.setattr(gd, "gh", lambda cmd, **kwargs: gh_calls.append(cmd) or "")
+    monkeypatch.setattr(gd, "build_mailbox_task", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("wrong repo dispatched")))
+
+    dispatched = gd._dispatch_item(cfg, paths, "owner", repo_to_project, info, ready_items, {})
+
+    assert dispatched is True
+    assert not list(tmp_path.iterdir())
+    assert gh_calls == [["issue", "transfer", "71", "owner/eigendark-website", "-R", "owner/eigendark"]]
+    assert comments == [(
+        "owner/eigendark",
+        71,
+        (
+            "🤖 Auto-routing this issue to the website repository because the task "
+            "targets the public website domain, not this backend repository.\n\n"
+            "Destination: `owner/eigendark-website`\n"
+            f"Reason label: `{gd.WRONG_REPO_LABEL}`"
+        ),
+    )]
+
+
+def test_dispatch_item_does_not_transfer_backend_issue_without_public_domain(tmp_path, monkeypatch):
+    cfg = {
+        "default_agent": "codex",
+        "default_task_type": "implementation",
+        "agent_fallbacks": {"implementation": ["codex"]},
+    }
+    paths = {"INBOX": tmp_path}
+    info = {"project_id": "project-1", "status_field_id": None, "status_options": {}}
+    project_cfg = {
+        "repos": [
+            {
+                "key": "eigendark",
+                "github_repo": "owner/eigendark",
+                "local_repo": "/tmp/eigendark",
+                "website_repo_key": "eigendark-website",
+            },
+            {
+                "key": "eigendark-website",
+                "github_repo": "owner/eigendark-website",
+                "local_repo": "/tmp/eigendark-website",
+            },
+        ],
+        "required_labels": ["ready"],
+    }
+    repo_cfg = project_cfg["repos"][0]
+    ready_items = [{
+        "item_id": "item-1",
+        "number": 72,
+        "title": "Fix backend import job",
+        "body": "The card ingestion worker fails on malformed rows.",
+        "url": "https://github.com/owner/eigendark/issues/72",
+        "labels": {"ready"},
+        "repo": "owner/eigendark",
+        "author": "trusted-user",
+        "state": "OPEN",
+    }]
+    repo_to_project = {"owner/eigendark": ("proj", project_cfg, repo_cfg)}
+
+    monkeypatch.setattr(gd, "is_trusted", lambda author, _cfg: True)
+    monkeypatch.setattr(gd, "_resolve_issue_dependencies", lambda *args, **kwargs: {"status": "clear"})
+    monkeypatch.setattr(gd, "_try_decompose", lambda *args, **kwargs: None)
+    monkeypatch.setattr(gd, "build_mailbox_task", lambda *args, **kwargs: ("task-1", "task body"))
+    monkeypatch.setattr(gd, "edit_issue_labels", lambda *args, **kwargs: None)
+    monkeypatch.setattr(gd, "add_issue_comment", lambda *args, **kwargs: None)
+    monkeypatch.setattr(gd, "_set_project_status", lambda *args, **kwargs: None)
+
+    dispatched = gd._dispatch_item(cfg, paths, "owner", repo_to_project, info, ready_items, {})
+
+    assert dispatched is True
+    assert len(list(tmp_path.iterdir())) == 1
+
+
 def test_skip_push_not_ready_persists_unblock_artifact(tmp_path, monkeypatch):
     """Push readiness block writes a structured unblock-notes artifact."""
     monkeypatch.setenv("ORCH_ROOT", str(tmp_path))

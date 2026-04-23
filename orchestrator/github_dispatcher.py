@@ -62,6 +62,7 @@ VALID_FALLBACK_AGENTS = VALID_ASSIGNABLE_AGENTS - {"auto"}
 AGENT_UNAVAILABLE_LABEL = "dispatch:agent-unavailable"
 AGENT_UNAVAILABLE_CODE = "agent_unavailable"
 CONTEXT_VALIDATION_LABEL = "dispatch:incomplete-context"
+WRONG_REPO_LABEL = "dispatch:wrong-repo"
 CI_CONTEXT_LINE_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"^\s*-\s+PR:\s+.+$", re.IGNORECASE),
     re.compile(r"^\s*-\s+Failed checks:\s*$", re.IGNORECASE),
@@ -146,6 +147,113 @@ def validate_task_context(
         "missing": missing,
         "present": present,
     }
+
+
+def _repo_slug(repo_cfg: dict) -> str:
+    repo = str(repo_cfg.get("github_repo") or "")
+    return repo.rsplit("/", 1)[-1].lower()
+
+
+def _companion_website_repo(project_cfg: dict, repo_cfg: dict) -> dict | None:
+    """Return the configured website companion for a backend repo, if any."""
+    repo_key = str(repo_cfg.get("key") or "").lower()
+    if repo_key.endswith("-website") or _repo_slug(repo_cfg).endswith("-website"):
+        return None
+
+    configured_key = str(repo_cfg.get("website_repo_key") or "").lower()
+    configured_repo = str(repo_cfg.get("website_github_repo") or "").lower()
+    expected_keys = {f"{repo_key}-website"} if repo_key else set()
+    expected_repos = {f"{repo_cfg.get('github_repo', '')}-website".lower()} if repo_cfg.get("github_repo") else set()
+
+    for candidate in project_cfg.get("repos", []):
+        candidate_key = str(candidate.get("key") or "").lower()
+        candidate_repo = str(candidate.get("github_repo") or "").lower()
+        if configured_key and candidate_key == configured_key:
+            return candidate
+        if configured_repo and candidate_repo == configured_repo:
+            return candidate
+        if candidate_key in expected_keys or candidate_repo in expected_repos:
+            return candidate
+    return None
+
+
+def _public_site_domain_candidates(repo_cfg: dict, website_repo_cfg: dict) -> set[str]:
+    candidates: set[str] = set()
+    for cfg in (repo_cfg, website_repo_cfg):
+        for field in ("public_domain", "domain", "website_domain"):
+            value = str(cfg.get(field) or "").strip().lower()
+            if value:
+                candidates.add(value.removeprefix("https://").removeprefix("http://").strip("/"))
+
+        for raw in (cfg.get("key"), _repo_slug(cfg)):
+            slug = str(raw or "").lower().removesuffix("-website")
+            if not slug:
+                continue
+            compact = slug.replace("-", "")
+            candidates.add(f"{slug}.com")
+            if compact != slug:
+                candidates.add(f"{compact}.com")
+
+    return {domain for domain in candidates if "." in domain}
+
+
+def _issue_targets_public_website(issue: dict, repo_cfg: dict, website_repo_cfg: dict) -> bool:
+    text = "\n".join(
+        str(issue.get(field) or "")
+        for field in ("title", "body", "url")
+    ).lower()
+    if not text:
+        return False
+
+    domains = _public_site_domain_candidates(repo_cfg, website_repo_cfg)
+    if any(re.search(rf"https?://(?:www\.)?{re.escape(domain)}(?:/|\b)", text) for domain in domains):
+        return True
+    if any(re.search(rf"\b(?:www\.)?{re.escape(domain)}/", text) for domain in domains):
+        return True
+    return False
+
+
+def _maybe_transfer_public_website_issue(
+    repo_full: str,
+    project_cfg: dict,
+    repo_cfg: dict,
+    issue: dict,
+) -> bool:
+    """Move public-site issues from a backend repo to its website companion."""
+    website_repo_cfg = _companion_website_repo(project_cfg, repo_cfg)
+    if not website_repo_cfg:
+        return False
+    target_repo = website_repo_cfg.get("github_repo")
+    if not target_repo or not _issue_targets_public_website(issue, repo_cfg, website_repo_cfg):
+        return False
+
+    number = issue["number"]
+    comment = (
+        "🤖 Auto-routing this issue to the website repository because the task "
+        "targets the public website domain, not this backend repository.\n\n"
+        f"Destination: `{target_repo}`\n"
+        f"Reason label: `{WRONG_REPO_LABEL}`"
+    )
+    try:
+        add_issue_comment(repo_full, number, comment)
+        gh(["issue", "transfer", str(number), target_repo, "-R", repo_full])
+        print(f"Transferred public website issue {repo_full}#{number} -> {target_repo}")
+    except Exception as exc:
+        edit_issue_labels(
+            repo_full,
+            number,
+            add=["blocked", WRONG_REPO_LABEL],
+            remove=project_cfg.get("required_labels", []) + ["in-progress", "agent-dispatched"],
+        )
+        add_issue_comment(
+            repo_full,
+            number,
+            "🤖 Blocked before dispatch: this appears to target the website repo, "
+            f"but automatic transfer to `{target_repo}` failed.\n\n"
+            f"Error: `{exc}`",
+        )
+        print(f"Blocked {repo_full}#{number} — failed to transfer to {target_repo}: {exc}")
+    return True
 
 
 def _record_context_completeness(
@@ -1861,6 +1969,9 @@ def _dispatch_item(cfg, paths, owner, repo_to_project, info, ready_items, issue_
         if item["labels"].intersection(excluded):
             continue
 
+        if _maybe_transfer_public_website_issue(repo_full, pcfg, rcfg, item):
+            return True
+
         resolution = _resolve_issue_dependencies(repo_full, item, issue_lookup, {})
         if resolution["status"] == "blocked":
             _mark_issue_blocked(repo_full, item, info, pcfg, resolution["dependency"])
@@ -2098,6 +2209,8 @@ def dispatch_one():
                     if labels.intersection(excluded):
                         continue
                     issue_with_label_set = {**issue, "labels": labels}
+                    if _maybe_transfer_public_website_issue(repo_full, project_cfg, repo_cfg, issue_with_label_set):
+                        return
                     resolution = _resolve_issue_dependencies(repo_full, issue_with_label_set, {}, {})
                     if resolution["status"] == "blocked":
                         add_issue_comment(repo_full, issue["number"], f"Waiting for #{resolution['dependency']}")
