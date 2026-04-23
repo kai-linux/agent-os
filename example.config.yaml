@@ -148,7 +148,8 @@ cost_tracking:
                                      #   output_per_million_tokens: 48.0
 
 budgets:
-  # Per-agent monthly USD budget caps. Missing agents are treated as unlimited.
+  # Per-agent monthly USD budget caps. Agents omitted from per_agent use
+  # budgets.default when present; without a matching default they are unlimited.
   # soft_warn_usd  — fires a one-time Telegram warning for the month.
   # hard_stop_usd  — removes the agent from healthy-agent selection for the
   #                  remainder of the calendar month (UTC).

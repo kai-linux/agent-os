@@ -111,6 +111,24 @@ def test_budget_for_agent_falls_back_to_default(tmp_path):
     entry = budgets.budget_for_agent(cfg, "gemini")
     assert entry == {"soft_warn_usd": 1.0, "hard_stop_usd": 2.0}
 
+def test_filter_budget_compliant_applies_default_hard_stop(tmp_path):
+    cfg = _cfg(tmp_path)
+    metrics_dir = Path(cfg["root_dir"]) / "runtime" / "metrics"
+    month_key = budgets.current_month_key()
+    _seed_cost_events(metrics_dir, [
+        {
+            "timestamp": f"{month_key}-20T00:00:00+00:00",
+            "month_key": month_key,
+            "task_id": "t1",
+            "agent": "gemini",
+            "usd_estimate": 2.5,
+        },
+    ])
+    passing, skipped = budgets.filter_budget_compliant_agents(["gemini", "claude"], cfg)
+    assert passing == ["claude"]
+    assert skipped["gemini"]["hard_stop_usd"] == 2.0
+    assert skipped["gemini"]["hard_stopped"] is True
+
 def test_budget_for_agent_returns_none_when_missing():
     assert budgets.budget_for_agent({}, "codex") is None
     assert budgets.budget_for_agent({"budgets": {}}, "codex") is None
@@ -317,11 +335,6 @@ def test_get_agent_chain_excludes_hard_stopped_sole_candidate(tmp_path, monkeypa
     assert chain == [], "hard-stopped sole candidate must be removed from dispatch chain"
     assert queue.get_next_agent({"task_type": "implementation", "agent": "auto"}, cfg, []) is None
 
-def test_get_agent_chain_skips_requested_hard_stopped_agent_and_keeps_fallback(tmp_path, monkeypatch):
-    """A requested agent must not bypass the monthly hard-stop, but a compliant
-    fallback should still be available for dispatch.
-    """
-
 def test_get_agent_chain_skips_hard_stopped_requested_agent_and_uses_fallback(tmp_path, monkeypatch):
     """Regression: an explicit agent preference must not bypass the monthly
     hard-stop when a compliant fallback is available."""
@@ -356,4 +369,3 @@ def test_get_agent_chain_skips_hard_stopped_requested_agent_and_uses_fallback(tm
     chain = queue.get_agent_chain(meta, cfg)
     assert chain == ["claude"], "over-budget requested agent must not be selected"
     assert queue.get_next_agent(meta, cfg, []) == "claude"
-
