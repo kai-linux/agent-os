@@ -39,13 +39,28 @@ Sprint selection should balance:
 
 
 
+
 <!-- auto-focus-areas -->
-- GitHub adoption funnel: README improvements, quickstart/deployment guides, case studies, and discoverability
-- Agent reliability and task processing: Codex degradation fixes, missing_context blocker resolution, CI cascade prevention
-- Observability infrastructure: SLO/cost tracking, outcome metrics, dashboards, and goal ancestry
-- Execution resilience: Auto-recovery of stalled tasks, work verification, and adaptive routing
+- GitHub adoption through content, guides, and case studies
+- Task reliability and cost management
+- Outcome measurement and closed-loop optimization
+- Pre-merge quality gates and deduplication
 
 ## Sprint History
+
+### Sprint 2026-04-23
+
+**Retrospective:**
+PRs merged:
+- PR #305: Agent: task-20260421-122331-phase-1-tailscale-secret-key-auth-layer (branch: agent/task-20260421-122331-phase-1-tailscale-secret-key-auth-layer)
+
+**Plan:**
+- [prio:high] Track per-agent token/cost spend and enforce monthly budget hard-stops: Human-filed prio:high issue addressing a core Operator Trust rubric gap — cost tracking infrastructure landed last sprint (#253) but hard-stop enforcement closes the trust loop that makes sustained autonomous operation safe, directly advancing the Execution Reliability and Operator Trust dimensions. Production signals: Repeat-Recovery Signals (improved=4, inconclusive=8, unchanged=1).
+- [prio:high] Add project bundle export/import for portable agent-os setups: Activation friction is the operator-validated blocker to fork growth (14% objective weight, still at 0 forks) — a portable export/import command converts curious forkers into retained users by making it trivial to try agent-os on a real repo, directly targeting the Adoption & Credibility rubric dimension. Production signals: Repeat-Recovery Signals (improved=4, inconclusive=8, unchanged=1).
+- [prio:high] Replace title-similarity dedup with semantic + in-flight + cross-repo dedup: The backlog shows multiple near-duplicate human-filed issues (#279/#280/#286 severity-tier, #281/#283/#287 telegram audit, #282/#284 ADR curator) proving title-similarity dedup is failing — semantic + in-flight dedup prevents wasted dispatch cycles and advances the Execution Reliability rubric dimension without requiring agent-side fixes. Production signals: Repeat-Recovery Signals (improved=4, inconclusive=8, unchanged=1).
+- [prio:high] Create video walkthrough of Agent OS autonomous multi-repo workflow: Adoption signals are stalled (2 stars, 0 forks for 14+ days) and product inspection flags missing CTAs and weak social proof; a video is the highest-leverage visible proof-of-capability for the 29%-weighted stars metric and compounds with the FORK_GUIDE and local-dev docs shipped last sprint. Production signals: Repeat-Recovery Signals (improved=4, inconclusive=8, unchanged=1).
+- [prio:high] Validate and test missing_context blocker reduction fix: Cross-sprint measurement lag is a repeating concern — every outcome since sprint 2026-04-09 remains inconclusive, and validating the missing_context fix with a regression test closes the first real outcome-measurement loop and advances the system from Level 3 toward Level 4 closed-loop optimization. Production signals: Repeat-Recovery Signals (improved=4, inconclusive=8, unchanged=1).
+
 
 ### Sprint 2026-04-21
 
