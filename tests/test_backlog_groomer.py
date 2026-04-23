@@ -187,6 +187,57 @@ def test_groom_repo_adds_created_issue_to_backlog(tmp_path, monkeypatch):
     assert backlog_urls == ["https://github.com/owner/repo/issues/10"]
 
 
+def test_groom_repo_semantically_suppresses_duplicate_issue(tmp_path, monkeypatch):
+    cfg = {
+        "root_dir": str(tmp_path),
+        "worktrees_dir": str(tmp_path / "worktrees"),
+        "semantic_dedup": {"fallback": "always_simhash", "threshold": 0.82, "recently_closed_days": 0},
+    }
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "README.md").write_text("## Goal\n\nKeep the repo healthy.\n", encoding="utf-8")
+    (repo / "NORTH_STAR.md").write_text("# North Star\n", encoding="utf-8")
+    (repo / "STRATEGY.md").write_text("# Strategy\n", encoding="utf-8")
+    (repo / "PLANNING_PRINCIPLES.md").write_text("# Planning Principles\n", encoding="utf-8")
+    (repo / "CODEBASE.md").write_text("# Codebase\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        bg,
+        "_list_open_issues",
+        lambda repo, cfg: [
+            {
+                "number": 42,
+                "title": "Deduplicate duplicate grooming tickets",
+                "body": "Avoid filing redundant backlog work.",
+                "labels": [{"name": "enhancement"}],
+                "url": "https://github.com/owner/repo/issues/42",
+            }
+        ],
+    )
+    monkeypatch.setattr(bg, "load_recent_metrics", lambda *args, **kwargs: [{"task_id": "t1", "repo": "owner/repo"}])
+    monkeypatch.setattr(bg, "_parse_known_issues", lambda repo_path: [])
+    monkeypatch.setattr(bg, "_find_risk_flags", lambda cfg: [])
+    monkeypatch.setattr(
+        bg,
+        "_call_haiku",
+        lambda prompt: '[{"title":"Dedup duplicate groomer issues","body":"## Goal\\nSuppress redundant backlog items before filing.","priority":"prio:high","labels":["enhancement"]}]',
+    )
+    monkeypatch.setattr(bg, "_open_issue_exists", lambda repo, title: False)
+    monkeypatch.setattr(bg, "_create_issue", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("duplicate should not be created")))
+    comments = []
+    monkeypatch.setattr(bg, "add_issue_comment", lambda repo, number, body: comments.append((repo, number, body)))
+
+    result = bg.groom_repo(cfg, "owner/repo", repo)
+
+    assert result["status"] == "skipped"
+    assert result["created"] == 0
+    assert result["skipped"] == 1
+    assert comments
+    assert comments[0][1] == 42
+    assert "similarity" in comments[0][2]
+    assert "Dedup duplicate groomer issues" in comments[0][2]
+
+
 def test_cleanup_stale_issue_when_referenced_pr_merged(monkeypatch):
     closed = []
     done = []

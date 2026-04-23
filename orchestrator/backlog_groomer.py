@@ -69,6 +69,13 @@ from orchestrator.quality_harness import (
 from orchestrator.queue import planner_reply_markup, save_telegram_action
 from orchestrator.scheduler_state import is_due, record_run, job_lock
 from orchestrator.repo_modes import is_dispatcher_only_repo
+from orchestrator.semantic_dedup import (
+    DedupCandidate,
+    DedupMatch,
+    SemanticDeduper,
+    collect_dedup_candidates,
+    semantic_dedup_enabled,
+)
 from orchestrator.skip_signals import load_skip_signals, skip_penalty_for_issue as _skip_penalty_for_issue
 from orchestrator.task_formatter import append_goal_ancestry_sections, resolve_goal_ancestry
 from orchestrator.trust import is_trusted
@@ -181,7 +188,7 @@ def _list_open_issues(repo: str, cfg: dict) -> list[dict]:
     """Return open issues from trusted authors for a repo via gh CLI."""
     raw = _gh([
         "issue", "list", "--repo", repo, "--state", "open",
-        "--json", "number,title,createdAt,updatedAt,labels,author,url",
+        "--json", "number,title,body,createdAt,updatedAt,labels,author,url",
         "--limit", "100",
     ])
     if not raw:
@@ -855,11 +862,62 @@ def _title_similar(a: str, b: str) -> float:
 
 
 def _is_duplicate(title: str, existing_titles: list[str]) -> bool:
-    """Check if title is semantically similar to any existing title."""
+    """Check if title is similar to any existing title using string fallback."""
     for existing in existing_titles:
         if _title_similar(title, existing) >= SIMILARITY_THRESHOLD:
             return True
     return False
+
+
+def _semantic_match(
+    deduper: SemanticDeduper | None,
+    title: str,
+    body: str,
+    candidates: list[DedupCandidate],
+) -> DedupMatch | None:
+    if not deduper:
+        return None
+    try:
+        return deduper.find_duplicate(title, body, candidates)
+    except Exception as e:
+        print(f"  Warning: semantic dedup failed; using string fallback only: {e}")
+        return None
+
+
+def _semantic_pointer_comment(match: DedupMatch, suppressed_title: str) -> str:
+    today = datetime.now(timezone.utc).date().isoformat()
+    source = match.candidate.source.replace("_", " ")
+    return (
+        f"another scorer signal matched this at similarity {match.similarity:.2f} on {today}: "
+        f"suppressed near-duplicate `{suppressed_title}` against {source}."
+    )
+
+
+def _comment_semantic_match(github_slug: str, match: DedupMatch, suppressed_title: str) -> None:
+    number = match.candidate.number
+    if number is None:
+        return
+    try:
+        add_issue_comment(github_slug, number, _semantic_pointer_comment(match, suppressed_title))
+    except Exception as e:
+        print(f"  Warning: failed to add semantic dedup pointer on #{number}: {e}")
+
+
+def _skip_semantic_duplicate(
+    github_slug: str,
+    deduper: SemanticDeduper | None,
+    title: str,
+    body: str,
+    candidates: list[DedupCandidate],
+) -> DedupMatch | None:
+    match = _semantic_match(deduper, title, body, candidates)
+    if match:
+        _comment_semantic_match(github_slug, match, title)
+        print(
+            f"  Skip (semantic duplicate {match.similarity:.2f} via {match.backend} "
+            f"against {match.candidate.source}): {title!r}"
+        )
+    return match
 
 
 def _open_issue_exists(repo: str, title: str) -> bool:
@@ -1213,6 +1271,8 @@ def _apply_approved_system_architect_actions(
     paths: dict,
     github_slug: str,
     open_titles: list[str],
+    semantic_deduper: SemanticDeduper | None,
+    semantic_candidates: list[DedupCandidate],
     base_ancestry: dict,
 ) -> list[str]:
     created_urls: list[str] = []
@@ -1227,6 +1287,13 @@ def _apply_approved_system_architect_actions(
             action["status"] = "invalid"
             save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
             continue
+        body = str(issue.get("body") or "").strip()
+        if _skip_semantic_duplicate(github_slug, semantic_deduper, title, body, semantic_candidates):
+            action["status"] = "completed"
+            action["issue_url"] = "(duplicate skipped)"
+            action["completed_at"] = datetime.now(timezone.utc).isoformat()
+            save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
+            continue
         if _is_duplicate(title, open_titles) or _open_issue_exists(github_slug, title):
             action["status"] = "completed"
             action["issue_url"] = "(duplicate skipped)"
@@ -1238,7 +1305,7 @@ def _apply_approved_system_architect_actions(
         priority = str(issue.get("priority") or "prio:high").strip()
         if priority not in labels:
             labels.append(priority)
-        body = append_goal_ancestry_sections(str(issue.get("body") or "").strip(), base_ancestry)
+        body = append_goal_ancestry_sections(body, base_ancestry)
         body += format_outcome_checks_section(
             get_repo_outcome_check_ids(cfg, github_slug, issue_labels=labels)
         )
@@ -1262,6 +1329,9 @@ def _apply_approved_system_architect_actions(
         save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
         created_urls.append(url)
         open_titles.append(title)
+        semantic_candidates.append(
+            DedupCandidate(title=title, body=body, number=None, url=url, state="open", source="created_this_run")
+        )
     return created_urls
 
 
@@ -1442,6 +1512,18 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
         )
 
     open_titles = [i.get("title", "") for i in open_issues]
+    semantic_deduper: SemanticDeduper | None = None
+    semantic_candidates: list[DedupCandidate] = []
+    if semantic_dedup_enabled(cfg, github_slug):
+        try:
+            semantic_deduper = SemanticDeduper(cfg, github_slug, repo_path)
+            semantic_candidates = collect_dedup_candidates(cfg, github_slug, repo_path, open_issues)
+            print(
+                f"  Semantic dedup: {len(semantic_candidates)} candidates, "
+                f"threshold={semantic_deduper.threshold:.2f}, backend={semantic_deduper.backend_name}"
+            )
+        except Exception as e:
+            print(f"  Warning: semantic dedup unavailable; using title-string fallback: {e}")
     stale = _stale_issues(open_issues)
     print(
         f"  Open issues: {len(open_issues)}, stale (>{STALE_DAYS}d): {len(stale)}, "
@@ -1510,6 +1592,8 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
         paths,
         github_slug,
         open_titles,
+        semantic_deduper,
+        semantic_candidates,
         base_ancestry,
     )
     if approved_urls:
@@ -1745,6 +1829,9 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
     for finding in architect_findings:
         issue = _system_architect_issue_for_finding(finding)
         title = issue["title"]
+        body = str(issue.get("body") or "")
+        if _skip_semantic_duplicate(github_slug, semantic_deduper, title, body, semantic_candidates):
+            continue
         if _is_duplicate(title, open_titles) or _open_issue_exists(github_slug, title):
             continue
         if _queue_system_architect_approval(cfg, paths, github_slug, finding, issue, cadence_days):
@@ -1768,7 +1855,13 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
         if not title:
             continue
 
-        # Local dedup against existing open issues
+        # Semantic dedup against open issues, recent closed issues, and active
+        # agent/task branches before falling back to title-string checks.
+        if _skip_semantic_duplicate(github_slug, semantic_deduper, title, body, semantic_candidates):
+            skipped.append(title)
+            continue
+
+        # Local title-string fallback against existing open issues
         if _is_duplicate(title, open_titles):
             print(f"  Skip (similar to open): {title!r}")
             skipped.append(title)
@@ -1797,6 +1890,9 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
             print(f"  Created: {url}")
             created_urls.append(url)
             open_titles.append(title)  # Prevent self-duplication within batch
+            semantic_candidates.append(
+                DedupCandidate(title=title, body=body, number=None, url=url, state="open", source="created_this_run")
+            )
         except Exception as e:
             print(f"  Failed to create {title!r}: {e}")
             failed.append(title)
