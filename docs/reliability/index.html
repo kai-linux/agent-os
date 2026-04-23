@@ -114,11 +114,11 @@
   <main>
     <h1>Agent OS Reliability Dashboard</h1>
     <p class="lede">Public, aggregate reliability metrics for technical builders evaluating whether Agent OS ships useful work consistently.</p>
-    <p class="meta">Updated 2026-04-22T03:00:01.658445+00:00 | Rolling 14-day window | Sources: runtime/metrics/agent_stats.jsonl + PRODUCTION_FEEDBACK.md</p>
+    <p class="meta">Updated 2026-04-23T03:00:01.800623+00:00 | Rolling 14-day window | Sources: runtime/metrics/agent_stats.jsonl + PRODUCTION_FEEDBACK.md</p>
     <div class="cards">
-      <section class="card"><p class="eyebrow">Task success rate</p><p class="metric">71%</p><p class="detail">85/119</p></section>
+      <section class="card"><p class="eyebrow">Task success rate</p><p class="metric">69%</p><p class="detail">85/124</p></section>
 <section class="card"><p class="eyebrow">Mean completion time</p><p class="metric">0.1h</p><p class="detail">completed tasks only</p></section>
-<section class="card"><p class="eyebrow">Escalation rate</p><p class="metric">13%</p><p class="detail">16/119</p></section>
+<section class="card"><p class="eyebrow">Escalation rate</p><p class="metric">17%</p><p class="detail">21/124</p></section>
 <section class="card"><p class="eyebrow">GitHub stars</p><p class="metric">2</p><p class="detail">stargazers</p></section>
 <section class="card"><p class="eyebrow">GitHub forks</p><p class="metric">0</p><p class="detail">forks</p></section>
     </div>
@@ -130,7 +130,7 @@
           <tr><th>Period</th><th>Success</th><th>Mean time</th><th>Escalation</th></tr>
         </thead>
         <tbody>
-          <tr><td>Last 7 days</td><td>64% (58/90)</td><td>0.1h</td><td>18%</td></tr><tr><td>Prior 7 days</td><td>93% (27/29)</td><td>0.1h</td><td>0%</td></tr>
+          <tr><td>Last 7 days</td><td>61% (58/95)</td><td>0.1h</td><td>22%</td></tr><tr><td>Prior 7 days</td><td>93% (27/29)</td><td>0.1h</td><td>0%</td></tr>
         </tbody>
       </table>
       <p class="callout">This view intentionally stays aggregate-only: no task bodies, escalation notes, internal logs, or operator-sensitive details.</p>
@@ -143,7 +143,7 @@
             <tr><th>Date</th><th>Success</th><th>Escalation</th><th>Volume</th></tr>
           </thead>
           <tbody>
-            <tr><td>2026-04-09</td><td><code>##########..</code> 83%</td><td><code>............</code> 0%</td><td>12</td></tr><tr><td>2026-04-10</td><td><code>############</code> 100%</td><td><code>............</code> 0%</td><td>2</td></tr><tr><td>2026-04-11</td><td><code>............</code> n/a</td><td><code>............</code> n/a</td><td>0</td></tr><tr><td>2026-04-12</td><td><code>############</code> 100%</td><td><code>............</code> 0%</td><td>5</td></tr><tr><td>2026-04-13</td><td><code>............</code> n/a</td><td><code>............</code> n/a</td><td>0</td></tr><tr><td>2026-04-14</td><td><code>############</code> 100%</td><td><code>............</code> 0%</td><td>5</td></tr><tr><td>2026-04-15</td><td><code>############</code> 100%</td><td><code>............</code> 0%</td><td>5</td></tr><tr><td>2026-04-16</td><td><code>............</code> n/a</td><td><code>............</code> n/a</td><td>0</td></tr><tr><td>2026-04-17</td><td><code>####........</code> 35%</td><td><code>######......</code> 47%</td><td>17</td></tr><tr><td>2026-04-18</td><td><code>######......</code> 50%</td><td><code>#...........</code> 7%</td><td>28</td></tr><tr><td>2026-04-19</td><td><code>############</code> 100%</td><td><code>............</code> 0%</td><td>5</td></tr><tr><td>2026-04-20</td><td><code>............</code> n/a</td><td><code>............</code> n/a</td><td>0</td></tr><tr><td>2026-04-21</td><td><code>##########..</code> 80%</td><td><code>##..........</code> 17%</td><td>35</td></tr><tr><td>2026-04-22</td><td><code>............</code> n/a</td><td><code>............</code> n/a</td><td>0</td></tr>
+            <tr><td>2026-04-10</td><td><code>############</code> 100%</td><td><code>............</code> 0%</td><td>2</td></tr><tr><td>2026-04-11</td><td><code>............</code> n/a</td><td><code>............</code> n/a</td><td>0</td></tr><tr><td>2026-04-12</td><td><code>############</code> 100%</td><td><code>............</code> 0%</td><td>5</td></tr><tr><td>2026-04-13</td><td><code>............</code> n/a</td><td><code>............</code> n/a</td><td>0</td></tr><tr><td>2026-04-14</td><td><code>############</code> 100%</td><td><code>............</code> 0%</td><td>5</td></tr><tr><td>2026-04-15</td><td><code>############</code> 100%</td><td><code>............</code> 0%</td><td>5</td></tr><tr><td>2026-04-16</td><td><code>............</code> n/a</td><td><code>............</code> n/a</td><td>0</td></tr><tr><td>2026-04-17</td><td><code>####........</code> 35%</td><td><code>######......</code> 47%</td><td>17</td></tr><tr><td>2026-04-18</td><td><code>######......</code> 50%</td><td><code>#...........</code> 7%</td><td>28</td></tr><tr><td>2026-04-19</td><td><code>############</code> 100%</td><td><code>............</code> 0%</td><td>5</td></tr><tr><td>2026-04-20</td><td><code>............</code> n/a</td><td><code>............</code> n/a</td><td>0</td></tr><tr><td>2026-04-21</td><td><code>##########..</code> 80%</td><td><code>##..........</code> 17%</td><td>35</td></tr><tr><td>2026-04-22</td><td><code>######......</code> 50%</td><td><code>######......</code> 50%</td><td>10</td></tr><tr><td>2026-04-23</td><td><code>............</code> n/a</td><td><code>............</code> n/a</td><td>0</td></tr>
           </tbody>
         </table>
       </section>
@@ -154,7 +154,7 @@
             <tr><th>Agent</th><th>Success</th><th>Completed</th></tr>
           </thead>
           <tbody>
-            <tr><td>claude</td><td>77%</td><td>55/71</td></tr><tr><td>codex</td><td>67%</td><td>24/36</td></tr><tr><td>deepseek</td><td>62%</td><td>5/8</td></tr><tr><td>gemini</td><td>25%</td><td>1/4</td></tr>
+            <tr><td>claude</td><td>77%</td><td>55/71</td></tr><tr><td>deepseek</td><td>62%</td><td>5/8</td></tr><tr><td>codex</td><td>59%</td><td>24/41</td></tr><tr><td>gemini</td><td>25%</td><td>1/4</td></tr>
           </tbody>
         </table>
       </section>
@@ -168,8 +168,8 @@
         <h2>Source Freshness</h2>
         <table>
           <tbody>
-            <tr><th>agent_stats.jsonl</th><td>119 records</td></tr>
-            <tr><th>Latest runtime metric</th><td>2026-04-21T13:54:21.951086+00:00</td></tr>
+            <tr><th>agent_stats.jsonl</th><td>124 records</td></tr>
+            <tr><th>Latest runtime metric</th><td>2026-04-22T17:29:05.565671+00:00</td></tr>
             <tr><th>PRODUCTION_FEEDBACK.md</th><td>n/a</td></tr>
           </tbody>
         </table>
