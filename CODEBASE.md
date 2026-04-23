@@ -42,6 +42,17 @@
 
 ## Recent Changes
 
+### 2026-04-23 — [task-20260423-072342-track-per-agent-token-cost-spend-and-enforce-month-retry-2] (#231 kai-linux/agent-os)
+Per-agent monthly cost tracking with hard-stop enforcement is shipped on the agent branch as commit `3804af5`. The prior `claude` attempt actually pushed the implementation successfully — the runner only exited code 2 at the very end due to an unrelated `agent_runner.sh` shell-quoting bug, which prevented a valid `.agent_result.md` from being produced. This retry verified that the shipped implementation matches the success criteria, that the full test suite (611 tests) passes on the live branch HEAD, and recorded the result file the previous attempt failed to emit.
+
+**Files:** `- orchestrator/budgets.py`, `- orchestrator/queue.py`, `- orchestrator/github_dispatcher.py`, `- orchestrator/public_dashboard.py`, `- example.config.yaml`, `- tests/test_budgets.py`
+
+**Decisions:**
+  - - Recognized that the prior attempt's `runner exited with code 2` was a downstream `agent_runner.sh` quoting bug that fired AFTER the implementation was committed and pushed; the actual implementation work was complete on the remote branch. Re-implementing the same module locally would only create a duplicate commit, so the retry was scoped to verification and to producing the `.agent_result.md` the prior run failed to emit.
+  - - Reset the local worktree to `origin/agent/...` rather than force-pushing a parallel implementation, to preserve the existing shipped commit `3804af5` and avoid a non-fast-forward overwrite of work that already passes the full test suite.
+  - - Did not modify the shipped code in this retry, per the "prefer minimal diffs" constraint and the "Do not repeat failed approaches" rule — the prior approach succeeded at the implementation level even though the runner reported failure.
+
+
 ### 2026-04-23 — [task-20260423-070711-phase-1-semantic-dedup-at-groom-time] (#306 kai-linux/agent-os)
 Implemented groom-time semantic duplicate suppression with local sentence-transformer embedding support, SQLite vector caching, deterministic SimHash-style fallback, configurable thresholding, and pointer comments on surviving matched issues.
 
