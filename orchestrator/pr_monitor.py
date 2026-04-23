@@ -405,6 +405,34 @@ def _find_merged_pr_for_task(repo: str, task_id: str) -> dict | None:
     return None
 
 
+def _find_closed_pr_for_task(repo: str, task_id: str) -> dict | None:
+    """Return the most recent closed-not-merged PR for this task, if any.
+
+    Without this, `_create_prs_for_orphan_branches` re-opens any PR an
+    operator deliberately closed (e.g. as superseded), creating an
+    immortal recreation loop until the branch itself is deleted.
+    """
+    if not task_id:
+        return None
+    title = f"Agent: {task_id}"
+    try:
+        prs = gh_json([
+            "pr", "list", "-R", repo, "--state", "closed",
+            "--search", title,
+            "--json", "number,title,headRefName,url,mergedAt",
+            "--limit", "20",
+        ]) or []
+    except Exception:
+        return None
+    for pr in prs:
+        if (pr.get("title") or "").strip() != title:
+            continue
+        if pr.get("mergedAt"):
+            continue
+        return pr
+    return None
+
+
 def _create_prs_for_orphan_branches(cfg: dict, repos: set[str]):
     """Open PRs for agent branches that have commits but no open PR yet."""
     for repo in sorted(repos):
@@ -438,6 +466,18 @@ def _create_prs_for_orphan_branches(cfg: dict, repos: set[str]):
                     gh(["api", f"repos/{repo}/git/refs/heads/{branch}",
                         "-X", "DELETE"], check=False)
                     print(f"  Deleted branch {branch}: merged PR already exists for task {task_id}")
+                except Exception:
+                    pass
+                continue
+            closed_pr = _find_closed_pr_for_task(repo, task_id)
+            if closed_pr:
+                # Operator deliberately closed this PR (e.g. superseded). Don't
+                # re-open in an immortal loop. Delete the branch so this orphan
+                # check stops surfacing it on every cron tick.
+                try:
+                    gh(["api", f"repos/{repo}/git/refs/heads/{branch}",
+                        "-X", "DELETE"], check=False)
+                    print(f"  Deleted branch {branch}: PR #{closed_pr.get('number')} was closed-not-merged for task {task_id}")
                 except Exception:
                     pass
                 continue
