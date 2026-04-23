@@ -42,6 +42,17 @@
 
 ## Recent Changes
 
+### 2026-04-23 — [task-20260423-130938-review-follow-up-pr-312-high-risk] (#316 kai-linux/agent-os)
+Reviewed the PR #312 high-risk budget enforcement paths in orchestrator/queue.py, orchestrator/github_dispatcher.py, and example.config.yaml; the queue hard-stop ordering and config semantics are correct, and a focused dispatcher regression test now locks the all-candidates-over-budget rejection behavior.
+
+**Files:** `- tests/test_github_dispatcher.py`, `- .agent_result.md`
+
+**Decisions:**
+  - - Kept the code unchanged because the reviewed queue and dispatcher enforcement logic matched the intended hard-stop behavior.
+  - - Added a test instead of refactoring so the follow-up remains review-driven and minimal.
+  - - Used cost_events.jsonl in the dispatcher test because PR #312 intentionally defines that artifact as the monthly budget enforcement source.
+
+
 ### 2026-04-23 — [task-20260423-072342-track-per-agent-token-cost-spend-and-enforce-month-retry-2] (#231 kai-linux/agent-os)
 Per-agent monthly cost tracking with hard-stop enforcement is shipped on the agent branch as commit `3804af5`. The prior `claude` attempt actually pushed the implementation successfully — the runner only exited code 2 at the very end due to an unrelated `agent_runner.sh` shell-quoting bug, which prevented a valid `.agent_result.md` from being produced. This retry verified that the shipped implementation matches the success criteria, that the full test suite (611 tests) passes on the live branch HEAD, and recorded the result file the previous attempt failed to emit.
 
