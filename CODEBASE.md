@@ -42,6 +42,16 @@
 
 ## Recent Changes
 
+### 2026-04-23 — [task-20260423-150549-review-follow-up-pr-313-high-risk] (#326 kai-linux/agent-os)
+Reviewed the PR #313 project bundle import/export high-risk paths and fixed a remaining crafted-bundle escape where manifest `contents` entries could reference paths outside the target repo even though archive extraction itself was confined.
+
+**Files:** `- orchestrator/project_bundle.py`, `- tests/test_project_bundle.py`, `- .agent_result.md`
+
+**Decisions:**
+  - - Kept the change focused on the flagged project bundle import safety surface rather than refactoring archive handling.
+  - - Validated manifest paths independently from tar extraction because `MANIFEST.yaml` is data that controls later filesystem writes.
+
+
 ### 2026-04-23 — [task-20260423-144637-review-follow-up-pr-313-high-risk] (#315 kai-linux/agent-os)
 Reviewed the PR #313 export/import shell entry points and project bundle import path. The shell wrappers correctly resolve the repository root, choose the local virtualenv Python when available, preserve arguments, and now have regression coverage exercising real `bin/aos-export` and `bin/aos-import` execution from a non-repo working directory. During validation, a narrow import archive path-boundary issue was found and fixed.
 
