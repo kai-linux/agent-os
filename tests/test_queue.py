@@ -24,6 +24,7 @@ from orchestrator.queue import (
     CommandExecutionError,
     _format_runner_failure,
     _parse_unblock_notes,
+    _quota_reset_at,
     _runner_environment_failure_from_log,
     _validate_workflow_files,
     agent_cooldown_remaining,
@@ -1377,6 +1378,36 @@ def test_format_runner_failure_classifies_claude_hit_limit_stdout():
     assert "usage limit / rate limit" in summary
     assert "hit your limit" in detail
     assert any("stdout tail" in item for item in blockers)
+
+
+def test_quota_reset_at_parses_provider_reset_timezone():
+    now = datetime(2026, 4, 23, 10, 8, tzinfo=timezone.utc)
+
+    reset_at = _quota_reset_at("You've hit your limit · resets 8am (Europe/Berlin)", now=now)
+
+    assert reset_at == datetime(2026, 4, 24, 6, 0, tzinfo=timezone.utc)
+
+
+def test_start_agent_cooldown_uses_provider_reset_hint(tmp_path):
+    cfg = {"root_dir": str(tmp_path)}
+    reset_at = datetime.now(timezone.utc) + timedelta(hours=9)
+
+    until = start_agent_cooldown(cfg, "codex", until=reset_at)
+
+    assert until == reset_at
+    assert agent_cooldown_remaining(cfg, "codex") > 8 * 60 * 60
+
+
+def test_format_runner_failure_classifies_codex_quota_variants():
+    exc = CommandExecutionError(
+        ["/bin/agent_runner.sh", "codex"],
+        1,
+        "",
+        "openai error: rate_limit_exceeded: You reached your limit for this model. Please try again later.",
+    )
+    summary, _blockers, detail = _format_runner_failure(exc)
+    assert "usage limit / rate limit" in summary
+    assert "reached your limit" in detail
 
 
 def test_format_runner_failure_classifies_bwrap_environment_failure():

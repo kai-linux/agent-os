@@ -13,6 +13,7 @@ import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 import yaml
 
@@ -294,7 +295,21 @@ def _classify_runner_failure(text: str) -> str | None:
         return None
     if "argument list too long" in lowered or "e2big" in lowered:
         return "prompt too large"
-    if any(token in lowered for token in ["rate limit", "rate-limit", "too many requests", "429", "usage limit", "quota", "hit your limit", "model is at capacity"]):
+    if any(token in lowered for token in [
+        "rate limit",
+        "rate-limit",
+        "rate_limit_exceeded",
+        "too many requests",
+        "429",
+        "usage limit",
+        "usage_limit",
+        "quota",
+        "insufficient_quota",
+        "exceeded your current quota",
+        "hit your limit",
+        "reached your limit",
+        "model is at capacity",
+    ]):
         return "usage limit / rate limit"
     if any(token in lowered for token in ["authentication", "unauthorized", "forbidden", "invalid api key", "not authenticated", "login required"]):
         return "authentication failure"
@@ -303,6 +318,42 @@ def _classify_runner_failure(text: str) -> str | None:
     if any(token in lowered for token in ["command not found", "no such file or directory", "unknown option", "unrecognized option"]):
         return "runner/cli configuration failure"
     return None
+
+def _quota_reset_at(text: str, *, now: datetime | None = None) -> datetime | None:
+    """Parse provider reset hints like ``resets 8am (Europe/Berlin)``."""
+    raw = str(text or "")
+    match = re.search(
+        r"\bresets?(?:\s+at)?\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?(?:\s*\(([^)]+)\))?",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+
+    hour = int(match.group(1))
+    minute = int(match.group(2) or 0)
+    meridiem = (match.group(3) or "").lower()
+    zone_name = (match.group(4) or "UTC").strip()
+    if meridiem == "pm" and hour != 12:
+        hour += 12
+    elif meridiem == "am" and hour == 12:
+        hour = 0
+    if hour > 23 or minute > 59:
+        return None
+
+    try:
+        zone = ZoneInfo(zone_name)
+    except Exception:
+        zone = timezone.utc
+
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    local_now = current.astimezone(zone)
+    reset_local = local_now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if reset_local <= local_now:
+        reset_local += timedelta(days=1)
+    return reset_local.astimezone(timezone.utc)
 
 def _format_runner_failure(exc: Exception) -> tuple[str, list[str], str | None]:
     if isinstance(exc, CommandExecutionError):
@@ -3409,7 +3460,13 @@ def agent_cooldown_remaining(cfg: dict, agent: str) -> int:
     delta = (until - datetime.now(timezone.utc)).total_seconds()
     return max(0, int(delta))
 
-def start_agent_cooldown(cfg: dict, agent: str, minutes: int = FALLBACK_COOLDOWN_MINUTES) -> datetime:
+def start_agent_cooldown(
+    cfg: dict,
+    agent: str,
+    minutes: int = FALLBACK_COOLDOWN_MINUTES,
+    *,
+    until: datetime | None = None,
+) -> datetime:
     """Pause dispatch to one quota-limited agent without stopping other agents."""
     agent_key = str(agent or "").strip().lower()
     if not agent_key:
@@ -3427,7 +3484,12 @@ def start_agent_cooldown(cfg: dict, agent: str, minutes: int = FALLBACK_COOLDOWN
                 return existing
         except ValueError:
             pass
-    until = now + timedelta(minutes=minutes)
+    until = until or (now + timedelta(minutes=minutes))
+    if until.tzinfo is None:
+        until = until.replace(tzinfo=timezone.utc)
+    until = until.astimezone(timezone.utc)
+    if until <= now:
+        until = now + timedelta(minutes=minutes)
     cooldowns[agent_key] = until.isoformat()
     path.write_text(json.dumps(cooldowns, sort_keys=True, indent=2) + "\n", encoding="utf-8")
     return until
@@ -3854,23 +3916,34 @@ def main():
 
             except Exception as e:
                 failure_summary, failure_blockers, failure_detail = _format_runner_failure(e)
+                runner_blocker_code = _blocker_code_from_runner_failure(failure_summary, failure_detail)
+                runner_next_step = "Try the next fallback model. If all models fail, inspect runner config, credentials, or quotas."
+                runner_unblock_notes = {
+                    "blocking_cause": f"{current_agent} runner failure: {failure_summary}",
+                    "next_action": runner_next_step,
+                }
+                if runner_blocker_code == "quota_limited":
+                    runner_next_step = (
+                        f"Wait for {current_agent} quota cooldown to expire, or reroute to another available model."
+                    )
+                    runner_unblock_notes = {
+                        "blocking_cause": f"{current_agent} hit a provider quota/rate limit.",
+                        "next_action": runner_next_step,
+                    }
                 runner_result = {
                     "agent": current_agent,
                     "status": "blocked",
-                    "blocker_code": _blocker_code_from_runner_failure(failure_summary, failure_detail),
+                    "blocker_code": runner_blocker_code,
                     "summary": f"{current_agent} failed before producing a valid result file. {failure_summary}",
                     "done": ["- Agent runner was invoked."],
                     "blockers": failure_blockers,
-                    "next_step": "Try the next fallback model. If all models fail, inspect runner config, credentials, or quotas.",
+                    "next_step": runner_next_step,
                     "files_changed": ["- Unknown / inspect worktree"],
                     "tests_run": ["- None"],
                     "decisions": ["- Treat runner failure as model-level failure and continue fallback chain if possible."],
                     "risks": ["- Model quota/auth/CLI issues may affect multiple tasks."],
                     "attempted_approaches": [f"- Attempted model: {current_agent}", f"- Failure detail: {failure_summary}"],
-                    "unblock_notes": {
-                        "blocking_cause": f"{current_agent} runner failure: {failure_summary}",
-                        "next_action": "Try the next fallback model. If all models fail, inspect runner config, credentials, or quotas.",
-                    },
+                    "unblock_notes": runner_unblock_notes,
                     "raw": "",
                 }
                 model_attempts.append(current_agent)
@@ -3887,7 +3960,8 @@ def main():
                     log(blocker, logfile, queue_summary_log=QUEUE_SUMMARY_LOG)
 
                 if runner_result["blocker_code"] == "quota_limited":
-                    until = start_agent_cooldown(cfg, current_agent)
+                    reset_at = _quota_reset_at("\n".join([failure_summary, failure_detail or ""]))
+                    until = start_agent_cooldown(cfg, current_agent, until=reset_at)
                     log(
                         f"Agent {current_agent} quota-limited; cooling down until {until.isoformat()}.",
                         logfile,
