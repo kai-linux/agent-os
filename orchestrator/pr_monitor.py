@@ -229,6 +229,7 @@ def _rebase_pr_onto_main(repo: str, pr: dict) -> bool:
             # Loop to handle conflicts across multiple rebase steps
             max_steps = 20
             step = 0
+            had_real_content_merge = False
             while result.returncode != 0 and step < max_steps:
                 step += 1
                 # Auto-resolve known safe files
@@ -238,6 +239,7 @@ def _rebase_pr_onto_main(repo: str, pr: dict) -> bool:
                 # For remaining conflicted files, try union merge (keep both sides)
                 conflict_files = _get_conflicted_files(worktree_path)
                 if conflict_files:
+                    had_real_content_merge = True
                     resolved = _try_union_resolve(worktree_path, conflict_files)
                     if not resolved:
                         print(f"  Rebase has conflicts that could not be auto-resolved, aborting")
@@ -259,11 +261,12 @@ def _rebase_pr_onto_main(repo: str, pr: dict) -> bool:
                 subprocess.run(["git", "-C", str(worktree_path), "rebase", "--abort"], capture_output=True)
                 return False
 
-            if step > 0:
-                # Validate with tests after conflict resolution. The runner
-                # depends on the project type — this script previously hardcoded
-                # pytest, which always failed on JS/static-content repos and
-                # caused every conflicting PR to be reset, never recovered.
+            if step > 0 and had_real_content_merge:
+                # Only validate when union-merge actually combined real content.
+                # When the only conflicts were the safe-list metadata files
+                # (.agent_result.md, CODEBASE.md), nothing was union-merged,
+                # so there is no broken-merge risk to catch — and running tests
+                # in /tmp/rebase-* would spuriously fail (no node_modules).
                 test_cmd = _detect_post_rebase_test_command(worktree_path)
                 if test_cmd:
                     test_result = subprocess.run(
@@ -280,6 +283,8 @@ def _rebase_pr_onto_main(repo: str, pr: dict) -> bool:
                         return False
                 else:
                     print(f"  No test runner detected for {repo} — skipping post-rebase validation")
+            elif step > 0:
+                print(f"  Only safe-list metadata conflicts resolved ({step} step(s)) — skipping post-rebase validation")
 
             # Force-push rebased branch
             subprocess.run(
