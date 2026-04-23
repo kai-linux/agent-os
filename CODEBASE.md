@@ -42,6 +42,17 @@
 
 ## Recent Changes
 
+### 2026-04-23 — [task-20260423-152340-review-follow-up-pr-312-high-risk] (#324 kai-linux/agent-os)
+Reviewed the high-risk PR #312 budget hard-stop paths and found the production enforcement still correct, but the example config comment understated `budgets.default` behavior. Updated the operator-facing config wording, added a regression proving default hard-stops apply to agents omitted from `per_agent`, and removed a no-op duplicate test stub.
+
+**Files:** `- CODEBASE.md`, `- example.config.yaml`, `- tests/test_budgets.py`, `- .agent_result.md`
+
+**Decisions:**
+  - - Kept production code unchanged because queue and dispatcher hard-stop filtering already enforce the intended invariant after prior follow-ups.
+  - - Fixed the config documentation because operator-facing budget semantics are part of the high-risk safety surface.
+  - - Added the narrowest regression for the documented `budgets.default` behavior instead of broad refactoring.
+
+
 ### 2026-04-23 — [task-20260423-150549-review-follow-up-pr-313-high-risk] (#326 kai-linux/agent-os)
 Reviewed the PR #313 project bundle import/export high-risk paths and fixed a remaining crafted-bundle escape where manifest `contents` entries could reference paths outside the target repo even though archive extraction itself was confined.
 
