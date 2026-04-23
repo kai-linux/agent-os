@@ -10,7 +10,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from orchestrator import github_dispatcher as gd
+from orchestrator import budgets, github_dispatcher as gd
 
 
 def test_parse_issue_dependencies_supports_both_keywords():
@@ -816,6 +816,57 @@ Improve dispatch validation.
     monkeypatch.setattr(gd, "format_task", lambda title, body, model=None: None)
 
     with pytest.raises(ValueError, match="No healthy agents available"):
+        gd.build_mailbox_task(cfg, "proj", repo_cfg, issue)
+
+
+def test_build_mailbox_task_rejects_when_all_candidates_hard_stopped(tmp_path, monkeypatch):
+    metrics_dir = tmp_path / "runtime" / "metrics"
+    metrics_dir.mkdir(parents=True)
+    month_key = budgets.current_month_key()
+    events = [
+        {
+            "timestamp": f"{month_key}-15T00:00:00+00:00",
+            "month_key": month_key,
+            "task_id": "task-1",
+            "agent": agent,
+            "usd_estimate": 5.0,
+        }
+        for agent in ("codex", "claude")
+    ]
+    (metrics_dir / budgets.COST_EVENTS_FILENAME).write_text(
+        "".join(json.dumps(record) + "\n" for record in events),
+        encoding="utf-8",
+    )
+
+    cfg = {
+        "root_dir": str(tmp_path),
+        "default_agent": "auto",
+        "default_task_type": "implementation",
+        "default_base_branch": "main",
+        "default_allow_push": True,
+        "default_max_attempts": 4,
+        "max_runtime_minutes": 40,
+        "formatter_model": None,
+        "agent_fallbacks": {"implementation": ["codex", "claude"]},
+        "budgets": {
+            "per_agent": {
+                "codex": {"hard_stop_usd": 2.0},
+                "claude": {"hard_stop_usd": 2.0},
+            },
+        },
+    }
+    repo_cfg = {"local_repo": "/tmp/repo", "github_repo": "owner/repo"}
+    issue = {
+        "number": 42,
+        "title": "Respect budget hard stops",
+        "url": "https://github.com/owner/repo/issues/42",
+        "labels": [{"name": "prio:high"}],
+        "body": "## Goal\nRespect budget hard stops.\n",
+    }
+
+    monkeypatch.setattr(gd, "format_task", lambda title, body, model=None: None)
+
+    with pytest.raises(ValueError, match="exceeded their monthly hard-stop budget"):
         gd.build_mailbox_task(cfg, "proj", repo_cfg, issue)
 
 
