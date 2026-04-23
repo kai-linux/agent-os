@@ -42,6 +42,17 @@
 
 ## Recent Changes
 
+### 2026-04-23 — [task-20260423-070711-phase-1-semantic-dedup-at-groom-time] (#306 kai-linux/agent-os)
+Implemented groom-time semantic duplicate suppression with local sentence-transformer embedding support, SQLite vector caching, deterministic SimHash-style fallback, configurable thresholding, and pointer comments on surviving matched issues.
+
+**Files:** `- .agent_result.md`, `- example.config.yaml`, `- orchestrator/backlog_groomer.py`, `- orchestrator/semantic_dedup.py`, `- tests/test_backlog_groomer.py`, `- tests/test_semantic_dedup.py`
+
+**Decisions:**
+  - - Kept `sentence-transformers` optional at runtime so groomer execution falls back locally instead of failing when the model package or model files are unavailable.
+  - - Weighted titles twice in embedding text because groomer issue bodies often contain boilerplate sections that can dilute the actual duplicate signal.
+  - - Used the existing GitHub issue comment helper for suppression pointers and skipped comments only when a match has no concrete issue number.
+
+
 ### 2026-04-23 — [task-20260423-070430-add-project-bundle-export-import-for-portable-agen] (#238 kai-linux/agent-os)
 Implemented portable agent-os project bundle export/import commands with deterministic archives, secret placeholder documentation, aggregate-only metrics, import-time secret restoration, config validation, and an optional no-op dispatch smoke task.
 
