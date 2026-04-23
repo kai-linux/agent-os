@@ -286,12 +286,15 @@ def export_bundle(repo: Path, out_path: Path) -> Path:
 
 
 def _safe_extract(bundle_path: Path, dest: Path) -> Path:
+    dest_root = dest.resolve()
     with tarfile.open(bundle_path, "r:gz") as tar:
         members = tar.getmembers()
         for member in members:
             target = (dest / member.name).resolve()
-            if not str(target).startswith(str(dest.resolve())):
-                raise BundleError(f"Unsafe bundle member path: {member.name}")
+            try:
+                target.relative_to(dest_root)
+            except ValueError as exc:
+                raise BundleError(f"Unsafe bundle member path: {member.name}") from exc
             if member.islnk() or member.issym():
                 raise BundleError(f"Refusing link in bundle: {member.name}")
         tar.extractall(dest, members, filter="data")
