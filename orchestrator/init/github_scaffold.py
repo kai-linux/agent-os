@@ -61,6 +61,29 @@ def _default_owner() -> str:
     return gh_run(["api", "user", "--jq", ".login"]).strip()
 
 
+_AGENT_RESULT_IGNORE_BLOCK = "# agent-os: handoff contract, never commit\n.agent_result.md\n"
+
+
+def _ensure_agent_result_ignored(gitignore: Path) -> bool:
+    """Append `.agent_result.md` to .gitignore when not already present.
+
+    `.agent_result.md` is the agent → orchestrator handoff contract; tracking
+    it would create a merge conflict on every concurrent agent PR. Per-clone
+    `.git/info/exclude` is added by `queue._ensure_local_excludes`, but only
+    a tracked `.gitignore` entry survives across clones and protects agents
+    that commit outside the orchestrator's `commit_and_push` flow.
+    """
+    if gitignore.exists():
+        existing = gitignore.read_text(encoding="utf-8")
+        if any(line.strip() == ".agent_result.md" for line in existing.splitlines()):
+            return False
+        prefix = "" if existing.endswith("\n") or existing == "" else "\n"
+        gitignore.write_text(existing + prefix + "\n" + _AGENT_RESULT_IGNORE_BLOCK, encoding="utf-8")
+        return True
+    gitignore.write_text(_AGENT_RESULT_IGNORE_BLOCK, encoding="utf-8")
+    return True
+
+
 def _ensure_repo_initialized(local_path: Path, repo_name: str) -> None:
     readme = local_path / "README.md"
     gitignore = local_path / ".gitignore"
@@ -82,6 +105,7 @@ def _ensure_repo_initialized(local_path: Path, repo_name: str) -> None:
             ),
             encoding="utf-8",
         )
+    _ensure_agent_result_ignored(gitignore)
     status = subprocess.run(["git", "status", "--short"], cwd=local_path, capture_output=True, text=True, check=False)
     if not status.stdout.strip():
         return
