@@ -1370,6 +1370,60 @@ def test_codex_runner_avoids_nested_sandbox():
     assert "--full-auto" not in text
 
 
+def test_agent_runner_streams_prompt_file_instead_of_arg_substitution():
+    runner = Path(__file__).parent.parent / "bin" / "agent_runner.sh"
+    text = runner.read_text(encoding="utf-8")
+
+    assert '$(cat "$PROMPT")' not in text
+    assert 'exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check - < "$PROMPT"' in text
+    assert '--dangerously-skip-permissions -p < "$PROMPT"' in text
+    assert '--output-format json < "$PROMPT"' in text
+
+
+def test_agent_runner_handles_prompt_quotes_via_stdin(tmp_path):
+    import subprocess
+
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    prompt = tmp_path / "prompt.txt"
+    prompt_text = 'Prompt with unmatched " quote, backtick `, and $(not executed).\n'
+    prompt.write_text(prompt_text, encoding="utf-8")
+    fake_claude = tmp_path / "fake-claude"
+    fake_claude.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        "cat > prompt.seen\n"
+        "cat > .agent_result.md <<'EOF'\n"
+        "STATUS: complete\n\n"
+        "BLOCKER_CODE:\nnone\n\n"
+        "SUMMARY:\nFake runner completed.\n\n"
+        "DONE:\n- Read stdin\n\n"
+        "BLOCKERS:\n- None\n\n"
+        "NEXT_STEP:\nNone\n\n"
+        "FILES_CHANGED:\n- None\n\n"
+        "TESTS_RUN:\n- None\n\n"
+        "DECISIONS:\n- None\n\n"
+        "RISKS:\n- None\n\n"
+        "ATTEMPTED_APPROACHES:\n- None\n\n"
+        "MANUAL_STEPS:\n- None\n"
+        "EOF\n",
+        encoding="utf-8",
+    )
+    fake_claude.chmod(0o755)
+    runner = Path(__file__).parent.parent / "bin" / "agent_runner.sh"
+    env = {**os.environ, "CLAUDE_BIN": str(fake_claude)}
+
+    result = subprocess.run(
+        [str(runner), "claude", str(workdir), str(prompt)],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (workdir / "prompt.seen").read_text(encoding="utf-8") == prompt_text
+
+
 def test_validate_workflow_files_rejects_runner_context_in_job_env(tmp_path):
     workflow_dir = tmp_path / ".github" / "workflows"
     workflow_dir.mkdir(parents=True)
