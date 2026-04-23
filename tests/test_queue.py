@@ -2147,6 +2147,37 @@ def test_should_attempt_git_rescue_allows_other_blockers_with_work(tmp_path):
     assert should_attempt_git_rescue(result, clone, "agent/foo") is True
 
 
+def test_rescue_git_progress_preserves_manual_intervention_status(tmp_path):
+    import subprocess
+    _, clone = _init_origin_clone(tmp_path)
+    subprocess.run(["git", "-C", str(clone), "checkout", "-B", "agent/foo", "origin/main"],
+                   check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(clone), "config", "user.email", "t@t.t"],
+                   check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(clone), "config", "user.name", "t"],
+                   check=True, capture_output=True)
+    (clone / "handoff.md").write_text("operator steps\n", encoding="utf-8")
+    result = {
+        "status": "blocked",
+        "blocker_code": "manual_intervention_required",
+        "summary": "Human recording remains.",
+        "next_step": "Record the video.",
+        "done": ["- Wrote handoff"],
+        "decisions": ["- Preserve human gate"],
+    }
+    logfile = tmp_path / "log.txt"
+    summary_log = tmp_path / "summary.log"
+    logfile.touch()
+    summary_log.touch()
+
+    rescued, pushed = rescue_git_progress({}, result, clone, "agent/foo", "task-1", True, logfile, summary_log)
+
+    assert pushed is True
+    assert rescued["status"] == "blocked"
+    assert rescued["blocker_code"] == "manual_intervention_required"
+    assert rescued["next_step"] == "Record the video."
+
+
 # ---------------------------------------------------------------------------
 # fallback cooldown
 # ---------------------------------------------------------------------------
@@ -2256,8 +2287,11 @@ def test_write_prompt_raises_when_body_exceeds_argv_limit(tmp_path):
 
 def test_should_try_fallback_short_circuits_on_permanent_infra_blocker():
     assert "prompt_too_large" in PERMANENT_INFRA_BLOCKERS
+    assert "manual_intervention_required" in PERMANENT_INFRA_BLOCKERS
     blocked = {"status": "blocked", "blocker_code": "prompt_too_large"}
     assert should_try_fallback(blocked) is False
+    manual = {"status": "blocked", "blocker_code": "manual_intervention_required"}
+    assert should_try_fallback(manual) is False
     recoverable = {"status": "blocked", "blocker_code": "timeout"}
     assert should_try_fallback(recoverable) is True
 

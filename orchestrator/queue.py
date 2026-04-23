@@ -67,8 +67,8 @@ BLOCKER_CODE_DESCRIPTIONS = {
 VALID_BLOCKER_CODES = set(BLOCKER_CODE_DESCRIPTIONS)
 # Blockers that are not agent-quality issues and will not be fixed by rotating
 # to the next fallback model. Short-circuit the fallback chain for these so we
-# stop burning credits on deterministic environmental failures.
-PERMANENT_INFRA_BLOCKERS = frozenset({"prompt_too_large"})
+# stop burning credits on deterministic environmental or human-gated failures.
+PERMANENT_INFRA_BLOCKERS = frozenset({"manual_intervention_required", "prompt_too_large"})
 # Linux caps a single argv string at PAGE_SIZE * 32 = 128 KiB (MAX_ARG_STRLEN).
 # Keep prompts well under that so we never hit E2BIG during execve.
 PROMPT_SIZE_LIMIT_BYTES = 100_000
@@ -2411,7 +2411,28 @@ def commit_and_push(worktree: Path, branch: str, task_id: str, allow_push: bool,
         log("Agent already committed changes; pushing unpushed commits.", logfile, queue_summary_log=queue_summary_log)
 
     if allow_push:
-        run(["git", "push", "-u", "origin", branch], cwd=worktree, logfile=logfile, queue_summary_log=queue_summary_log)
+        try:
+            run(["git", "push", "-u", "origin", branch], cwd=worktree, logfile=logfile, queue_summary_log=queue_summary_log)
+        except CommandExecutionError as e:
+            detail = "\n".join(part for part in [e.stdout or "", e.stderr or ""] if part)
+            if "non-fast-forward" not in detail.lower():
+                raise
+            fetch_ref = f"+refs/heads/{branch}:refs/remotes/origin/{branch}"
+            run(["git", "fetch", "origin", fetch_ref], cwd=worktree, logfile=logfile, queue_summary_log=queue_summary_log)
+            contains = subprocess.run(
+                ["git", "merge-base", "--is-ancestor", "HEAD", f"origin/{branch}"],
+                cwd=worktree,
+                capture_output=True,
+                text=True,
+            )
+            if contains.returncode == 0:
+                log(
+                    f"Remote branch origin/{branch} already contains local HEAD; treating non-fast-forward push as no-op.",
+                    logfile,
+                    queue_summary_log=queue_summary_log,
+                )
+            else:
+                raise
     else:
         log("allow_push=false, skipping git push.", logfile, queue_summary_log=queue_summary_log)
 
@@ -2464,11 +2485,15 @@ def rescue_git_progress(
         return None, False
 
     rescued = dict(result)
-    rescued["status"] = "complete"
     rescued["rescued_by_orchestrator"] = True
     summary = result.get("summary", "Recovered worktree changes.")
     rescued["summary"] = f"{summary} Orchestrator rescued and pushed the worktree changes."
-    rescued["next_step"] = "Monitor the pushed branch and rerun CI/PR checks."
+    if result.get("blocker_code") == "manual_intervention_required":
+        rescued["status"] = result.get("status", "blocked")
+        rescued["next_step"] = result.get("next_step") or "Complete the documented manual handoff steps."
+    else:
+        rescued["status"] = "complete"
+        rescued["next_step"] = "Monitor the pushed branch and rerun CI/PR checks."
     done = list(result.get("done", ["- None"]))
     done.append("- Orchestrator committed and pushed recovered worktree changes.")
     rescued["done"] = done

@@ -552,10 +552,13 @@ def sync_result(meta: dict, result: dict, commit_hash: str | None):
                 print(f"Warning: failed to close issue #{issue_number}: {e}")
 
     elif status in ("partial", "blocked"):
+        blocked_labels = ["blocked"]
+        if blocker_code == "manual_intervention_required":
+            blocked_labels.append("human-required")
         edit_issue_labels(
             repo,
             issue_number,
-            add=["blocked"],
+            add=blocked_labels,
             remove=["in-progress", "ready", "agent-dispatched"],
         )
         status_value = project_cfg["blocked_value"]

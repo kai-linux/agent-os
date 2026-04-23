@@ -553,6 +553,54 @@ def test_sync_result_rescued_complete_marks_issue_done_without_pr(monkeypatch):
     assert project_status_calls == ["opt-done"]
 
 
+def test_sync_result_manual_intervention_adds_human_required_label(monkeypatch):
+    monkeypatch.setattr("orchestrator.github_sync.load_config", lambda: _cfg())
+    monkeypatch.setattr(
+        "orchestrator.github_sync._get_issue_snapshot",
+        lambda repo, issue: {"state": "OPEN", "labels": [], "body": "", "url": _meta()["github_issue_url"]},
+    )
+    monkeypatch.setattr("orchestrator.github_sync.add_issue_comment", lambda repo, issue, body: None)
+    label_calls = []
+    monkeypatch.setattr(
+        "orchestrator.github_sync.edit_issue_labels",
+        lambda repo, issue, add=None, remove=None: label_calls.append({"add": add, "remove": remove}),
+    )
+    monkeypatch.setattr(
+        "orchestrator.github_sync.query_project",
+        lambda project_number, owner: {
+            "project_id": "proj",
+            "status_field_id": "field",
+            "status_options": {"In Progress": "opt-in-progress", "Done": "opt-done", "Blocked": "opt-blocked"},
+            "items": [{"url": "https://github.com/kai-linux/agent-os/issues/64", "item_id": "item-64"}],
+        },
+    )
+    project_status_calls = []
+    monkeypatch.setattr(
+        "orchestrator.github_sync.set_item_status",
+        lambda project_id, item_id, field_id, option_id: project_status_calls.append(option_id),
+    )
+
+    github_sync.sync_result(
+        _meta(),
+        {
+            "status": "blocked",
+            "summary": "Needs human recording.",
+            "next_step": "Record and upload the video.",
+            "blocker_code": "manual_intervention_required",
+            "manual_steps": "- Record the screencast.",
+        },
+        "abc123",
+    )
+
+    assert label_calls == [
+        {
+            "add": ["blocked", "human-required"],
+            "remove": ["in-progress", "ready", "agent-dispatched"],
+        }
+    ]
+    assert project_status_calls == ["opt-blocked"]
+
+
 def test_sync_result_partial_skips_terminal_issue_and_reconciles_done(monkeypatch):
     monkeypatch.setattr("orchestrator.github_sync.load_config", lambda: _cfg())
     comments = []
