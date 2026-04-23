@@ -186,3 +186,29 @@ def test_safe_extract_rejects_sibling_prefix_path_escape(tmp_path):
 
     with pytest.raises(BundleError, match="Unsafe bundle member path"):
         _safe_extract(bundle, tmp_path / "extract")
+
+
+def test_import_rejects_manifest_content_path_escape(tmp_path):
+    bundle = tmp_path / "malicious-manifest.tar.gz"
+    with tarfile.open(bundle, "w:gz") as tar:
+        manifest = yaml.safe_dump(
+            {
+                "schema_version": 1,
+                "contents": ["../outside.txt"],
+                "secrets": [],
+            }
+        ).encode("utf-8")
+        info = tarfile.TarInfo("bundle/MANIFEST.yaml")
+        info.size = len(manifest)
+        tar.addfile(info, fileobj=io.BytesIO(manifest))
+
+        payload = b"pwned"
+        info = tarfile.TarInfo("outside.txt")
+        info.size = len(payload)
+        tar.addfile(info, fileobj=io.BytesIO(payload))
+
+    target = tmp_path / "target"
+    with pytest.raises(BundleError, match="Unsafe manifest content path"):
+        import_bundle(bundle, target, prompt=False)
+
+    assert not (tmp_path / "outside.txt").exists()

@@ -345,9 +345,22 @@ def _replace_placeholders(text: str, secret_values: dict[str, str]) -> str:
     return text
 
 
+def _validate_manifest_content_path(rel: Any) -> str:
+    if not isinstance(rel, str) or not rel:
+        raise BundleError(f"Unsafe manifest content path: {rel!r}")
+    path = Path(rel)
+    if path.is_absolute() or ".." in path.parts:
+        raise BundleError(f"Unsafe manifest content path: {rel}")
+    return rel
+
+
 def _copy_bundle_files(bundle_root: Path, repo: Path, manifest: dict, secret_values: dict[str, str], force: bool) -> list[str]:
     copied: list[str] = []
-    contents = [p for p in manifest.get("contents", []) if p not in {"MANIFEST.yaml", "SECRETS.md", "runtime/metrics/summary.yaml"}]
+    contents = [
+        _validate_manifest_content_path(p)
+        for p in manifest.get("contents", [])
+        if p not in {"MANIFEST.yaml", "SECRETS.md", "runtime/metrics/summary.yaml"}
+    ]
     for rel in sorted(contents):
         if _is_excluded(rel):
             continue
