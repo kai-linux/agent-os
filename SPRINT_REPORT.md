@@ -1,11 +1,11 @@
 # Sprint Report
 
-- Generated: 2026-04-21 11:01 UTC
-- Sprint Date: 2026-04-21
+- Generated: 2026-04-23 05:01 UTC
+- Sprint Date: 2026-04-23
 
 ## Headline
 
-Sprint delivered core infrastructure for evidence-driven planning and execution reliability, shifting focus from adoption surfaces to foundational agent architecture.
+Shipped 10 observability and infrastructure features (deploy-watchdog, cost tracking, SLO enforcement, CVE watcher, goal ancestry); established safeguards for autonomous operation but zero adoption work completed.
 
 ## Goal
 
@@ -65,67 +65,40 @@ Public attention matters, but it is not the primary objective.
 
 ## How This Sprint Moved The Repo Forward
 
-This sprint prioritized execution-layer infrastructure—SLO tracking, cost tracking, deploy-watchdog, CVE watcher, external-signal ingestion, and quality-harness architect—to support the north star's Level 3-4 transition (evidence-driven planning and closed-loop optimization). All 7 PRs merged with outcome checks configured. However, the infrastructure-first approach deprioritized adoption-facing work (README, setup guides, fork documentation), which remain strategic constraints. The next-sprint plan explicitly flags activation friction and missing onboarding artifacts as direct blockers to the stars metric.
+The sprint advanced Execution Reliability and Operator Trust significantly—deploying auto-revert safeguards, cost tracking with budget enforcement, SLO dashboards, and measurement infrastructure essential for sustained autonomous operation. However, the sprint was 100% infrastructure-focused, misaligned with the strategy target of 40%+ sprint capacity on adoption and credibility work. Public adoption metrics remain stalled (2 stars, 0 forks for 14+ days), and the internal improvements—while valuable for operator confidence—remain invisible to potential users.
 
 ## Progress This Sprint
 
-- Delivered 7 architectural PRs instrumenting evidence collection: SLO state tracker, cost tracking, CVE watcher, deploy-watchdog, external-signal ingester, quality-harness architect
-- Attached goal ancestry (objective→sprint→issue→task) to all dispatched work, creating auditability and traceability across the planning chain
-- Implemented deploy-watchdog auto-recovery for post-merge regressions, advancing the Execution Reliability rubric dimension
-- All merged PRs have outcome checks configured; awaiting snapshot evaluation across 63 total configured checks
+- Cost tracking + SLO enforcement + deploy-watchdog: closed the operator-trust loop for autonomous budgeting and auto-recovery without human intervention
+- Quality-harness architect + goal-ancestry tracking: shipped visibility layer enabling evidence-driven planning progression (Level 3→4 closed-loop optimization)
+- External-signal ingester + CVE watcher + cost tracker: deployed observability stack that provides production telemetry, dependency health, and operating cost visibility
+- Web control plane with Tailscale authentication: shipped authenticated access for remote operator oversight and control
 
 ## Risks And Gaps
 
-- Adoption work fell below the 40% baseline specified in strategy: README truncation, FORK_GUIDE, and local setup documentation remain unfixed despite being flagged as highest-leverage conversion points
-- Outcome measurement lag: all infrastructure work shows 'outcome snapshot pending' with no validated impact signals yet, creating a gap between shipped capability and evidence of progress
+- Adoption work absent: 0/10 completed items advanced adoption or credibility; strategy mandates 40%+ adoption focus—current trajectory will not move stalled stars/forks metrics
+- Infrastructure-first bias: Sprint selection appears to default to internal reliability over activation work despite visible stalling in public signals (2 stars, 0 forks, 14+ days unchanged)
+- Measurement lag: Outcome validation for deployed features remains inconclusive; validation of missing_context fixes still pending, delaying confirmation of closed-loop optimization gains
 
 ## Next Sprint Focus
 
-- Auto-recover stalled tasks in runtime/mailbox/processing/ to eliminate the repeated operational failure mode (11 blocked, 25 partial tasks observed)
-- Add work-verifier agent to block stubs, mocks, and scope-mismatch before merge, closing a pre-merge trust gap that undermines operator confidence
-- Fix README workflow diagram rendering truncation—the single highest-traffic adoption surface cannot have a broken first impression
-- Create FORK_GUIDE.md with customization patterns (forks stalled at 0 with 14% strategic weight) and document local development setup end-to-end to unblock the activation funnel
+- Rebalance to adoption: prioritize project export/import and video walkthrough to address operator-validated activation friction and move stalled adoption metrics
+- Validate missing_context blocker reduction with regression testing to close first real evidence-driven outcome loop
+- Complete per-agent cost hard-stops and semantic dedup while shipping adoption work in parallel to maintain infrastructure reliability gains and public credibility simultaneously
 
 ## Debug Hypothesis
 
-Planner may be over-weighting infrastructure reliability relative to the 40% adoption-work baseline in strategy; infrastructure is necessary but insufficient without corresponding activation-surface fixes. The adoption bottleneck (README clarity, setup friction, fork/customization guidance) has not improved since 2026-04-15 and is now explicitly called out in next-sprint directives as blocking the 29%-weighted stars metric.
+Sprint planning may not be enforcing the 40%+ adoption-work constraint from strategy—backlog grooming or task dispatch defaults to infrastructure over activation work despite stalled public metrics and stated adoption-first positioning.
 
 ## Source Retrospective
 
-Issues completed:
-- #260: Build SLO state tracker module [prio:normal, done] — COMPLETED
-- #253: Implement cost tracking infrastructure [prio:normal, done] — COMPLETED
-- #251: Add authenticated web control plane with meta-info panels (Tailscale-ready) [enhancement, task:architecture, prio:normal] — COMPLETED
-- #250: Add quality-harness architect with modality detection and field-failure fixture loop [enhancement, task:architecture, prio:high, done] — COMPLETED
-- #245: Add deploy-watchdog agent that auto-reverts post-merge regressions [enhancement, task:architecture, prio:normal, done] — COMPLETED
-- #244: Add SLO / error-budget tracker so planner can modulate risk tolerance [enhancement, task:architecture, prio:normal, done] — COMPLETED
-- #243: Add dependency / CVE watcher with auto-bump PRs and high-risk escalation [enhancement, task:architecture, prio:normal, done] — COMPLETED
-- #242: Add external-signal ingester for production telemetry, support, and mentions [enhancement, task:architecture, prio:normal, done] — COMPLETED
-- #241: Add cost-tracking agent with per-repo budgets and burn-rate detector [enhancement, task:architecture, prio:normal, done] — COMPLETED
-- #240: Attach goal ancestry (objective→sprint→issue) to every dispatched task [enhancement, task:architecture, prio:normal, done] — COMPLETED
-
 PRs merged:
-- PR #277: Agent: task-20260421-094629-add-deploy-watchdog-agent-that-auto-reverts-post-m (branch: agent/task-20260421-094629-add-deploy-watchdog-agent-that-auto-reverts-post-m)
-- PR #276: Agent: task-20260421-094524-build-slo-state-tracker-module (branch: agent/task-20260421-094524-build-slo-state-tracker-module)
-- PR #275: Agent: task-20260421-094340-add-dependency-cve-watcher-with-auto-bump-prs-and- (branch: agent/task-20260421-094340-add-dependency-cve-watcher-with-auto-bump-prs-and-)
-- PR #274: Agent: task-20260421-094236-add-external-signal-ingester-for-production-teleme (branch: agent/task-20260421-094236-add-external-signal-ingester-for-production-teleme)
-- PR #273: Agent: task-20260421-094128-implement-cost-tracking-infrastructure (branch: agent/task-20260421-094128-implement-cost-tracking-infrastructure)
-- PR #272: Agent: task-20260421-093931-attach-goal-ancestry-objective-sprint-issue-to-eve (branch: agent/task-20260421-093931-attach-goal-ancestry-objective-sprint-issue-to-eve)
-- PR #265: Agent: task-20260421-093841-add-quality-harness-architect-with-modality-detect (branch: agent/task-20260421-093841-add-quality-harness-architect-with-modality-detect)
-
-Outcome evidence:
-- #250 / PR #265: merged, outcome snapshot pending (9 configured checks).
-- #253 / PR #273: merged, outcome snapshot pending (7 configured checks).
-- #242 / PR #274: merged, outcome snapshot pending (9 configured checks).
-- #240 / PR #272: merged, outcome snapshot pending (9 configured checks).
-- #243 / PR #275: merged, outcome snapshot pending (9 configured checks).
-- #260 / PR #276: merged, outcome snapshot pending (7 configured checks).
-- #245 / PR #277: merged, outcome snapshot pending (9 configured checks).
+- PR #305: Agent: task-20260421-122331-phase-1-tailscale-secret-key-auth-layer (branch: agent/task-20260421-122331-phase-1-tailscale-secret-key-auth-layer)
 
 ## Planned Next Sprint
 
-- [prio:high] Auto-recover stalled tasks left in runtime/mailbox/processing/: Recent task metrics show blocked/partial debug tasks piling up (11 blocked, 25 partial) and stalled processing tasks are a repeated operational failure mode; auto-recovery is human-filed, targets two objective metrics directly, and advances the Execution Reliability rubric dimension. Production signals: Repeat-Recovery Signals (improved=4, inconclusive=8, unchanged=1).
-- [prio:high] Add work-verifier agent blocking stubs, mocks, and scope-mismatch before merge: Every recent outcome is 'inconclusive' and product inspection flagged credibility skepticism risk; a pre-merge work-verifier closes a trust gap that undermines both the task success rate metric and the Operator Trust rubric dimension, and is a human-filed structural fix rather than self-improvement churn. Production signals: Repeat-Recovery Signals (improved=4, inconclusive=8, unchanged=1).
-- [prio:high] Fix README rendering truncation in workflow diagram: The README is the single highest-traffic adoption surface and product inspection explicitly flagged truncation as a live rendering concern; a broken first impression directly undermines the 29%-weighted stars metric and every other adoption task depends on a complete README. Production signals: Repeat-Recovery Signals (improved=4, inconclusive=8, unchanged=1).
-- [prio:high] Create FORK_GUIDE.md with customization patterns: Forks are stalled at 0 with 14% objective weight and the strategy explicitly targets solo builders; a fork/customization guide is the operator-validated missing activation artifact that directly addresses the stalled adoption funnel flagged in last sprint's directives.
-- [prio:high] Document and test local development setup end-to-end: Product inspection flags low adoption despite sophisticated features, and the operator directive names activation friction as a blocking constraint; a tested local setup directly compounds with the FORK_GUIDE to convert visitors into retained users and is the highest-leverage remaining adoption-facing doc.
+- [prio:high] Track per-agent token/cost spend and enforce monthly budget hard-stops: Human-filed prio:high issue addressing a core Operator Trust rubric gap — cost tracking infrastructure landed last sprint (#253) but hard-stop enforcement closes the trust loop that makes sustained autonomous operation safe, directly advancing the Execution Reliability and Operator Trust dimensions. Production signals: Repeat-Recovery Signals (improved=4, inconclusive=8, unchanged=1).
+- [prio:high] Add project bundle export/import for portable agent-os setups: Activation friction is the operator-validated blocker to fork growth (14% objective weight, still at 0 forks) — a portable export/import command converts curious forkers into retained users by making it trivial to try agent-os on a real repo, directly targeting the Adoption & Credibility rubric dimension. Production signals: Repeat-Recovery Signals (improved=4, inconclusive=8, unchanged=1).
+- [prio:high] Replace title-similarity dedup with semantic + in-flight + cross-repo dedup: The backlog shows multiple near-duplicate human-filed issues (#279/#280/#286 severity-tier, #281/#283/#287 telegram audit, #282/#284 ADR curator) proving title-similarity dedup is failing — semantic + in-flight dedup prevents wasted dispatch cycles and advances the Execution Reliability rubric dimension without requiring agent-side fixes. Production signals: Repeat-Recovery Signals (improved=4, inconclusive=8, unchanged=1).
+- [prio:high] Create video walkthrough of Agent OS autonomous multi-repo workflow: Adoption signals are stalled (2 stars, 0 forks for 14+ days) and product inspection flags missing CTAs and weak social proof; a video is the highest-leverage visible proof-of-capability for the 29%-weighted stars metric and compounds with the FORK_GUIDE and local-dev docs shipped last sprint. Production signals: Repeat-Recovery Signals (improved=4, inconclusive=8, unchanged=1).
+- [prio:high] Validate and test missing_context blocker reduction fix: Cross-sprint measurement lag is a repeating concern — every outcome since sprint 2026-04-09 remains inconclusive, and validating the missing_context fix with a regression test closes the first real outcome-measurement loop and advances the system from Level 3 toward Level 4 closed-loop optimization. Production signals: Repeat-Recovery Signals (improved=4, inconclusive=8, unchanged=1).
