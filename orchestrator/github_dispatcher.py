@@ -818,6 +818,26 @@ def _parse_log_result_section(text: str, label: str, next_labels: list[str]) -> 
     return match.group(1).strip() if match else ""
 
 
+def _sanitize_snapshot_blocker_code(raw: str) -> str:
+    """Map a raw blocker_code string into a value useful for escalation.
+
+    The worker log stores the literal line following ``BLOCKER_CODE:``. When
+    an agent echoed the prompt template instead of replacing it, that line is
+    the instruction prose (e.g. "One line. Required when STATUS..."). The
+    escalation message and error-pattern aggregator are not useful when they
+    display that prose. Treat any value not in ``VALID_BLOCKER_CODES`` as
+    ``invalid_result_contract`` so patterns aggregate cleanly and the
+    operator immediately sees the real problem.
+    """
+    from orchestrator.queue import VALID_BLOCKER_CODES  # lazy to avoid import cycle
+    normalized = str(raw or "").strip().strip("`").lower()
+    if normalized in {"", "none", "- none", "n/a", "na"}:
+        return "none"
+    if normalized in VALID_BLOCKER_CODES:
+        return normalized
+    return "invalid_result_contract"
+
+
 def _extract_task_result_snapshot(paths: dict, task_id: str, body: str) -> dict:
     log_path = paths["LOGS"] / f"{task_id}.log"
     if log_path.exists():
@@ -829,11 +849,12 @@ def _extract_task_result_snapshot(paths: dict, task_id: str, body: str) -> dict:
             "SUMMARY",
             ["DONE", "BLOCKERS", "NEXT_STEP", "FILES_CHANGED", "TESTS_RUN", "DECISIONS", "RISKS", "ATTEMPTED_APPROACHES", "MANUAL_STEPS"],
         )
-        blocker_code = _parse_log_result_section(
+        raw_blocker_code = _parse_log_result_section(
             text,
             "BLOCKER_CODE",
             ["SUMMARY", "DONE", "BLOCKERS", "NEXT_STEP", "FILES_CHANGED", "TESTS_RUN", "DECISIONS", "RISKS", "ATTEMPTED_APPROACHES", "MANUAL_STEPS"],
         ).splitlines()[0].strip() if "BLOCKER_CODE:" in text else ""
+        blocker_code = _sanitize_snapshot_blocker_code(raw_blocker_code) if raw_blocker_code else "unknown"
         blockers = _parse_log_result_section(
             text,
             "BLOCKERS",
