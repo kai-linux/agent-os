@@ -1,5 +1,7 @@
 # AGENTS.md
 
+> Companion doc for Claude Code: [CLAUDE.md](CLAUDE.md). Both files describe this repo for different coding agents — keep them in sync.
+
 ## Default Delivery Rule
 
 - When a task is complete, commit your changes and push to the remote unless the user explicitly says not to.
