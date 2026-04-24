@@ -43,6 +43,7 @@ from orchestrator.gh_project import (
     query_project,
     set_item_status,
 )
+from orchestrator.library_scout import issue_for_suggestion, load_recent_suggestions
 from orchestrator.objectives import load_repo_objective, format_objective_for_prompt
 from orchestrator.outcome_attribution import get_repo_outcome_check_ids, format_outcome_checks_section
 from orchestrator.repo_context import (
@@ -1335,6 +1336,155 @@ def _apply_approved_system_architect_actions(
     return created_urls
 
 
+def _library_scout_action_summary(issue: dict, suggestion: dict, cadence_days: float) -> str:
+    package = str(suggestion.get("package") or "?").strip()
+    reason = str(suggestion.get("reason") or suggestion.get("summary") or "").strip()
+    keywords = [str(item).strip() for item in suggestion.get("keywords") or [] if str(item).strip()]
+    lines = [
+        f"📚 Library Scout Proposal — {suggestion.get('repo', 'repo')}",
+        f"Cadence: every {cadence_days:g} day(s)",
+        "",
+        f"Package: {package}",
+        f"Issue: {issue['title']}",
+    ]
+    if reason:
+        lines.extend(["", reason])
+    if keywords:
+        lines.extend(["", f"Matched signals: {', '.join(keywords)}"])
+    lines.extend([
+        "",
+        "Approve to create exactly one bounded spike issue from this curated suggestion.",
+        "Skip to leave the suggestion recorded without creating an issue.",
+    ])
+    return "\n".join(lines)
+
+
+def _list_library_scout_actions(actions_dir: Path, github_slug: str) -> list[dict]:
+    actions: list[dict] = []
+    if not actions_dir.exists():
+        return actions
+    for path in sorted(actions_dir.glob("*.json")):
+        try:
+            action = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if action.get("type") != "library_scout_approval":
+            continue
+        if action.get("repo") != github_slug:
+            continue
+        actions.append(action)
+    return actions
+
+
+def _queue_library_scout_approval(
+    cfg: dict,
+    paths: dict,
+    github_slug: str,
+    suggestion: dict,
+    issue: dict,
+    cadence_days: float,
+) -> bool:
+    suggestion_id = str(suggestion.get("id") or "").strip()
+    for action in _list_library_scout_actions(paths["TELEGRAM_ACTIONS"], github_slug):
+        if action.get("suggestion_id") == suggestion_id and action.get("status") in {"pending", "done", "completed"}:
+            return False
+    now = datetime.now(timezone.utc)
+    timeout_hours = max(24.0, min(cadence_days * 24.0, 24.0 * 14.0))
+    action = {
+        "action_id": uuid4().hex[:12],
+        "type": "library_scout_approval",
+        "status": "pending",
+        "approval": "pending",
+        "created_at": now.isoformat(),
+        "expires_at": (now + timedelta(hours=timeout_hours)).isoformat(),
+        "chat_id": str(cfg.get("telegram_chat_id", "")).strip(),
+        "message_id": None,
+        "repo": github_slug,
+        "suggestion_id": suggestion_id,
+        "package": suggestion.get("package"),
+        "issue": issue,
+    }
+    save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
+    message_id = _send_telegram(
+        cfg,
+        _library_scout_action_summary(issue, {**suggestion, "repo": github_slug}, cadence_days),
+        reply_markup=planner_reply_markup(action["action_id"]),
+    )
+    if message_id is None:
+        return False
+    action["message_id"] = message_id
+    save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
+    return True
+
+
+def _apply_approved_library_scout_actions(
+    cfg: dict,
+    paths: dict,
+    github_slug: str,
+    open_titles: list[str],
+    semantic_deduper: SemanticDeduper | None,
+    semantic_candidates: list[DedupCandidate],
+    base_ancestry: dict,
+) -> list[str]:
+    created_urls: list[str] = []
+    for action in _list_library_scout_actions(paths["TELEGRAM_ACTIONS"], github_slug):
+        if action.get("approval") != "approved":
+            continue
+        if action.get("issue_url"):
+            continue
+        issue = action.get("issue") or {}
+        title = str(issue.get("title") or "").strip()
+        body = str(issue.get("body") or "").strip()
+        if not title or not body:
+            action["status"] = "invalid"
+            save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
+            continue
+        if _skip_semantic_duplicate(github_slug, semantic_deduper, title, body, semantic_candidates):
+            action["status"] = "completed"
+            action["issue_url"] = "(duplicate skipped)"
+            action["completed_at"] = datetime.now(timezone.utc).isoformat()
+            save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
+            continue
+        if _is_duplicate(title, open_titles) or _open_issue_exists(github_slug, title):
+            action["status"] = "completed"
+            action["issue_url"] = "(duplicate skipped)"
+            action["completed_at"] = datetime.now(timezone.utc).isoformat()
+            save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
+            continue
+        labels = [str(label) for label in issue.get("labels", []) if str(label).strip()]
+        priority = str(issue.get("priority") or "prio:normal").strip()
+        if priority not in labels:
+            labels.append(priority)
+        body = append_goal_ancestry_sections(body, base_ancestry)
+        body += format_outcome_checks_section(
+            get_repo_outcome_check_ids(cfg, github_slug, issue_labels=labels)
+        )
+        url = _create_issue(github_slug, title, body, labels)
+        _set_issue_backlog(cfg, github_slug, url)
+        append_audit_event(
+            cfg,
+            "autonomous_issue_created",
+            {
+                "source": "library_scout",
+                "repo": github_slug,
+                "title": title,
+                "labels": labels,
+                "issue_url": url,
+                "package": action.get("package"),
+            },
+        )
+        action["status"] = "completed"
+        action["issue_url"] = url
+        action["completed_at"] = datetime.now(timezone.utc).isoformat()
+        save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
+        created_urls.append(url)
+        open_titles.append(title)
+        semantic_candidates.append(
+            DedupCandidate(title=title, body=body, number=None, url=url, state="open", source="created_this_run")
+        )
+    return created_urls
+
+
 def _parse_issues(text: str) -> list[dict]:
     """Parse JSON array from Claude response, stripping markdown fences if present."""
     if text.startswith("```"):
@@ -1638,9 +1788,22 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
     )
     if approved_urls:
         print(f"  Applied {len(approved_urls)} approved system architect proposal(s).")
+    library_urls = _apply_approved_library_scout_actions(
+        cfg,
+        paths,
+        github_slug,
+        open_titles,
+        semantic_deduper,
+        semantic_candidates,
+        base_ancestry,
+    )
+    if library_urls:
+        print(f"  Applied {len(library_urls)} approved library scout proposal(s).")
+    approved_urls.extend(library_urls)
 
     # Skip if no data to analyze
-    if not stale and not known_issues and not risk_flags and not blocked_tasks and not blocked_issues and not repo_gaps and not bootstrap_issues and not records and not scorer_findings:
+    library_suggestions = load_recent_suggestions(cfg, github_slug)
+    if not stale and not known_issues and not risk_flags and not blocked_tasks and not blocked_issues and not repo_gaps and not bootstrap_issues and not records and not scorer_findings and not library_suggestions:
         print("  No data to analyze, skipping.")
         return {"status": "created" if approved_urls else "no-data", "created": len(approved_urls), "skipped": 0, "cleaned": len(cleaned), "urls": approved_urls}
 
@@ -1669,7 +1832,7 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
         print(f"  Cadence backoff: {recent_auto_skips} recent auto-skips → reducing generation from {num_issues} to {reduced}")
         num_issues = reduced
 
-    if num_issues == 0 and not bootstrap_issues and not architect_findings:
+    if num_issues == 0 and not bootstrap_issues and not architect_findings and not library_suggestions:
         print(f"  Backlog already at target depth ({current_backlog} ≥ {target_depth}); skipping generation.")
         return {"status": "skipped", "created": 0, "skipped": 0, "cleaned": len(cleaned)}
 
@@ -1875,6 +2038,16 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
         if _is_duplicate(title, open_titles) or _open_issue_exists(github_slug, title):
             continue
         if _queue_system_architect_approval(cfg, paths, github_slug, finding, issue, cadence_days):
+            approval_requests += 1
+    for suggestion in library_suggestions:
+        issue = issue_for_suggestion(suggestion)
+        title = issue["title"]
+        body = str(issue.get("body") or "")
+        if _skip_semantic_duplicate(github_slug, semantic_deduper, title, body, semantic_candidates):
+            continue
+        if _is_duplicate(title, open_titles) or _open_issue_exists(github_slug, title):
+            continue
+        if _queue_library_scout_approval(cfg, paths, github_slug, suggestion, issue, cadence_days):
             approval_requests += 1
 
     for issue in proposed[:MAX_ISSUES_PER_RUN]:

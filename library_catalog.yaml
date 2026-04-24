@@ -1,0 +1,37 @@
+libraries:
+  - package: "instructor"
+    ecosystem: "python"
+    summary: "Structured extraction and schema-constrained LLM outputs."
+    reason: "Useful when a repo is hand-rolling structured extraction or validation."
+    keywords:
+      - "structured extraction"
+      - "schema validation"
+      - "json extraction"
+      - "pydantic"
+    spike_title: "Spike instructor for structured extraction workflows"
+    task_type: "research"
+    labels: ["enhancement"]
+  - package: "pydantic-ai"
+    ecosystem: "python"
+    summary: "Typed agent workflows with validation and tool orchestration."
+    reason: "Useful for repos building agent loops, validation-heavy orchestration, or tool calling."
+    keywords:
+      - "tool orchestration"
+      - "agent workflow"
+      - "tool calling"
+      - "validation-heavy"
+    spike_title: "Spike pydantic-ai for typed agent orchestration"
+    task_type: "research"
+    labels: ["enhancement"]
+  - package: "dspy"
+    ecosystem: "python"
+    summary: "Prompt/program optimization for retrieval and evaluation-heavy pipelines."
+    reason: "Useful when repos are tuning extraction, retrieval, or evaluation flows repeatedly."
+    keywords:
+      - "retrieval"
+      - "evaluation"
+      - "similarity"
+      - "optimization"
+    spike_title: "Spike DSPy for retrieval and eval pipeline fit"
+    task_type: "research"
+    labels: ["enhancement"]

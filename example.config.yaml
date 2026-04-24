@@ -343,6 +343,45 @@ quality_harness:
                                        # multimodal_eval, llm_judge_eval, bot_conversation_eval
   suite_commands: {}                   # Optional per-suite command; may print JSON {"score": 0.95, "failing_fixtures": [...]}
 
+tool_registry:
+  verified_packages_file: "verified_packages.yaml"  # Operator-curated package allowlist with pinned versions + sha256
+  library_catalog_file: "library_catalog.yaml"      # Operator-curated suggestion catalog; scout never invents packages
+  mcp_servers:
+    linear_mcp:
+      title: "Linear MCP"
+      package: "@acme/mcp-linear"
+      version: "1.2.3"                               # Required pin; @latest is banned
+      sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      command: ["npx", "-y", "@acme/mcp-linear@1.2.3"]
+      env:
+        LINEAR_API_KEY: "${LINEAR_API_KEY}"          # Env-var reference only; raw secrets are forbidden
+      task_permissions:
+        groomer: ["issues:read", "issues:write"]
+        research: ["issues:read"]
+    browser_mcp:
+      title: "Browser MCP"
+      package: "@acme/mcp-browser"
+      version: "0.4.1"
+      sha256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      command: ["npx", "-y", "@acme/mcp-browser@0.4.1"]
+      env:
+        BROWSER_API_KEY: "${BROWSER_API_KEY}"
+      task_permissions:
+        quality_harness: ["browser:run", "browser:screenshot"]
+  http_apis:
+    receipt_ocr_api:
+      title: "Receipt OCR API"
+      base_url: "https://ocr.example.com/v1"
+      credential_env: "OCR_API_KEY"                 # Env-var reference only
+      task_permissions:
+        quality_harness: ["ocr:extract"]
+        implementation: ["ocr:extract"]
+
+library_scout:
+  enabled: true
+  cadence_days: 30                    # Monthly scout cadence
+  max_suggestions_per_repo: 3
+
 semantic_dedup:
   enabled: true                         # Groomer suppresses near-duplicate issues before filing them
   threshold: 0.82                       # Per-repo override: semantic_dedup_threshold or semantic_dedup.threshold
@@ -391,6 +430,7 @@ github_projects:
       - github_repo: "yourname/repo1"
         path: "/path/to/repo1"
         automation_mode: full             # Full automation: planner/groomer/analyzer/pr_monitor stay enabled
+        enabled_tools: [linear_mcp, receipt_ocr_api] # Explicit opt-in; repos without this keep adapter defaults
         plan_size: 3
         sprint_cadence_days: 1      # Daily planning for this repo
         planner_allow_early_refresh: true  # Optional per-repo override
@@ -422,6 +462,8 @@ github_projects:
           suite_commands:
             unit: "pytest -q"
             multimodal_eval: "python3 -m repo1.eval --json"
+        library_scout:
+          cadence_days: 30
         production_feedback:
           enabled: true
           stale_after_hours: 48
