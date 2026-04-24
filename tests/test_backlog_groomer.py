@@ -1131,3 +1131,107 @@ def test_groom_repo_applies_approved_system_architect_action(tmp_path, monkeypat
     stored = json.loads((actions_dir / "abcdef123456.json").read_text(encoding="utf-8"))
     assert stored["status"] == "completed"
     assert stored["issue_url"] == "https://github.com/owner/repo/issues/41"
+
+
+def test_groom_repo_queues_library_scout_suggestions_for_approval(tmp_path, monkeypatch):
+    cfg = {
+        "root_dir": str(tmp_path),
+        "worktrees_dir": str(tmp_path / "worktrees"),
+        "telegram_chat_id": "123",
+    }
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "README.md").write_text("## Goal\n\nKeep the repo healthy.\n", encoding="utf-8")
+    (repo / "NORTH_STAR.md").write_text("# North Star\n", encoding="utf-8")
+    (repo / "STRATEGY.md").write_text("# Strategy\n", encoding="utf-8")
+    (repo / "PLANNING_PRINCIPLES.md").write_text("# Planning Principles\n", encoding="utf-8")
+    (repo / "CODEBASE.md").write_text("# Codebase\n", encoding="utf-8")
+
+    monkeypatch.setattr(bg, "_list_open_issues", lambda repo, cfg: [])
+    monkeypatch.setattr(bg, "load_recent_metrics", lambda *args, **kwargs: [])
+    monkeypatch.setattr(bg, "_parse_known_issues", lambda repo_path: [])
+    monkeypatch.setattr(bg, "_find_risk_flags", lambda cfg: [])
+    monkeypatch.setattr(bg, "_call_haiku", lambda prompt: "[]")
+    monkeypatch.setattr(bg, "_open_issue_exists", lambda repo, title: False)
+    monkeypatch.setattr(bg, "_set_issue_backlog", lambda *args, **kwargs: None)
+    monkeypatch.setattr(bg, "_send_telegram", lambda *args, **kwargs: 88)
+    monkeypatch.setattr(
+        bg,
+        "load_recent_suggestions",
+        lambda cfg, github_slug: [
+            {
+                "id": "owner/repo:instructor",
+                "package": "instructor",
+                "summary": "Structured extraction",
+                "reason": "Repo text repeatedly mentions structured extraction.",
+                "keywords": ["structured extraction", "schema validation"],
+                "spike_title": "Spike instructor for structured extraction workflows",
+                "task_type": "research",
+                "labels": ["enhancement"],
+            }
+        ],
+    )
+
+    result = bg.groom_repo(cfg, "owner/repo", repo)
+
+    assert result["status"] == "approval_pending"
+    actions = list((tmp_path / "runtime" / "telegram_actions").glob("*.json"))
+    assert len(actions) == 1
+    action = json.loads(actions[0].read_text(encoding="utf-8"))
+    assert action["type"] == "library_scout_approval"
+    assert action["issue"]["title"] == "Spike instructor for structured extraction workflows"
+
+
+def test_groom_repo_applies_approved_library_scout_action(tmp_path, monkeypatch):
+    cfg = {
+        "root_dir": str(tmp_path),
+        "worktrees_dir": str(tmp_path / "worktrees"),
+    }
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "README.md").write_text("## Goal\n\nKeep the repo healthy.\n", encoding="utf-8")
+    (repo / "NORTH_STAR.md").write_text("# North Star\n", encoding="utf-8")
+    (repo / "STRATEGY.md").write_text("# Strategy\n", encoding="utf-8")
+    (repo / "PLANNING_PRINCIPLES.md").write_text("# Planning Principles\n", encoding="utf-8")
+    (repo / "CODEBASE.md").write_text("# Codebase\n", encoding="utf-8")
+
+    actions_dir = tmp_path / "runtime" / "telegram_actions"
+    actions_dir.mkdir(parents=True)
+    (actions_dir / "fedcba654321.json").write_text(
+        json.dumps(
+            {
+                "action_id": "fedcba654321",
+                "type": "library_scout_approval",
+                "status": "done",
+                "approval": "approved",
+                "repo": "owner/repo",
+                "suggestion_id": "owner/repo:instructor",
+                "package": "instructor",
+                "issue": {
+                    "title": "Spike instructor for structured extraction workflows",
+                    "body": "## Goal\nTest instructor\n\n## Success Criteria\n- Evaluate fit\n\n## Constraints\n- Prefer minimal diffs",
+                    "labels": ["enhancement", "library-spike"],
+                    "priority": "prio:normal",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(bg, "_list_open_issues", lambda repo, cfg: [])
+    monkeypatch.setattr(bg, "load_recent_metrics", lambda *args, **kwargs: [])
+    monkeypatch.setattr(bg, "_parse_known_issues", lambda repo_path: [])
+    monkeypatch.setattr(bg, "_find_risk_flags", lambda cfg: [])
+    monkeypatch.setattr(bg, "load_recent_suggestions", lambda cfg, github_slug: [])
+    monkeypatch.setattr(bg, "_set_issue_backlog", lambda *args, **kwargs: None)
+    monkeypatch.setattr(bg, "get_repo_outcome_check_ids", lambda *args, **kwargs: [])
+    created = []
+    monkeypatch.setattr(bg, "_create_issue", lambda repo, title, body, labels: created.append((title, body, labels)) or "https://github.com/owner/repo/issues/52")
+
+    result = bg.groom_repo(cfg, "owner/repo", repo)
+
+    assert result["status"] == "created"
+    assert created and created[0][0] == "Spike instructor for structured extraction workflows"
+    stored = json.loads((actions_dir / "fedcba654321.json").read_text(encoding="utf-8"))
+    assert stored["status"] == "completed"
+    assert stored["issue_url"] == "https://github.com/owner/repo/issues/52"

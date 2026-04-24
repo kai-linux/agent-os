@@ -1,0 +1,10 @@
+packages:
+  - ecosystem: npm
+    package: "@acme/mcp-linear"
+    version: "1.2.3"
+    sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  - ecosystem: npm
+    package: "@acme/mcp-browser"
+    version: "0.4.1"
+    sha256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+

@@ -13,6 +13,7 @@ import yaml
 from orchestrator.audit_log import send_tamper_alert, verify_audit_chain
 from orchestrator.paths import load_config, runtime_paths
 from orchestrator.system_architect import architect_digest_line
+from orchestrator.tool_registry import registry_status_line
 
 WINDOW_HOURS = 24
 MAX_TASKS_PER_SECTION = 3
@@ -292,6 +293,7 @@ def format_digest_message(
     now: datetime,
     audit_status: str = "OK",
     architect_status: str = "system architect: no report",
+    tool_registry_status: str = "tool registry: inactive",
 ) -> str:
     total_activity = len(completed) + len(blocked) + len(escalated) + pr_activity["created"] + pr_activity["merged"]
     if total_activity == 0:
@@ -336,6 +338,7 @@ def format_digest_message(
     lines.append(f"- Created: {pr_activity['created']}")
     lines.append(f"- Merged: {pr_activity['merged']}")
     lines.append(f"🏗️ {architect_status}")
+    lines.append(f"🧰 {tool_registry_status}")
     lines.append(f"audit chain status: {audit_status}")
 
     return "\n".join(lines[:39])
@@ -400,6 +403,7 @@ def run():
         now,
         audit_status=audit_status,
         architect_status=architect_digest_line(cfg),
+        tool_registry_status=registry_status_line(cfg),
     )
     print(message)
     _send_telegram(cfg, message)
