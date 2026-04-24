@@ -406,7 +406,9 @@ def test_groom_repo_prompt_includes_repo_documents(tmp_path, monkeypatch):
 
     result = bg.groom_repo(cfg, "owner/repo", repo)
 
-    assert result["status"] == "error"
+    # Empty LLM response is "no-data" (backlog likely covered), not "error".
+    # The test cares that the prompt was built correctly, not about status.
+    assert result["status"] == "no-data"
     prompt = captured["prompt"]
     assert "Improve closed-loop planning." in prompt
     assert "Closed-loop self-improvement." in prompt
