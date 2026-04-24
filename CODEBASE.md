@@ -72,6 +72,17 @@ Implemented an operator-curated tool and library registry with per-repo opt-in, 
   - - Kept MCP hardening registry-driven and fail-closed at config load time, validating enabled tools only so repos without `enabled_tools` remain backward-compatible with the adapter default toolset.
   - - Reused the existing Telegram approval action path for library-scout findings instead of introducing a second approval subsystem, keeping operator gating consistent with system-architect proposals.
   - - Scoped library suggestions strictly to `library_catalog.yaml` keyword matches so the scout cannot autonomously invent dependencies or open dependency PRs.
+### 2026-04-24 — [task-20260424-094351-unify-pending-human-approvals-into-a-single-inbox-] (#235 kai-linux/agent-os)
+Implemented a file-backed approvals inbox under `runtime/approvals/` with Markdown frontmatter records, lifecycle helpers and CLI commands, then wired existing Telegram-driven sprint-plan and system-architect approvals plus new high-risk PR and repeat-blocker approval requests into the shared store without replacing Telegram notifications.
+
+**Files:** `- .agent_result.md`, `- bin/aos-approvals`, `- orchestrator/approvals.py`, `- orchestrator/backlog_groomer.py`, `- orchestrator/log_analyzer.py`, `- orchestrator/paths.py`, `- orchestrator/pr_monitor.py`, `- orchestrator/queue.py`
+
+**Decisions:**
+  - - Used Markdown files with YAML frontmatter so operators can inspect or edit `decision` and `reason` directly before running the CLI
+  - - Kept Telegram JSON action files as callback envelopes instead of replacing them, which minimized workflow churn while moving approval state into the new inbox
+  - - Deduplicated high-risk PR and repeat-blocker notifications through the approval store before sending Telegram so recurring polls do not spam repeated approval messages
+  - - Used auto-expiry defaults of `skip` for sprint/system-architect approvals and `hold` for high-risk PR / repeat-blocker approvals to match the task safety requirements
+
 
 ### 2026-04-23 — [task-20260423-165940-review-follow-up-pr-312-high-risk] (#327 kai-linux/agent-os)
 Reviewed the PR #312 monthly budget hard-stop surface and found the production enforcement path still correct; fixed stale operator-facing config wording for `budgets.default`, removed a no-op duplicate test stub, and added a focused regression proving default hard-stops apply during budget filtering.
