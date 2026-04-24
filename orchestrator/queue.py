@@ -2352,49 +2352,43 @@ Prior model attempts in this task lineage:
 
 You must create or overwrite a file named .agent_result.md in the repository root before exiting.
 
-Use EXACTLY this format:
+Use EXACTLY this format. The lines inside <...> brackets are placeholders —
+replace them with your actual answer. Do NOT copy the template verbatim.
 
-STATUS: complete|partial|blocked
+STATUS: <one of: complete, partial, blocked>
 
 BLOCKER_CODE:
-One line. Required when STATUS is partial or blocked. Use `none` when STATUS is complete.
+<one blocker code from the Rules list below, or `none` when STATUS is complete>
 
 SUMMARY:
-One short paragraph.
+<one short paragraph describing what you did this run>
 
 DONE:
-- bullet
-- bullet
+- <one concrete thing you completed; add more lines or remove if none>
 
 BLOCKERS:
-- bullet
-- bullet
+- <one real blocker; write a single line `- None` when nothing is blocking>
 
 NEXT_STEP:
-One short paragraph. If complete, write: None
+<one short paragraph for the next run, or the literal word None when STATUS is complete>
 
 FILES_CHANGED:
-- path
-- path
+- <repo-relative path you modified; write `- None` when no files changed>
 
 TESTS_RUN:
-- command + result
-- command + result
+- <command + pass/fail result, e.g. `pytest -q → 42 passed`; `- None` when no tests ran>
 
 DECISIONS:
-- bullet
-- bullet
+- <decision you made and why; `- None` when no notable decisions>
 
 RISKS:
-- bullet
-- bullet
+- <risk you're leaving behind for future runs; `- None` when none>
 
 ATTEMPTED_APPROACHES:
-- bullet
-- bullet
+- <approach you tried this run, successful or not, so future runs do not repeat a failed path>
 
 MANUAL_STEPS:
-- None
+- <action the operator must take before automation can continue; `- None` when none>
 
 Rules:
 - Prefer the smallest viable diff.
@@ -2407,6 +2401,7 @@ Rules:
 {result_contract_blocker_guidance()}
 - Always write .agent_result.md even if no code changes were made
 - In ATTEMPTED_APPROACHES, describe what you tried this run so future runs do not repeat the same failed path
+- Never copy the <...> placeholders into your answer. Replace each with a real value or with `None`.
 - Read the prior model attempts above and avoid repeating clearly failed approaches unless you have a specific new reason
 - Automation-first escalation policy: before emitting ANY item under MANUAL_STEPS
   or marking the task blocked on a "manual action", attempt to automate it. The

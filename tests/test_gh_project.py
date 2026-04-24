@@ -435,12 +435,15 @@ def test_create_prs_for_orphan_branches_audits_opened_pr(monkeypatch):
 
     pm._create_prs_for_orphan_branches({"root_dir": "/tmp/test-root"}, {"owner/repo"})
 
+    # Body must start with `Closes #42` so GitHub auto-closes the linked issue
+    # on merge. Without this, agent PRs leave their issues open and the
+    # blocked-task escalation keeps firing on long-completed work.
     assert pr_calls == [
         (
             "owner/repo",
             "agent/task-123",
             "Agent: task-123",
-            "Automated changes for issue #42\n\n## Original Task ID\ntask-123\n",
+            "Closes #42\n\nAutomated changes for issue #42.\n\n## Original Task ID\ntask-123\n",
         )
     ]
     assert audit_calls and audit_calls[0][0] == "autonomous_pr_opened"

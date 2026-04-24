@@ -506,7 +506,10 @@ def sync_result(meta: dict, result: dict, commit_hash: str | None):
             repo,
             branch,
             f"Agent: {task_id}",
-            f"Automated changes for issue #{issue_number}",
+            # `Closes #N` is a GitHub closing keyword; without it, merging the
+            # PR leaves the issue open and escalations keep firing on
+            # long-completed work.
+            f"Closes #{issue_number}\n\nAutomated changes for issue #{issue_number}.",
         )
         if pr_url:
             comment += f"\n### PR\n{pr_url}\n"

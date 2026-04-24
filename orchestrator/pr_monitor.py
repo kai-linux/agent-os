@@ -515,8 +515,15 @@ def _create_prs_for_orphan_branches(cfg: dict, repos: set[str]):
             # Try to find the linked issue number for proper cleanup on merge
             issue_number = _find_issue_for_task(repo, task_id)
             if issue_number:
+                # Use `Closes #N` so GitHub auto-closes the linked issue when
+                # the PR merges. The previous wording ("Automated changes for
+                # issue #N") is not a closing keyword — merged PRs left their
+                # issues open, which kept the escalation poller firing on
+                # long-done work (e.g. eigendark-website#77 triggered a
+                # blocked-task escalation a day after its fix shipped).
                 body = (
-                    f"Automated changes for issue #{issue_number}\n\n"
+                    f"Closes #{issue_number}\n\n"
+                    f"Automated changes for issue #{issue_number}.\n\n"
                     f"## Original Task ID\n{task_id}\n"
                 )
             else:
