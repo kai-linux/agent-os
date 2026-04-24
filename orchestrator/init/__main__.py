@@ -8,7 +8,7 @@ import yaml
 
 from orchestrator.init import ui
 from orchestrator.init import charter as charter_phase
-from orchestrator.init import config_emit, cron_install, dialogue, github_scaffold, preflight, telegram_pair
+from orchestrator.init import config_emit, cron_install, dialogue, github_scaffold, preflight, telegram_pair, tuning
 from orchestrator.init.state import State, delete_state, resumable_states, slugify_repo_name
 from orchestrator.paths import ROOT
 
@@ -86,8 +86,25 @@ def _print_preflight_results(results: list[preflight.CheckResult]) -> None:
             ui.fail(f"{result.message} — {result.hint}")
 
 
+def _confirm_config_merge_mode(existing_cfg: dict | None) -> str:
+    """Prompt the operator about preserving an existing config.yaml.
+
+    Returns one of: ``merge`` (default), ``abort``. Operators get a clear
+    choice before their existing tuning is touched. Merge mode now preserves
+    scalar settings via setdefault, so the only reason to abort is when the
+    operator wants to hand-edit the file instead.
+    """
+    if not existing_cfg:
+        return "merge"
+    ui.warn("An existing config.yaml was detected.")
+    print("  [1] Add this project to the existing config (merge, preserve current settings)")
+    print("  [2] Abort — I'll edit config.yaml manually")
+    choice = ui.choice("", ["1", "2"], default="1")
+    return "merge" if choice == "1" else "abort"
+
+
 def _final_banner(state: State, telegram: dict[str, str], cron_mode: str) -> None:
-    ui.header("Step 7/7 — Done")
+    ui.header("Step 8/8 — Done")
     github = state.get("github", {})
     print(f"  Repo:     {github.get('repo_url')}")
     print(f"  Project:  {github.get('project_url')}")
@@ -132,12 +149,12 @@ def main() -> int:
         if config_path.exists():
             existing_cfg = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
 
-        ui.header("Step 1/7 — What are you building?")
+        ui.header("Step 1/8 — What are you building?")
         intake = dialogue.run(state.get("intake"))
         if not state.get("intake"):
             state.mark("intake", intake)
 
-        ui.header("Step 2/7 — GitHub repo")
+        ui.header("Step 2/8 — GitHub repo")
         github = github_scaffold.run(state, intake, dry_run=args.dry_run)
 
         expected_slug = slugify_repo_name(github["repo_name"])
@@ -147,18 +164,26 @@ def main() -> int:
             state.path = expected_path
             state.save()
 
-        ui.header("Step 3/7 — Designing the charter")
+        ui.header("Step 3/8 — Designing the charter and supporting docs")
         charter = charter_phase.run(state, intake, github, dry_run=args.dry_run)
 
-        ui.header("Step 4/7 — Telegram control plane")
+        ui.header("Step 4/8 — Telegram control plane")
         telegram = telegram_pair.run(state, github["repo_full_name"], existing_cfg=existing_cfg, dry_run=args.dry_run)
 
-        ui.header("Step 5/7 — Writing config.yaml")
-        config_path = config_emit.run(state, intake, github, charter, telegram, dry_run=args.dry_run)
+        ui.header("Step 5/8 — Tuning cadence and thresholds")
+        tuning_choices = tuning.run(state, existing_cfg=existing_cfg)
+
+        ui.header("Step 6/8 — Writing config.yaml")
+        merge_mode = _confirm_config_merge_mode(existing_cfg)
+        if merge_mode == "abort":
+            ui.warn("Aborted before config.yaml changes. Your saved init state at "
+                    f"{state.path} is preserved; rerun `bin/agentos init` to resume.")
+            return 1
+        config_path = config_emit.run(state, intake, github, charter, telegram, dry_run=args.dry_run, tuning=tuning_choices)
         ui.ok(f"Wrote {config_path}")
         ui.ok(f"Wrote {state.path}")
 
-        ui.header("Step 6/7 — Cron setup")
+        ui.header("Step 7/8 — Cron setup")
         cron_mode = cron_install.run(state, dry_run=args.dry_run)
         state.complete()
 

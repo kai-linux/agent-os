@@ -52,6 +52,9 @@ Output EXACTLY one JSON object, no code fences, no prose before or after. Schema
   "stack_decision": "<one-line stack summary>",
   "stack_rationale": "<2-4 sentence rationale>",
   "north_star_md": "<full markdown body for NORTH_STAR.md — include: one-paragraph mission, stack + rationale, out-of-scope list, definition of first vertical slice>",
+  "vision_md": "<full markdown body for VISION.md — a 2-5 year aspiration for this product: where it is when it's finished, who uses it, what it does for them, what it never will be>",
+  "strategy_md": "<full markdown body for STRATEGY.md — how we get from today's empty repo to the vision: 3-5 ordered phases each with a concrete goal and the kind of work it contains. Not a ticket list — a strategy document>",
+  "planning_principles_md": "<full markdown body for PLANNING_PRINCIPLES.md — non-negotiable rules agents must follow when planning or implementing for this project (e.g. 'prefer boring tech', 'no premature abstraction', 'tests before merge'). 5-10 bullets>",
   "seed_issues": [
     {{
       "title": "<imperative, <= 70 chars>",
@@ -68,6 +71,9 @@ Rules:
 - Each issue must be independently completable — no "depends on issue #2" language.
 - success_criteria bullets must be observable (file exists, command returns 0, endpoint returns 200, etc.)
 - 3-5 issues total. No more.
+- vision_md must describe an end state, not features. Avoid implementation details.
+- strategy_md must sequence phases causally (each phase unlocks the next), not alphabetically.
+- planning_principles_md must give agents actionable constraints, not platitudes.
 """
 
 
@@ -95,6 +101,13 @@ def validate_charter_payload(payload: dict[str, Any]) -> None:
         raise CharterError("Missing stack_decision")
     if not payload.get("north_star_md"):
         raise CharterError("Missing north_star_md")
+    # Newer schema adds VISION/STRATEGY/PLANNING_PRINCIPLES. Treat these as
+    # soft-required: accept older architect outputs that omit them so
+    # mid-flight resumes of an earlier init don't break, but warn via
+    # validation error when a new run yields nothing for them.
+    for soft in ("vision_md", "strategy_md", "planning_principles_md"):
+        if soft in payload and not str(payload.get(soft) or "").strip():
+            raise CharterError(f"{soft} present but empty")
     issues = payload.get("seed_issues")
     if not isinstance(issues, list) or not 3 <= len(issues) <= 5:
         raise CharterError("seed_issues must contain 3-5 issues")
@@ -225,15 +238,37 @@ def _ensure_priority_labels(repo_full_name: str) -> None:
         )
 
 
-def _commit_charter(local_path: Path, markdown_body: str, *, dry_run: bool) -> str:
-    target = local_path / "NORTH_STAR.md"
-    target.write_text(markdown_body.rstrip() + "\n", encoding="utf-8")
+_CHARTER_DOCS = (
+    ("north_star_md", "NORTH_STAR.md"),
+    ("vision_md", "VISION.md"),
+    ("strategy_md", "STRATEGY.md"),
+    ("planning_principles_md", "PLANNING_PRINCIPLES.md"),
+)
+
+
+def _commit_charter(local_path: Path, payload: dict[str, Any], *, dry_run: bool) -> str:
+    """Write each charter markdown doc that the architect produced.
+
+    Older architect outputs only produced NORTH_STAR.md; the schema now also
+    accepts VISION/STRATEGY/PLANNING_PRINCIPLES. Write only the ones actually
+    present in the payload so the commit doesn't leave empty files.
+    """
+    written: list[str] = []
+    for key, filename in _CHARTER_DOCS:
+        body = str(payload.get(key) or "").strip()
+        if not body:
+            continue
+        target = local_path / filename
+        target.write_text(body + "\n", encoding="utf-8")
+        written.append(filename)
     if dry_run:
         return "DRYRUN"
-    subprocess.run(["git", "add", "NORTH_STAR.md"], cwd=local_path, check=True)
+    if not written:
+        raise CharterError("No charter markdown docs produced by architect")
+    subprocess.run(["git", "add", *written], cwd=local_path, check=True)
+    headline = f"Charter: scaffold {', '.join(written)} and seed backlog"
     subprocess.run(
-        ["git", "commit", "-m",
-         with_agent_os_trailer("NORTH_STAR: scaffold charter and seed backlog")],
+        ["git", "commit", "-m", with_agent_os_trailer(headline)],
         cwd=local_path, check=True,
     )
     subprocess.run(["git", "push"], cwd=local_path, check=True)
@@ -316,7 +351,7 @@ def run(state: State, intake: dict[str, str], github: dict[str, Any], *, dry_run
 
     local_path = Path(github["local_clone_path"]).expanduser()
     if not state.get("charter.committed_sha"):
-        sha = _commit_charter(local_path, charter_data["north_star_md"], dry_run=dry_run)
+        sha = _commit_charter(local_path, charter_data, dry_run=dry_run)
         state.merge("charter", {"committed_sha": sha})
 
     if not state.get("issues_created"):
