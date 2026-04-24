@@ -42,6 +42,18 @@
 
 ## Recent Changes
 
+### 2026-04-24 — [task-20260424-094351-unify-pending-human-approvals-into-a-single-inbox-] (#235 kai-linux/agent-os)
+Implemented a file-backed approvals inbox under `runtime/approvals/` with Markdown frontmatter records, lifecycle helpers and CLI commands, then wired existing Telegram-driven sprint-plan and system-architect approvals plus new high-risk PR and repeat-blocker approval requests into the shared store without replacing Telegram notifications.
+
+**Files:** `- .agent_result.md`, `- bin/aos-approvals`, `- orchestrator/approvals.py`, `- orchestrator/backlog_groomer.py`, `- orchestrator/log_analyzer.py`, `- orchestrator/paths.py`, `- orchestrator/pr_monitor.py`, `- orchestrator/queue.py`
+
+**Decisions:**
+  - - Used Markdown files with YAML frontmatter so operators can inspect or edit `decision` and `reason` directly before running the CLI
+  - - Kept Telegram JSON action files as callback envelopes instead of replacing them, which minimized workflow churn while moving approval state into the new inbox
+  - - Deduplicated high-risk PR and repeat-blocker notifications through the approval store before sending Telegram so recurring polls do not spam repeated approval messages
+  - - Used auto-expiry defaults of `skip` for sprint/system-architect approvals and `hold` for high-risk PR / repeat-blocker approvals to match the task safety requirements
+
+
 ### 2026-04-23 — [task-20260423-165940-review-follow-up-pr-312-high-risk] (#327 kai-linux/agent-os)
 Reviewed the PR #312 monthly budget hard-stop surface and found the production enforcement path still correct; fixed stale operator-facing config wording for `budgets.default`, removed a no-op duplicate test stub, and added a focused regression proving default hard-stops apply during budget filtering.
 ### 2026-04-23 — [task-20260423-152340-review-follow-up-pr-312-high-risk] (#324 kai-linux/agent-os)
