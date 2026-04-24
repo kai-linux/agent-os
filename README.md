@@ -27,7 +27,7 @@ You give it a backlog. It ships product.
 |:---:|:---:|:---:|:---:|
 | **69%** (61/88) | **0.1h** | **11%** (10/88) | **88** |
 
-Current pool: Claude · Codex · Gemini · DeepSeek. Metrics above are from the public reliability dashboard updated on 2026-04-21.
+Current pool: Claude · Codex (Gemini and DeepSeek were retired from rotation after quality review). Metrics above are from the public reliability dashboard updated on 2026-04-21.
 [Full reliability dashboard →](docs/reliability/README.md) · [Multi-agent case study →](docs/case-study-agent-os.md)
 
 ---
@@ -99,23 +99,28 @@ Agent OS solves coordination so agents can do more of the routine delivery work 
             │  Queue Engine  │  Worktree → Agent → Result → Retry/Escalate
             └───────┬────────┘
                     │
-              Push branch, open PR
+              Push branch, open PR (body: `Closes #N`)
                     │
             ┌───────▼────────┐
-            │  PR Monitor    │  CI green → merge · Conflict → rebase · Fail → escalate
-            └───────┬────────┘
+            │  PR Monitor    │  CI green → merge · Conflict → auto-rebase
+            │  + e2e health  │  Wedged >4h on same blocker → terminal close,
+            └───────┬────────┘  dispatcher re-spawns from clean main
                     │
-              Issue closed, board → Done
+              Issue auto-closed on merge, board → Done
                     │
-        ┌───────────┴───────────┐
-        ▼                       ▼
-  Log Analyzer            Backlog Groomer
-  Files fix tickets ──► back into the backlog
+     ┌──────────────┼──────────────────┬──────────────────┐
+     ▼              ▼                  ▼                  ▼
+ Log Analyzer  Backlog Groomer  Strategic Planner  Incident Scanner
+ (weekly)      (hourly cadence)  (per sprint)      (every 6h)
+ metrics       backlog hygiene   objectives        runtime signals →
+ + failure     + new issues      + priorities      self-fix issues
+     │              │                  │                  │
+     └──────────────┴──────────────────┴──────────────────┘
+                              │
+                         back into the backlog
 </pre>
 
-**That last arrow is the point.** The system files tickets about its own failures.
-Those tickets enter the backlog. The agents fix them. The fixes get merged.
-Next week, the system is better. **Indefinitely.**
+**That last arrow is the point.** Four separate improvement loops all file tickets about the system's own failures — from slow chronic issues (log analyzer, weekly) to acute runtime incidents (incident scanner, every 6h). The tickets enter the backlog. The agents fix them. The fixes get merged. Next cycle, the system is better. **Indefinitely.**
 
 ---
 
@@ -123,11 +128,15 @@ Next week, the system is better. **Indefinitely.**
 
 This is the part that makes Agent OS different from a task runner.
 
-- **Every Monday** — the log analyzer reads a week of execution metrics, synthesizes failure patterns, and files fix tickets with evidence and reasoning
-- **Every Saturday** — the backlog groomer scans for stale issues, risk flags, and undocumented known issues, then generates improvement tasks
+- **Every 6 hours** — the **incident scanner** reads the last 24h of runtime signals (incidents, escalation notes, anomaly audit events), classifies recurring patterns via deterministic rules + LLM fallback, and files self-fix issues labeled `autonomous-fix`. Closes the acute-incident loop: by the time an operator would otherwise be paged twice about the same bug, the fix issue is already in the backlog.
+- **Every 5 minutes** — **pr_monitor** manages PR health end-to-end: auto-merge on green, auto-rebase on conflict, and if a PR is wedged for >4h on the same blocker signature it's terminal-closed + branch deleted so the dispatcher re-spawns from a clean main instead of looping forever on the same failure.
+- **Every Monday** — the log analyzer reads a week of execution metrics, synthesizes chronic failure patterns, and files fix tickets with evidence and reasoning
+- **Every hour** — the backlog groomer runs per-repo cadence checks; each repo generates new issues on its own schedule (default 3.5 days, tunable). It also triages blocked issues and dedupes against semantic near-duplicates.
 - **Every sprint** — the strategic planner evaluates business-outcome metrics, adjusts priorities, and selects the next sprint from the backlog
 
 These generated issues are indistinguishable from human-written ones. They enter the same queue, get dispatched to the same agents, go through the same CI → merge pipeline. The system literally engineers itself.
+
+Merged agent PRs now lead with `Closes #N` in the PR body so GitHub auto-closes the linked issue, eliminating a class of phantom escalations where the product fix shipped but the orchestration state lagged.
 
 ---
 
@@ -230,16 +239,33 @@ python3 -m orchestrator.pr_monitor
 <details>
 <summary>Optional: set up cron for full autonomy</summary>
 
-```bash
-# Add to crontab — see docs/configuration.md for full reference
-crontab -l 2>/dev/null; echo "
-* * * * * cd $HOME/agent-os && .venv/bin/python3 -m orchestrator.github_dispatcher >> runtime/logs/dispatcher.log 2>&1
-* * * * * cd $HOME/agent-os && .venv/bin/python3 -m orchestrator.queue >> runtime/logs/queue.log 2>&1
-*/5 * * * * cd $HOME/agent-os && .venv/bin/python3 -m orchestrator.pr_monitor >> runtime/logs/pr_monitor.log 2>&1
-"
+Prefer `bin/agentos init` (Option C) — it installs the full cron block automatically. If you need to install manually, the current layout is:
+
+```cron
+# Auto-pull latest orchestrator code
+* * * * * /path/to/agent-os/bin/run_autopull.sh >> runtime/logs/autopull.log 2>&1
+
+# Dispatcher + queue + pr_monitor + telegram control
+* * * * *   /path/to/agent-os/bin/run_dispatcher.sh       >> runtime/logs/dispatcher.log 2>&1
+* * * * *   /path/to/agent-os/bin/run_queue.sh            >> runtime/logs/queue.log 2>&1
+*/5 * * * * /path/to/agent-os/bin/run_pr_monitor.sh       >> runtime/logs/pr_monitor.log 2>&1
+* * * * *   /path/to/agent-os/bin/run_telegram_control.sh >> runtime/logs/telegram_control.log 2>&1
+
+# Self-improvement loops (per-repo cadence inside each)
+0 * * * *  /path/to/agent-os/bin/run_backlog_groomer.sh    >> runtime/logs/backlog_groomer.log 2>&1
+0 * * * *  /path/to/agent-os/bin/run_strategic_planner.sh  >> runtime/logs/strategic_planner.log 2>&1
+15 */6 * * * /path/to/agent-os/bin/run_incident_scanner.sh >> runtime/logs/incident_scanner.log 2>&1
+
+# Weekly scoring + log analysis (Monday 06:30 / 07:00)
+30 6 * * 1 /path/to/agent-os/bin/run_agent_scorer.sh >> runtime/logs/agent_scorer.log 2>&1
+0  7 * * 1 /path/to/agent-os/bin/run_log_analyzer.sh >> runtime/logs/log_analyzer.log 2>&1
+
+# Daily digest + product inspection (08:00 / 06:00)
+0 8 * * * /path/to/agent-os/bin/run_daily_digest.sh       >> runtime/logs/daily_digest.log 2>&1
+0 6 * * * /path/to/agent-os/bin/run_product_inspector.sh  >> runtime/logs/product_inspector.log 2>&1
 ```
 
-Once cron is running, the system dispatches, executes, reviews, and merges with bounded retries and escalation.
+Every entrypoint sources `bin/common_env.sh`, which honors the `bin/agentos off` kill-switch, so cron entries stay installed but exit early when the orchestrator is paused.
 </details>
 
 ### Option C: Bootstrap From Scratch
@@ -250,7 +276,18 @@ If you do not already have a repo, project board, Telegram bot, or cron installe
 bin/agentos init
 ```
 
-It walks through product intake, creates a GitHub repo and Project v2 board, seeds the first backlog issues, pairs Telegram, writes `config.yaml`, and installs the required cron block.
+Eight interactive steps:
+
+1. **What are you building?** Short intake — idea, kind (web/api/game/…), stack preference, success criteria for the first user.
+2. **GitHub repo.** Create or adopt a repo. `.gitignore` is seeded with `.agent_result.md` (the agent→orchestrator handoff contract — must never be committed) and other sensible defaults.
+3. **Charter and supporting docs.** The architect agent proposes a stack, rationale, and the first 3–5 seed issues, then writes four markdown docs into the new repo: `NORTH_STAR.md` (first vertical slice), `VISION.md` (2–5 year end-state), `STRATEGY.md` (phased path from today to vision), `PLANNING_PRINCIPLES.md` (non-negotiable agent rules).
+4. **Telegram control plane.** Pair a bot to this operator. Existing Telegram credentials in `config.yaml` are preserved, not overwritten.
+5. **Tuning cadence and thresholds.** Interactively set `sprint_cadence_days`, `groomer_cadence_days`, `max_parallel_workers`, runtime cap, plan size, retries, dependency-watcher cadence. Defaults come from existing `config.yaml` when present — press enter to keep what you already tuned.
+6. **Write config.yaml.** If `config.yaml` already exists, you're prompted to confirm merging the new project into it (scalars like existing Telegram token and existing project entries are preserved via `setdefault`, so re-running init never clobbers earlier customizations). Backup of the pre-merge file is always written to `config.yaml.bak.TIMESTAMP`.
+7. **Cron setup.** Installs or updates the orchestrator cron block; unchanged on re-run.
+8. **Done.** Project URL, config path, and first-PR ETA printed.
+
+You can safely re-run `bin/agentos init` whenever you want to add another project: existing settings survive, the new repo joins the pool, and the cadence prompts default to your current config so hitting enter preserves your tuning.
 
 ---
 
@@ -300,13 +337,17 @@ A dedicated poller (`bin/run_telegram_control.sh`) runs every minute with `AGENT
 |---|---|---|
 | `github_dispatcher.py` | Triages backlog, assigns + formats tasks | Every minute |
 | `queue.py` | Routes to best agent, retries, escalates | Per task |
-| `pr_monitor.py` | CI gate, auto-merge, auto-rebase | Every 5 min |
-| `log_analyzer.py` | Failure analysis → fix tickets | Weekly |
-| `agent_scorer.py` | Execution + business-outcome scoring | Weekly |
-| `backlog_groomer.py` | Backlog hygiene + task generation | Config-driven |
-| `strategic_planner.py` | Sprint planning from evidence + objectives | Per sprint |
+| `pr_monitor.py` | CI gate, auto-merge, auto-rebase, **e2e health terminal-close of wedged PRs** | Every 5 min |
+| `incident_scanner.py` | Turns runtime signals (incidents + escalations + audit anomalies) into self-fix issues via deterministic rules + LLM fallback | **Every 6 hours** |
+| `backlog_groomer.py` | Backlog hygiene + per-repo task generation + blocker triage + dedup notifications | Every hour (per-repo cadence gate) |
+| `strategic_planner.py` | Sprint planning from evidence + objectives | Every hour (per-sprint gate) |
+| `work_verifier.py` | Pre-merge deterministic + LLM judge on every PR | Per PR |
+| `log_analyzer.py` | Chronic failure analysis → fix tickets | Weekly (Mon 07:00) |
+| `agent_scorer.py` | Execution + business-outcome scoring | Weekly (Mon 06:30) |
+| `product_inspector.py` | Live product-health + adoption probes | Daily (06:00) |
+| `daily_digest.py` | Operator digest to Telegram | Daily (08:00) |
 
-4 agents in the pool: **Claude, Codex, Gemini, DeepSeek** — routed by task type with automatic fallback chains.
+2 agents in the active pool: **Claude, Codex** — routed by task type with automatic fallback chains. Gemini and DeepSeek were retired from rotation after quality review; the adapter contracts remain in `orchestrator/` so either can be re-enabled by updating `agent_fallbacks` in `config.yaml`.
 
 The backlog is GitHub Issues. The sprint board is GitHub Projects. The standup is Telegram. The office is a **$5/month VPS**.
 
