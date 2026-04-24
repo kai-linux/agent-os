@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -310,6 +311,51 @@ def _send_incident(cfg: dict, incident: dict[str, Any], tier_cfg: dict[str, Any]
     return delivered
 
 
+def _is_incident_stale(incident: dict[str, Any]) -> tuple[bool, str]:
+    """Return (stale, reason) when an incident's underlying condition has resolved.
+
+    Incidents raised at ``sev3`` are held for the next ``regular_digest``
+    delivery window (typically the next morning). When the underlying PR
+    state changes in the meantime — e.g. stuck_pr_merge resolves because
+    the PR merged within minutes — the digest would otherwise ship a
+    stale alert hours or a full day later.
+
+    Checks GitHub for PR-typed incidents. Returns (True, reason) only when
+    authoritatively confirmed resolved; any lookup failure returns
+    (False, "") so we err on the side of delivering.
+    """
+    event = incident.get("event") or {}
+    source = str(event.get("source") or incident.get("source") or "")
+    event_type = str(event.get("type") or "")
+    repo = str(event.get("repo") or "").strip()
+    pr_number = event.get("pr_number")
+    if not repo or not pr_number:
+        return (False, "")
+    if source not in {"pr_monitor", "work_verifier"} and "pr" not in event_type.lower():
+        return (False, "")
+    try:
+        result = subprocess.run(
+            ["gh", "pr", "view", str(pr_number), "-R", repo, "--json", "state,mergedAt,mergeStateStatus"],
+            capture_output=True, text=True, timeout=20, check=False,
+        )
+        if result.returncode != 0:
+            return (False, "")
+        payload = json.loads(result.stdout or "{}")
+    except (OSError, json.JSONDecodeError, subprocess.TimeoutExpired):
+        return (False, "")
+    state = str(payload.get("state") or "").upper()
+    if state == "MERGED":
+        return (True, f"PR #{pr_number} merged at {payload.get('mergedAt')}")
+    if state == "CLOSED":
+        return (True, f"PR #{pr_number} closed without merge")
+    # For still-OPEN PRs, check if the specific condition has cleared.
+    merge_state = str(payload.get("mergeStateStatus") or "").upper()
+    if event_type == "stuck_pr_merge" and merge_state == "CLEAN":
+        # Stuck-merge alert, but PR is now cleanly mergeable — condition cleared.
+        return (True, f"PR #{pr_number} now CLEAN (stuck-merge condition cleared)")
+    return (False, "")
+
+
 def _incident_due(router_cfg: dict, incident: dict[str, Any], now: datetime) -> bool:
     severity = str(incident.get("sev") or "").lower()
     tier_cfg = dict(router_cfg["tiers"].get(severity) or {})
@@ -336,6 +382,17 @@ def flush_pending(cfg: dict | None = None, *, now: datetime | None = None, logfi
         if incident.get("resolved_at") or incident.get("deduped_to") or incident.get("notified_at"):
             continue
         if not _incident_due(router_cfg, incident, current):
+            continue
+        # Guard against stale PR alerts: if the underlying PR merged or
+        # otherwise cleared between when the incident was raised and the
+        # digest fires, mark resolved and skip delivery. Without this, a
+        # stuck_pr_merge incident created at 15:55 and resolved at 16:00
+        # still ships to Telegram at the next digest_hour (09:00 next day).
+        stale, reason = _is_incident_stale(incident)
+        if stale:
+            incident["resolved_at"] = current.isoformat()
+            incident["auto_resolved_reason"] = reason
+            changed = True
             continue
         tier_cfg = dict(router_cfg["tiers"].get(incident.get("sev")) or {})
         if _send_incident(cfg, incident, tier_cfg, logfile=logfile, queue_summary_log=queue_summary_log):
