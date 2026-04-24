@@ -42,6 +42,17 @@
 
 ## Recent Changes
 
+### 2026-04-24 — [task-20260424-094619-add-curated-mcp-external-api-library-registry-with] (#252 kai-linux/agent-os)
+Implemented a curated tool/library registry with per-repo opt-in and task-type-scoped resolution, fail-closed MCP checksum/env validation at startup, a monthly suggestion-only library scout, groomer approval handling for scout-generated spike issues, and focused regression coverage for the new paths.
+
+**Files:** `- .agent_result.md`, `- CODEBASE.md`, `- example.config.yaml`, `- library_catalog.yaml`, `- verified_packages.yaml`, `- bin/run_library_scout.sh`, `- orchestrator/tool_registry.py`, `- orchestrator/library_scout.py`
+
+**Decisions:**
+  - - Kept registry validation fail-closed in `load_config()` so bad MCP pins, checksum drift, or missing credential env vars block startup before any adapter can use the tool.
+  - - Validated only tools enabled by a repo’s `enabled_tools` opt-in list so repos without curated-tool adoption remain backward-compatible with the existing default toolset.
+  - - Reused the existing Telegram `plan:*` approval callback path for library scout proposals to keep operator approval semantics and audit logging aligned with system-architect approvals.
+
+
 ### 2026-04-24 — [task-20260424-094351-unify-pending-human-approvals-into-a-single-inbox-] (#235 kai-linux/agent-os)
 Implemented a file-backed approvals inbox under `runtime/approvals/` with Markdown frontmatter records, lifecycle helpers and CLI commands, then wired existing Telegram-driven sprint-plan and system-architect approvals plus new high-risk PR and repeat-blocker approval requests into the shared store without replacing Telegram notifications.
 
