@@ -1078,6 +1078,11 @@ def test_groom_repo_queues_system_architect_findings_for_approval(tmp_path, monk
     assert action["type"] == "system_architect_approval"
     assert action["approval"] == "pending"
     assert action["issue"]["title"] == "Add missing role `system_architect` to agent-os"
+    approval_path = tmp_path / "runtime" / "approvals" / f"approval-{action['action_id']}.md"
+    assert approval_path.exists()
+    approval_text = approval_path.read_text(encoding="utf-8")
+    assert "kind: system_architect" in approval_text
+    assert "finding_id: capability_gap:role:system-architect" in approval_text
 
 
 def test_groom_repo_applies_approved_system_architect_action(tmp_path, monkeypatch):

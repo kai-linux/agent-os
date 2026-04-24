@@ -15,6 +15,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from orchestrator import github_dispatcher as gd
+from orchestrator import approvals
 from orchestrator.repo_context import (
     gather_objective_alignment,
     gather_recent_git_state,
@@ -1741,6 +1742,12 @@ def test_handle_telegram_callback_expired():
 def test_handle_telegram_callback_plan_approve():
     with tempfile.TemporaryDirectory() as d:
         actions_dir = Path(d)
+        approvals.request(
+            {"root_dir": d},
+            kind="sprint_plan",
+            approval_id="abcdef123456",
+            context={"repo": "owner/repo"},
+        )
         action = {
             "action_id": "abcdef123456",
             "type": "plan_approval",
@@ -1758,6 +1765,10 @@ def test_handle_telegram_callback_plan_approve():
         assert "Approved sprint plan" in outcome["text"]
         stored = actions_dir.joinpath("abcdef123456.json").read_text(encoding="utf-8")
         assert '"approval": "approved"' in stored
+        approval_path = Path(d) / "runtime" / "approvals" / "resolved" / "approval-abcdef123456.md"
+        assert approval_path.exists()
+        resolved = approval_path.read_text(encoding="utf-8")
+        assert "decision: approve" in resolved
         audit_lines = (Path(d) / "runtime" / "audit" / "audit.jsonl").read_text(encoding="utf-8").splitlines()
         assert any('"event_type":"telegram_callback"' in line for line in audit_lines)
 

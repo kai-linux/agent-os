@@ -1151,6 +1151,7 @@ def handle_telegram_callback(
     queue_summary_log: Path | None = None,
 ) -> dict:
     from orchestrator.audit_log import append_audit_event
+    from orchestrator import approvals
 
     m = re.fullmatch(r"(esc|plan|rvt):([a-f0-9]{12}):(requeue|retry|close|skip|approve|reject|cancel)", callback_data or "")
     if not m:
@@ -1168,6 +1169,20 @@ def handle_telegram_callback(
         action["status"] = "expired"
         action["expired_at"] = datetime.now(timezone.utc).isoformat()
         save_telegram_action(actions_dir, action)
+        try:
+            from orchestrator import approvals
+
+            decision, reason = approvals.AUTO_EXPIRY_DEFAULTS.get(
+                str(action.get("type") or ""),
+                ("hold", "Auto-expired at approval deadline; defaulted to hold."),
+            )
+            if action.get("type") == "plan_approval":
+                decision, reason = ("skip", "Auto-expired at approval deadline; defaulted to skip.")
+            elif action.get("type") == "system_architect_approval":
+                decision, reason = ("skip", "Auto-expired at approval deadline; defaulted to skip.")
+            approvals.resolve(cfg, action_id, decision, reason)
+        except Exception:
+            pass
         return {"text": "This escalation action expired after 48 hours.", "show_alert": True, "remove_keyboard": True}
 
     if action_type == "plan":
@@ -1177,11 +1192,29 @@ def handle_telegram_callback(
         action["handled_action"] = operation
         action["handled_at"] = datetime.now(timezone.utc).isoformat()
         action["approval"] = "approved" if operation == "approve" else "rejected"
-        action["result_text"] = (
-            f"Approved sprint plan for {action.get('repo', 'repo')}."
+        approval_decision = "approve" if operation == "approve" else "skip"
+        approval_reason = (
+            "Approved from Telegram callback."
             if operation == "approve"
-            else f"Skipped sprint plan for {action.get('repo', 'repo')}."
+            else "Skipped from Telegram callback."
         )
+        try:
+            approvals.resolve(cfg, action_id, approval_decision, approval_reason)
+        except FileNotFoundError:
+            pass
+        action_kind = str(action.get("type") or "")
+        if action_kind == "system_architect_approval":
+            action["result_text"] = (
+                f"Approved system architect proposal for {action.get('repo', 'repo')}."
+                if operation == "approve"
+                else f"Skipped system architect proposal for {action.get('repo', 'repo')}."
+            )
+        else:
+            action["result_text"] = (
+                f"Approved sprint plan for {action.get('repo', 'repo')}."
+                if operation == "approve"
+                else f"Skipped sprint plan for {action.get('repo', 'repo')}."
+            )
         save_telegram_action(actions_dir, action)
         append_audit_event(
             cfg,
