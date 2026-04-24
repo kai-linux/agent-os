@@ -42,6 +42,16 @@
 
 ## Recent Changes
 
+### 2026-04-24 — [task-20260424-102830-review-follow-up-pr-347-high-risk] (#348 kai-linux/agent-os)
+Reviewed the high-risk PR #347 surfaces covering the library scout shell entry point, runtime config/path validation, queue prompt wiring, and example config semantics. The production code paths remained correct, so I kept the diff review-driven and minimal by adding focused regressions that lock the intended fail-closed tool-registry behavior and the prompt-scoping contract for explicitly opted-in repos.
+
+**Files:** `- .agent_result.md`, `- tests/test_paths.py`, `- tests/test_queue.py`
+
+**Decisions:**
+  - - Kept production code unchanged because review of the flagged high-risk paths found the shell wrapper, config-relative registry validation, and queue prompt gating behavior consistent with the intended safety model.
+  - - Added only narrow regression coverage on the reviewed surfaces instead of broadening the diff, to preserve the follow-up review scope and avoid refactoring unrelated code.
+
+
 ### 2026-04-24 — [task-20260424-094619-add-curated-mcp-external-api-library-registry-with] (#252 kai-linux/agent-os)
 Implemented a curated tool/library registry with per-repo opt-in and task-type-scoped resolution, fail-closed MCP checksum/env validation at startup, a monthly suggestion-only library scout, groomer approval handling for scout-generated spike issues, and focused regression coverage for the new paths.
 
