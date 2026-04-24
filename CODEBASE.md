@@ -42,6 +42,16 @@
 
 ## Recent Changes
 
+### 2026-04-24 — [task-20260424-094619-add-curated-mcp-external-api-library-registry-with] (#252 kai-linux/agent-os)
+Implemented an operator-curated tool and library registry with per-repo opt-in, task-type-scoped MCP/HTTP tool resolution, fail-closed MCP version/checksum/env-var startup validation, a monthly library scout that suggests only catalog-listed packages, groomer approval handling for scout-generated spike issues, and daily digest/prompt surfaces for registry state.
+
+**Files:** `- .agent_result.md`, `- CODEBASE.md`, `- example.config.yaml`, `- library_catalog.yaml`, `- verified_packages.yaml`, `- bin/run_library_scout.sh`, `- orchestrator/tool_registry.py`, `- orchestrator/library_scout.py`, `- orchestrator/paths.py`, `- orchestrator/queue.py`, `- orchestrator/backlog_groomer.py`, `- orchestrator/daily_digest.py`, `- tests/test_tool_registry.py`, `- tests/test_library_scout.py`, `- tests/test_paths.py`, `- tests/test_daily_digest.py`, `- tests/test_backlog_groomer.py`
+
+**Decisions:**
+  - - Kept MCP hardening registry-driven and fail-closed at config load time, validating enabled tools only so repos without `enabled_tools` remain backward-compatible with the adapter default toolset.
+  - - Reused the existing Telegram approval action path for library-scout findings instead of introducing a second approval subsystem, keeping operator gating consistent with system-architect proposals.
+  - - Scoped library suggestions strictly to `library_catalog.yaml` keyword matches so the scout cannot autonomously invent dependencies or open dependency PRs.
+
 ### 2026-04-23 — [task-20260423-165940-review-follow-up-pr-312-high-risk] (#327 kai-linux/agent-os)
 Reviewed the PR #312 monthly budget hard-stop surface and found the production enforcement path still correct; fixed stale operator-facing config wording for `budgets.default`, removed a no-op duplicate test stub, and added a focused regression proving default hard-stops apply during budget filtering.
 ### 2026-04-23 — [task-20260423-152340-review-follow-up-pr-312-high-risk] (#324 kai-linux/agent-os)

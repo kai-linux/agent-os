@@ -30,6 +30,7 @@ from orchestrator.repo_context import build_execution_context, gather_recent_git
 from orchestrator.repo_modes import is_dispatcher_only_repo
 from orchestrator.agent_scorer import filter_healthy_agents, log_gate_decision, ADAPTIVE_HEALTH_WINDOW_DAYS, ADAPTIVE_HEALTH_THRESHOLD
 from orchestrator.scheduler_state import is_due, job_lock, record_run
+from orchestrator.tool_registry import format_tool_bundle_for_prompt, resolve_tools_for
 
 from orchestrator.cost_tracker import rebuild_cost_records, resolve_attempt_model, resolve_attempt_provider, estimate_text_tokens
 from orchestrator.budgets import (
@@ -2316,6 +2317,14 @@ def write_prompt(task_id: str, meta: dict, body: str, current_agent: str, prior_
         cfg_for_obj = {}
     objective_context = gather_objective_alignment(repo_path, cfg_for_obj, github_slug)
     sprint_directives = read_sprint_directives(repo_path) if worktree else ""
+    curated_tools = ""
+    if cfg_for_obj and github_slug:
+        try:
+            bundle = resolve_tools_for(github_slug, meta.get("task_type", "implementation"), cfg_for_obj)
+            if not bundle.get("default_toolset_allowed", True):
+                curated_tools = format_tool_bundle_for_prompt(bundle)
+        except Exception as exc:
+            curated_tools = f"Curated tool registry unavailable: {exc}"
 
     enhanced_sections = []
     if git_state and git_state != "(recent git state unavailable)":
@@ -2324,6 +2333,8 @@ def write_prompt(task_id: str, meta: dict, body: str, current_agent: str, prior_
         enhanced_sections.append(f"## Objective Alignment\n\n{objective_context}")
     if sprint_directives and not sprint_directives.startswith("(no sprint directives"):
         enhanced_sections.append(f"## Sprint Directives\n\n{sprint_directives}")
+    if curated_tools:
+        enhanced_sections.append(f"## Curated Tools\n\n{curated_tools}")
     web_kind = _web_task_kind(meta, body)
     if web_kind:
         enhanced_sections.append(_web_task_rubric_for(web_kind).strip())

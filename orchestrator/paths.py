@@ -85,8 +85,10 @@ def load_config():
     cfg["_config_dir"] = str(config_dir)
 
     from orchestrator.dashboard.auth import validate_dashboard_auth_config
+    from orchestrator.tool_registry import validate_tool_registry_or_raise
 
     cfg.update(validate_dashboard_auth_config(cfg))
+    cfg["_tool_registry_status"] = validate_tool_registry_or_raise(cfg)
     return cfg
 
 
