@@ -184,12 +184,18 @@ def merge_config(existing: dict[str, Any], intake: dict[str, str], github: dict[
     merged.setdefault("github_project_blocked_value", status_values["Blocked"])
     merged.setdefault("github_project_done_value", status_values["Done"])
 
+    # github_repos / github_projects: only register the new repo when it
+    # isn't already in the existing config. Re-running init for an existing
+    # repo used to silently overwrite its entry; preserve the operator's
+    # previous edits instead.
     github_repos = dict(merged.get("github_repos") or {})
-    github_repos[repo_name] = github["repo_full_name"]
+    github_repos.setdefault(repo_name, github["repo_full_name"])
     merged["github_repos"] = github_repos
 
     github_projects = dict(merged.get("github_projects") or {})
-    github_projects.update(_project_entry(github))
+    new_project_entry = _project_entry(github)
+    for key, value in new_project_entry.items():
+        github_projects.setdefault(key, value)
     merged["github_projects"] = github_projects
 
     trusted_authors = list(merged.get("trusted_authors") or [])
@@ -197,13 +203,44 @@ def merge_config(existing: dict[str, Any], intake: dict[str, str], github: dict[
         trusted_authors.append(github["owner"])
     merged["trusted_authors"] = trusted_authors
 
-    merged["telegram_bot_token"] = telegram["token"]
-    merged["telegram_chat_id"] = str(telegram["chat_id"])
+    # Preserve existing Telegram credentials — the operator has already paired
+    # a bot and the new repo does not supersede that pairing. Only write when
+    # absent.
+    merged.setdefault("telegram_bot_token", telegram["token"])
+    merged.setdefault("telegram_chat_id", str(telegram["chat_id"]))
     merged.setdefault("dependency_watcher", {"enabled": True, "cadence_days": 7, "max_actions_per_week": 3})
     return merged
 
 
-def run(state, intake: dict[str, str], github: dict[str, Any], charter: dict[str, Any], telegram: dict[str, str], *, dry_run: bool = False) -> Path:
+def apply_tuning(payload: dict[str, Any], tuning: dict[str, Any] | None) -> dict[str, Any]:
+    """Overlay interactive tuning choices onto a config payload.
+
+    Only applies keys the operator explicitly chose (present in tuning).
+    Nested keys like ``dependency_watcher.cadence_days`` merge into the
+    existing nested dict rather than replacing it.
+    """
+    if not tuning:
+        return payload
+    for key, value in tuning.items():
+        if key == "dependency_watcher_cadence_days":
+            dw = dict(payload.get("dependency_watcher") or {})
+            dw["cadence_days"] = value
+            payload["dependency_watcher"] = dw
+            continue
+        payload[key] = value
+    return payload
+
+
+def run(
+    state,
+    intake: dict[str, str],
+    github: dict[str, Any],
+    charter: dict[str, Any],
+    telegram: dict[str, str],
+    *,
+    dry_run: bool = False,
+    tuning: dict[str, Any] | None = None,
+) -> Path:
     config_path = ROOT / "config.yaml"
     _ensure_hooks_path()
     existing_cfg = None
@@ -212,9 +249,16 @@ def run(state, intake: dict[str, str], github: dict[str, Any], charter: dict[str
         existing_cfg = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
         ts = datetime.now().strftime("%Y%m%d-%H%M%S")
         backup = config_path.with_name(f"config.yaml.bak.{ts}")
-        shutil.move(str(config_path), str(backup))
+        # Copy (not move) the backup so the existing config stays readable
+        # until the merged file replaces it atomically. Prevents a race where
+        # a concurrent reader sees a missing config mid-swap.
+        shutil.copy2(str(config_path), str(backup))
 
-    payload = merge_config(existing_cfg, intake, github, charter, telegram) if existing_cfg is not None else build_config(intake, github, charter, telegram)
+    if existing_cfg is not None:
+        payload = merge_config(existing_cfg, intake, github, charter, telegram)
+    else:
+        payload = build_config(intake, github, charter, telegram)
+    payload = apply_tuning(payload, tuning)
     yaml_text = yaml.safe_dump(payload, sort_keys=False)
     if not dry_run:
         config_path.write_text(yaml_text, encoding="utf-8")
