@@ -2356,6 +2356,102 @@ def test_write_prompt_omits_git_state_section_when_unavailable(tmp_path, monkeyp
     assert "Objective Alignment" in text
 
 
+def test_write_prompt_includes_curated_tools_for_opted_in_repo(tmp_path, monkeypatch):
+    root, worktree = _write_prompt_env(
+        tmp_path,
+        monkeypatch,
+        git_state="abc1234 feat: add widget",
+        sprint_payload=None,
+    )
+    monkeypatch.setattr(
+        "orchestrator.queue.load_config",
+        lambda: {
+            "tool_registry": {
+                "mcp_servers": {
+                    "linear_mcp": {
+                        "title": "Linear MCP",
+                        "package": "@acme/mcp-linear",
+                        "version": "1.2.3",
+                        "sha256": "a" * 64,
+                        "env": {"LINEAR_API_KEY": "${LINEAR_API_KEY}"},
+                        "task_permissions": {"implementation": ["issues:read"]},
+                    }
+                }
+            },
+            "github_projects": {
+                "proj": {
+                    "repos": [
+                        {"github_repo": "owner/repo", "enabled_tools": ["linear_mcp"]},
+                    ]
+                }
+            },
+        },
+    )
+
+    prompt_file = write_prompt(
+        "task-ctx-curated-tools",
+        {"task_type": "implementation", "base_branch": "main", "github_repo": "owner/repo"},
+        "Implement the feature.",
+        "claude",
+        [],
+        root,
+        worktree=worktree,
+    )
+
+    text = prompt_file.read_text(encoding="utf-8")
+    assert "## Curated Tools" in text
+    assert "linear_mcp [mcp]" in text
+    assert "package=@acme/mcp-linear@1.2.3" in text
+    assert "perms=issues:read" in text
+
+
+def test_write_prompt_omits_curated_tools_for_repo_without_override(tmp_path, monkeypatch):
+    root, worktree = _write_prompt_env(
+        tmp_path,
+        monkeypatch,
+        git_state="abc1234 feat: add widget",
+        sprint_payload=None,
+    )
+    monkeypatch.setattr(
+        "orchestrator.queue.load_config",
+        lambda: {
+            "tool_registry": {
+                "mcp_servers": {
+                    "linear_mcp": {
+                        "title": "Linear MCP",
+                        "package": "@acme/mcp-linear",
+                        "version": "1.2.3",
+                        "sha256": "a" * 64,
+                        "env": {"LINEAR_API_KEY": "${LINEAR_API_KEY}"},
+                        "task_permissions": {"implementation": ["issues:read"]},
+                    }
+                }
+            },
+            "github_projects": {
+                "proj": {
+                    "repos": [
+                        {"github_repo": "owner/repo"},
+                    ]
+                }
+            },
+        },
+    )
+
+    prompt_file = write_prompt(
+        "task-ctx-default-tools",
+        {"task_type": "implementation", "base_branch": "main", "github_repo": "owner/repo"},
+        "Implement the feature.",
+        "claude",
+        [],
+        root,
+        worktree=worktree,
+    )
+
+    text = prompt_file.read_text(encoding="utf-8")
+    assert "## Curated Tools" not in text
+    assert "Curated tool registry" not in text
+
+
 @pytest.mark.parametrize("agent_name", ["claude", "codex", "deepseek"])
 def test_write_prompt_dispatch_context_is_agent_agnostic(tmp_path, monkeypatch, agent_name):
     """Dispatch Context injection must be identical across claude, codex, and deepseek.
