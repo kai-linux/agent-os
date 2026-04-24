@@ -14,6 +14,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from orchestrator import approvals
 from orchestrator.agent_scorer import (
     WINDOW_DAYS,
     build_degradation_findings,
@@ -304,8 +305,11 @@ def check_blocker_regression_alerts(
         fix_dt = cutoff_24h
 
     alerts: list[str] = []
+    from orchestrator.queue import send_telegram
+
     for blocker_code, threshold in BLOCKER_REGRESSION_ALERTS.items():
         count = 0
+        repo_counts: Counter[str] = Counter()
         for rec in records:
             if str(rec.get("blocker_code", "")).strip().lower() != blocker_code:
                 continue
@@ -319,9 +323,29 @@ def check_blocker_regression_alerts(
             if ts < fix_dt or ts < cutoff_24h:
                 continue
             count += 1
+            repo_name = str(rec.get("repo") or "").strip()
+            if repo_name:
+                repo_counts[repo_name] += 1
         if count > threshold:
+            repo = repo_counts.most_common(1)[0][0] if repo_counts else _resolve_default_repo(cfg)
+            record = approvals.request(
+                cfg,
+                kind="repeat_blocker",
+                telegram_message_id=None,
+                action_url="",
+                context={
+                    "repo": repo,
+                    "blocker_code": blocker_code,
+                    "count_24h": count,
+                    "threshold": threshold,
+                    "dedup_key": f"repeat-blocker:{repo}:{blocker_code}",
+                },
+            )
+            if record.get("telegram_message_id"):
+                continue
             msg = (
                 f"\u26a0\ufe0f Blocker regression alert: {blocker_code}\n"
+                f"Repo: {repo}\n"
                 f"Count: {count} in rolling 24h (threshold: {threshold})\n\n"
                 f"RCA runbook:\n"
                 f"1. Identify which tasks hit {blocker_code}: "
@@ -332,7 +356,13 @@ def check_blocker_regression_alerts(
                 f"5. Check if repo_context.py helpers are raising exceptions silently"
             )
             alerts.append(msg)
-            _send_telegram(cfg, msg)
+            message_id = send_telegram(cfg, msg)
+            approvals.update(
+                cfg,
+                str(record["id"]),
+                telegram_message_id=message_id,
+                action_url=approvals.build_action_url(str(cfg.get("telegram_chat_id", "")).strip(), message_id),
+            )
     return alerts
 
 

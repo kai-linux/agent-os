@@ -114,6 +114,8 @@ def runtime_paths(cfg: dict):
         "TELEGRAM_ACTIONS": ROOT / "runtime" / "telegram_actions",
         "TELEGRAM_OFFSET": ROOT / "runtime" / "telegram_update_offset.txt",
         "SKIP_SIGNALS": ROOT / "runtime" / "metrics" / "plan_skip_signals.jsonl",
+        "APPROVALS": ROOT / "runtime" / "approvals",
+        "APPROVALS_RESOLVED": ROOT / "runtime" / "approvals" / "resolved",
     }
 
     for p in [
@@ -127,6 +129,8 @@ def runtime_paths(cfg: dict):
         paths["PROMPTS"],
         paths["INCIDENTS"],
         paths["TELEGRAM_ACTIONS"],
+        paths["APPROVALS"],
+        paths["APPROVALS_RESOLVED"],
     ]:
         p.mkdir(parents=True, exist_ok=True)
 

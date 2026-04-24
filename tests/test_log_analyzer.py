@@ -172,6 +172,36 @@ def test_blocker_regression_alert_ignores_pre_fix_data():
     assert len(alerts) == 0
 
 
+def test_blocker_regression_alert_creates_repeat_blocker_approval(tmp_path, monkeypatch):
+    sent = []
+    monkeypatch.setattr("orchestrator.queue.send_telegram", lambda cfg, text: sent.append(text) or 88)
+    now = datetime.now(tz=timezone.utc)
+    fix_ts = (now - timedelta(hours=12)).isoformat()
+    records = [
+        {
+            "timestamp": (now - timedelta(hours=i)).isoformat(),
+            "repo": "owner/repo",
+            "status": "blocked",
+            "blocker_code": "missing_context",
+        }
+        for i in range(6)
+    ]
+
+    alerts = check_blocker_regression_alerts(
+        records,
+        {"root_dir": str(tmp_path), "github_repo": "owner/repo", "telegram_chat_id": "-100123"},
+        fix_timestamp=fix_ts,
+    )
+
+    assert len(alerts) == 1
+    assert sent
+    approval_files = list((tmp_path / "runtime" / "approvals").glob("approval-*.md"))
+    assert len(approval_files) == 1
+    approval_text = approval_files[0].read_text(encoding="utf-8")
+    assert "kind: repeat_blocker" in approval_text
+    assert "blocker_code: missing_context" in approval_text
+
+
 def test_run_audits_created_issue(monkeypatch, tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()

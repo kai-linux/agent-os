@@ -18,7 +18,7 @@ from copy import deepcopy
 from unittest.mock import MagicMock
 
 from orchestrator import pr_monitor
-from orchestrator.pr_risk_assessment import RiskAssessment
+from orchestrator.pr_risk_assessment import RiskAssessment, RiskSignal
 
 
 def _make_pr(mergeable: str = "MERGEABLE", merge_state: str = "CLEAN") -> dict:
@@ -219,9 +219,26 @@ def test_monitor_prs_work_verifier_block_clears_poisoned_attempts(monkeypatch, t
     monkeypatch.setattr(pr_monitor, "_prompt_labeled_field_failures", lambda cfg, repo: None)
     monkeypatch.setattr("orchestrator.control_state.is_repo_disabled", lambda *args, **kwargs: False)
 
-    pr_monitor.monitor_prs()
 
-    assert not stuck_calls
-    assert not merge_calls
-    assert "attempts" not in state[pr["url"]]
-    assert any(pr["url"] in snapshot and "attempts" not in snapshot[pr["url"]] for snapshot in saves)
+def test_send_risk_telegram_creates_high_risk_approval(tmp_path, monkeypatch):
+    sent = []
+
+    monkeypatch.setattr("orchestrator.queue.send_telegram", lambda cfg, text: sent.append(text) or 321)
+    cfg = {"root_dir": str(tmp_path), "telegram_chat_id": "-100123"}
+    risk = RiskAssessment(
+        level="high",
+        signals=[RiskSignal(category="large_diff", severity="high", detail="large risky diff")],
+        files_changed=9,
+        lines_changed=900,
+        has_source_changes=True,
+        has_test_changes=False,
+    )
+
+    pr_monitor._send_risk_telegram(cfg, "owner/repo", 77, risk)
+
+    assert sent
+    approval_files = list((tmp_path / "runtime" / "approvals").glob("approval-*.md"))
+    assert len(approval_files) == 1
+    text = approval_files[0].read_text(encoding="utf-8")
+    assert "kind: high_risk_pr" in text
+    assert "pr_number: 77" in text

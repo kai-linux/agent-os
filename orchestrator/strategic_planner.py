@@ -30,6 +30,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 from uuid import uuid4
 
+from orchestrator import approvals
 from orchestrator.commit_signature import with_agent_os_trailer
 from orchestrator.paths import load_config, runtime_paths
 from orchestrator.objectives import (
@@ -3441,6 +3442,15 @@ def _invalidate_pending_action_for_dormant_repo(paths: dict, action: dict, githu
     action["completed_at"] = now
     action["invalid_reason"] = "repo is dormant"
     save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
+    try:
+        approvals.resolve(
+            load_config(),
+            str(action.get("action_id") or ""),
+            "skip",
+            "Repo is dormant; discarding pending sprint plan approval.",
+        )
+    except Exception:
+        pass
 
 
 def _complete_plan_action(
@@ -3535,6 +3545,15 @@ def _complete_plan_action(
         return True
 
     if telegram_action_expired(action):
+        try:
+            approvals.resolve(
+                cfg,
+                str(action.get("action_id") or ""),
+                "skip",
+                "Auto-expired at approval deadline; defaulted to skip.",
+            )
+        except Exception:
+            pass
         skip_msg = f"⏭️ Sprint plan for {repo} expired without approval. Skipping this cycle."
         print(skip_msg)
         _send_telegram(cfg, skip_msg)
@@ -4093,6 +4112,20 @@ def run():
                 print("  Failed to send plan to Telegram (or no credentials).")
                 print("  Skipping plan application — approval gate is mandatory.")
                 continue
+            approvals.request(
+                cfg,
+                kind="sprint_plan",
+                approval_id=action["action_id"],
+                expires_at=action["expires_at"],
+                telegram_message_id=msg_id,
+                action_url=approvals.build_action_url(str(cfg.get("telegram_chat_id", "")).strip(), msg_id),
+                context={
+                    "repo": github_slug,
+                    "plan": plan,
+                    "retrospective": retrospective,
+                    "dedup_key": f"sprint-plan:{github_slug}:{action['created_at']}",
+                },
+            )
             action["message_id"] = msg_id
             action["plan"] = plan
             action["retrospective"] = retrospective

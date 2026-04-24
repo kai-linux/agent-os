@@ -29,6 +29,7 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from uuid import uuid4
 
+from orchestrator import approvals
 from orchestrator.paths import load_config
 from orchestrator.agent_scorer import load_recent_metrics, findings_path as scorer_findings_path
 from orchestrator.audit_log import append_audit_event
@@ -67,7 +68,7 @@ from orchestrator.quality_harness import (
     resolve_quality_harness_config,
     write_harness_plan_finding,
 )
-from orchestrator.queue import planner_reply_markup, save_telegram_action
+from orchestrator.queue import planner_reply_markup, save_telegram_action, telegram_action_expired
 from orchestrator.scheduler_state import is_due, record_run, job_lock
 from orchestrator.repo_modes import is_dispatcher_only_repo
 from orchestrator.semantic_dedup import (
@@ -1224,6 +1225,11 @@ def _list_system_architect_actions(actions_dir: Path, github_slug: str) -> list[
             continue
         if action.get("repo") != github_slug:
             continue
+        if action.get("status") == "pending" and telegram_action_expired(action):
+            action["status"] = "expired"
+            action["expired_at"] = datetime.now(timezone.utc).isoformat()
+            save_telegram_action(actions_dir, action)
+            continue
         actions.append(action)
     return actions
 
@@ -1262,6 +1268,22 @@ def _queue_system_architect_approval(
     message_id = _send_telegram(cfg, msg, reply_markup=planner_reply_markup(action["action_id"]))
     if message_id is None:
         return False
+    approvals.request(
+        cfg,
+        kind="system_architect",
+        approval_id=action["action_id"],
+        expires_at=action["expires_at"],
+        telegram_message_id=message_id,
+        action_url=approvals.build_action_url(str(cfg.get("telegram_chat_id", "")).strip(), message_id),
+        context={
+            "repo": github_slug,
+            "finding_id": finding.get("id"),
+            "finding_kind": finding.get("kind"),
+            "finding_name": finding.get("name"),
+            "issue": issue,
+            "dedup_key": f"system-architect:{github_slug}:{finding.get('id')}",
+        },
+    )
     action["message_id"] = message_id
     save_telegram_action(paths["TELEGRAM_ACTIONS"], action)
     return True
