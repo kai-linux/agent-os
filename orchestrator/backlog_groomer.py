@@ -1400,6 +1400,46 @@ def _set_issue_backlog(cfg: dict, github_slug: str, issue_url: str):
 
 
 
+_GROOMER_NOTIFY_STATE_FILE = "backlog_groomer_notify.json"
+
+
+def _groomer_notify_state_path(cfg: dict) -> Path:
+    root = Path(cfg.get("root_dir", ".")).expanduser()
+    return root / "runtime" / "state" / _GROOMER_NOTIFY_STATE_FILE
+
+
+def _groomer_notify_is_duplicate(cfg: dict, signature: str) -> bool:
+    """Return True when this run's notification signature matches the last one.
+
+    A persistent error like "LLM returned no usable issues" on eigendark-website
+    otherwise re-fires every hour with identical content. We still want to
+    notify the first time the error appears and the first time it clears —
+    just not for every interim tick that says the same thing.
+    """
+    try:
+        payload = json.loads(_groomer_notify_state_path(cfg).read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return False
+    return str(payload.get("last_signature") or "") == signature
+
+
+def _groomer_notify_record(cfg: dict, signature: str) -> None:
+    path = _groomer_notify_state_path(cfg)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps({"last_signature": signature, "ts": _utc_now_isoformat()}),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+
+
+def _utc_now_isoformat() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat()
+
+
 def _send_telegram(cfg: dict, text: str, reply_markup: dict | None = None) -> int | None:
     token = str(cfg.get("telegram_bot_token", "")).strip()
     chat_id = str(cfg.get("telegram_chat_id", "")).strip()
@@ -1908,7 +1948,11 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
     elif skipped:
         status = "skipped"
     else:
-        status = "error"
+        # LLM returned no usable candidates. This is not a failure — it
+        # typically means the backlog is already covered and nothing new is
+        # worth grooming yet. Treating it as "error" previously produced an
+        # hourly Telegram repeating the same message on a stable state.
+        status = "no-data"
 
     result = {
         "status": status,
@@ -1920,10 +1964,9 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
         "approval_requests": approval_requests,
     }
     if status == "error":
-        if failed:
-            result["error"] = f"all {len(failed)} create attempts failed (see log)"
-        else:
-            result["error"] = "LLM returned no usable issues"
+        result["error"] = f"all {len(failed)} create attempts failed (see log)"
+    elif status == "no-data":
+        result["note"] = "LLM returned no usable issues (backlog likely covered)"
     return result
 
 
@@ -1947,9 +1990,16 @@ def run():
         all_cleaned = 0
         status_counts = {"created": 0, "approval_pending": 0, "skipped": 0, "no-data": 0, "error": 0, "dormant": 0}
         summaries = []
+        # Summaries that represent genuine activity (created/approval/error/
+        # unblocked triage). Cadence-skipped and dispatcher-only lines land in
+        # `summaries` above for the stdout log but are dropped from the
+        # Telegram so the operator-facing message doesn't fill with "not yet"
+        # noise each hour.
+        active_summaries: list[str] = []
         notify = False
         agent_os_root = Path(cfg.get("root_dir", ".")).expanduser()
         triage_totals = {"considered": 0, "unblocked": 0, "left": 0, "errors": 0}
+        signature_parts: list[str] = []
 
         for github_slug, repo_path in repos:
             if is_dispatcher_only_repo(cfg, github_slug):
@@ -1962,12 +2012,15 @@ def run():
                 triage_stats = triage_blocked_issues(cfg, github_slug, agent_os_root)
                 for key, value in triage_stats.items():
                     triage_totals[key] = triage_totals.get(key, 0) + value
-                if triage_stats.get("unblocked", 0):
+                unblocked = triage_stats.get("unblocked", 0)
+                if unblocked:
                     print(
-                        f"  Blocker triage: unblocked {triage_stats['unblocked']} "
+                        f"  Blocker triage: unblocked {unblocked} "
                         f"issue(s) on {github_slug} ({triage_stats['considered']} considered)."
                     )
                     notify = True
+                    active_summaries.append(f"{github_slug}: {unblocked} unblocked via triage")
+                    signature_parts.append(f"{github_slug}:triage:{unblocked}")
                     # Label changes from triage need to be reflected on the
                     # project board immediately, even when the per-repo cadence
                     # gate would otherwise skip groom_repo this tick. Without
@@ -2001,23 +2054,33 @@ def run():
             all_created += result.get("created", 0)
             all_skipped += result.get("skipped", 0)
             all_cleaned += result.get("cleaned", 0)
-            if status in {"created", "approval_pending", "error"} or result.get("cleaned", 0) > 0:
+            # Notify policy: only genuine activity (new issues or an approval
+            # request) or a genuine error. `cleaned` housekeeping runs silently
+            # — it was producing an hourly Telegram on a stable state.
+            if status in {"created", "approval_pending", "error"}:
                 notify = True
             if status in {"created", "approval_pending", "skipped"}:
                 record_run(cfg, "backlog_groomer", github_slug)
 
             if status == "created":
-                summaries.append(f"{github_slug}: {result.get('created', 0)} created, {result.get('skipped', 0)} skipped, {result.get('cleaned', 0)} cleaned")
+                line = f"{github_slug}: {result.get('created', 0)} created, {result.get('skipped', 0)} skipped, {result.get('cleaned', 0)} cleaned"
+                summaries.append(line); active_summaries.append(line)
+                signature_parts.append(f"{github_slug}:created:{result.get('created', 0)}")
             elif status == "approval_pending":
-                summaries.append(f"{github_slug}: {result.get('approval_requests', 0)} architect approval request(s) queued, {result.get('cleaned', 0)} cleaned")
+                line = f"{github_slug}: {result.get('approval_requests', 0)} architect approval request(s) queued, {result.get('cleaned', 0)} cleaned"
+                summaries.append(line); active_summaries.append(line)
+                signature_parts.append(f"{github_slug}:approval:{result.get('approval_requests', 0)}")
             elif status == "skipped":
                 summaries.append(f"{github_slug}: skipped ({result.get('skipped', 0)} duplicate/failed creates, {result.get('cleaned', 0)} cleaned)")
             elif status == "no-data":
                 summaries.append(f"{github_slug}: no-data ({result.get('cleaned', 0)} cleaned)")
             else:
-                summaries.append(f"{github_slug}: error ({result.get('error', 'unknown error')})")
+                err_key = str(result.get('error', 'unknown error'))[:80]
+                line = f"{github_slug}: error ({err_key})"
+                summaries.append(line); active_summaries.append(line)
+                signature_parts.append(f"{github_slug}:error:{err_key}")
 
-        summary = (
+        full_log = (
             f"Backlog Groomer complete\n"
             f"Issues created: {all_created} | Skipped: {all_skipped} | Cleaned: {all_cleaned}\n"
             f"Blocker triage: {triage_totals.get('unblocked', 0)} unblocked / "
@@ -2027,9 +2090,20 @@ def run():
             f"no-data={status_counts['no-data']} error={status_counts['error']} dormant={status_counts['dormant']}\n"
             + "\n".join(summaries)
         )
-        print(f"\n{summary}")
+        print(f"\n{full_log}")
         if notify:
-            _send_telegram(cfg, summary)
+            signature = "|".join(sorted(signature_parts))
+            if _groomer_notify_is_duplicate(cfg, signature):
+                print("  Suppressing Telegram: identical to last notification signature")
+            else:
+                telegram_summary = (
+                    f"Backlog Groomer\n"
+                    f"Created: {all_created} | Cleaned: {all_cleaned} | "
+                    f"Triage unblocked: {triage_totals.get('unblocked', 0)}\n"
+                    + ("\n".join(active_summaries) if active_summaries else "(no per-repo changes)")
+                )
+                _send_telegram(cfg, telegram_summary)
+                _groomer_notify_record(cfg, signature)
 
 
 if __name__ == "__main__":
