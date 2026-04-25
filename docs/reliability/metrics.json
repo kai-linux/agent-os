@@ -1,45 +1,88 @@
 {
-  "generated_at": "2026-04-23T03:00:01.800623+00:00",
+  "budgets": {
+    "enabled": false,
+    "month_key": "2026-04",
+    "per_agent": [
+      {
+        "agent": "claude",
+        "hard_stop_usd": null,
+        "hard_stopped": false,
+        "month_key": "2026-04",
+        "remaining_usd": null,
+        "soft_warn_usd": null,
+        "spend_usd": 0.228087
+      },
+      {
+        "agent": "codex",
+        "hard_stop_usd": null,
+        "hard_stopped": false,
+        "month_key": "2026-04",
+        "remaining_usd": null,
+        "soft_warn_usd": null,
+        "spend_usd": 6.641415
+      },
+      {
+        "agent": "deepseek",
+        "hard_stop_usd": null,
+        "hard_stopped": false,
+        "month_key": "2026-04",
+        "remaining_usd": null,
+        "soft_warn_usd": null,
+        "spend_usd": 0.0
+      },
+      {
+        "agent": "gemini",
+        "hard_stop_usd": null,
+        "hard_stopped": false,
+        "month_key": "2026-04",
+        "remaining_usd": null,
+        "soft_warn_usd": null,
+        "spend_usd": 0.0
+      }
+    ],
+    "total_spend_usd": 6.869502
+  },
+  "generated_at": "2026-04-25T03:00:02.288900+00:00",
   "github": {
     "forks": 0,
-    "open_issues": 38,
+    "open_issues": 33,
     "repo": "kai-linux/agent-os",
-    "stars": 2
+    "stars": 3
   },
   "momentum": {
     "current_week": {
-      "escalation_rate": 0.22105263157894736,
-      "mean_completion_hours": 0.11818342911877396,
-      "success_rate": 0.6105263157894737,
-      "successes": 58,
-      "total": 95
+      "escalation_rate": 0.109375,
+      "mean_completion_hours": 0.09653850385038504,
+      "success_rate": 0.7890625,
+      "successes": 101,
+      "total": 128
     },
     "prior_week": {
-      "escalation_rate": 0.0,
-      "mean_completion_hours": 0.11390637860082305,
-      "success_rate": 0.9310344827586207,
-      "successes": 27,
-      "total": 29
+      "escalation_rate": 0.25,
+      "mean_completion_hours": 0.10328439153439153,
+      "success_rate": 0.65625,
+      "successes": 21,
+      "total": 32
     }
   },
   "per_agent": [
     {
+      "agent": "codex",
+      "rate": 0.7901234567901234,
+      "successes": 64,
+      "total": 81
+    },
+    {
       "agent": "claude",
-      "rate": 0.7746478873239436,
+      "rate": 0.7857142857142857,
       "successes": 55,
-      "total": 71
+      "total": 70
     },
     {
       "agent": "deepseek",
-      "rate": 0.625,
-      "successes": 5,
-      "total": 8
-    },
-    {
-      "agent": "codex",
-      "rate": 0.5853658536585366,
-      "successes": 24,
-      "total": 41
+      "rate": 0.4,
+      "successes": 2,
+      "total": 5
     },
     {
       "agent": "gemini",
@@ -49,22 +92,6 @@
     }
   ],
   "rolling_14_day": [
-    {
-      "blocked": 0,
-      "date": "2026-04-10",
-      "escalation_rate": 0.0,
-      "success_rate": 1.0,
-      "successes": 2,
-      "total": 2
-    },
-    {
-      "blocked": 0,
-      "date": "2026-04-11",
-      "escalation_rate": null,
-      "success_rate": null,
-      "successes": 0,
-      "total": 0
-    },
     {
       "blocked": 0,
       "date": "2026-04-12",
@@ -154,8 +181,24 @@
       "total": 10
     },
     {
-      "blocked": 0,
+      "blocked": 1,
       "date": "2026-04-23",
+      "escalation_rate": 0.0312,
+      "success_rate": 0.9688,
+      "successes": 31,
+      "total": 32
+    },
+    {
+      "blocked": 0,
+      "date": "2026-04-24",
+      "escalation_rate": 0.0,
+      "success_rate": 1.0,
+      "successes": 18,
+      "total": 18
+    },
+    {
+      "blocked": 0,
+      "date": "2026-04-25",
       "escalation_rate": null,
       "success_rate": null,
       "successes": 0,
@@ -165,9 +208,9 @@
   "sources": {
     "agent_stats": {
       "available": true,
-      "latest_timestamp": "2026-04-22T17:29:05.565671+00:00",
+      "latest_timestamp": "2026-04-24T14:04:24.017592+00:00",
       "path": "runtime/metrics/agent_stats.jsonl",
-      "records": 124
+      "records": 160
     },
     "production_feedback": {
       "available": true,
@@ -177,37 +220,37 @@
   },
   "summary": {
     "escalation_rate": {
-      "escalated": 21,
-      "rate": 0.1693548387096774,
-      "total": 124
+      "escalated": 22,
+      "rate": 0.1375,
+      "total": 160
     },
-    "mean_completion_time_hours": 0.1168248366013072,
+    "mean_completion_time_hours": 0.09769968123861567,
     "task_success_rate": {
-      "rate": 0.6854838709677419,
-      "successes": 85,
-      "total": 124
+      "rate": 0.7625,
+      "successes": 122,
+      "total": 160
     }
   },
   "top_blockers": [
-    {
-      "code": "dependency_blocked",
-      "count": 8
-    },
-    {
-      "code": "missing_credentials",
-      "count": 8
-    },
     {
       "code": "no_diff_produced",
       "count": 8
     },
     {
-      "code": "quota_limited",
+      "code": "dependency_blocked",
+      "count": 7
+    },
+    {
+      "code": "invalid_result_contract",
       "count": 7
     },
     {
       "code": "prompt_too_large",
       "count": 6
+    },
+    {
+      "code": "missing_credentials",
+      "count": 5
     }
   ],
   "window_days": 14
