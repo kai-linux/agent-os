@@ -42,7 +42,7 @@
     ],
     "total_spend_usd": 6.869502
   },
-  "generated_at": "2026-04-26T03:00:02.151189+00:00",
+  "generated_at": "2026-04-27T03:00:02.066254+00:00",
   "github": {
     "forks": 0,
     "open_issues": 33,
@@ -51,15 +51,15 @@
   },
   "momentum": {
     "current_week": {
-      "escalation_rate": 0.12,
-      "mean_completion_hours": 0.09949999999999999,
-      "success_rate": 0.87,
-      "successes": 87,
-      "total": 100
+      "escalation_rate": 0.12631578947368421,
+      "mean_completion_hours": 0.09865752032520327,
+      "success_rate": 0.8631578947368421,
+      "successes": 82,
+      "total": 95
     },
     "prior_week": {
       "escalation_rate": 0.16666666666666666,
-      "mean_completion_hours": 0.09322460317460317,
+      "mean_completion_hours": 0.09720238095238096,
       "success_rate": 0.5833333333333334,
       "successes": 35,
       "total": 60
@@ -74,9 +74,9 @@
     },
     {
       "agent": "claude",
-      "rate": 0.7857142857142857,
-      "successes": 55,
-      "total": 70
+      "rate": 0.7692307692307693,
+      "successes": 50,
+      "total": 65
     },
     {
       "agent": "deepseek",
@@ -92,14 +92,6 @@
     }
   ],
   "rolling_14_day": [
-    {
-      "blocked": 0,
-      "date": "2026-04-13",
-      "escalation_rate": null,
-      "success_rate": null,
-      "successes": 0,
-      "total": 0
-    },
     {
       "blocked": 0,
       "date": "2026-04-14",
@@ -203,6 +195,14 @@
       "success_rate": null,
       "successes": 0,
       "total": 0
+    },
+    {
+      "blocked": 0,
+      "date": "2026-04-27",
+      "escalation_rate": null,
+      "success_rate": null,
+      "successes": 0,
+      "total": 0
     }
   ],
   "sources": {
@@ -210,7 +210,7 @@
       "available": true,
       "latest_timestamp": "2026-04-24T14:04:24.017592+00:00",
       "path": "runtime/metrics/agent_stats.jsonl",
-      "records": 160
+      "records": 155
     },
     "production_feedback": {
       "available": true,
@@ -221,14 +221,14 @@
   "summary": {
     "escalation_rate": {
       "escalated": 22,
-      "rate": 0.1375,
-      "total": 160
+      "rate": 0.14193548387096774,
+      "total": 155
     },
-    "mean_completion_time_hours": 0.09769968123861567,
+    "mean_completion_time_hours": 0.09822222222222222,
     "task_success_rate": {
-      "rate": 0.7625,
-      "successes": 122,
-      "total": 160
+      "rate": 0.7548387096774194,
+      "successes": 117,
+      "total": 155
     }
   },
   "top_blockers": [
