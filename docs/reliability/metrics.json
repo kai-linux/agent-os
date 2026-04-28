@@ -42,7 +42,7 @@
     ],
     "total_spend_usd": 6.869502
   },
-  "generated_at": "2026-04-27T03:00:02.066254+00:00",
+  "generated_at": "2026-04-28T03:00:02.196525+00:00",
   "github": {
     "forks": 0,
     "open_issues": 33,
@@ -92,14 +92,6 @@
     }
   ],
   "rolling_14_day": [
-    {
-      "blocked": 0,
-      "date": "2026-04-14",
-      "escalation_rate": 0.0,
-      "success_rate": 1.0,
-      "successes": 5,
-      "total": 5
-    },
     {
       "blocked": 0,
       "date": "2026-04-15",
@@ -203,6 +195,14 @@
       "success_rate": null,
       "successes": 0,
       "total": 0
+    },
+    {
+      "blocked": 0,
+      "date": "2026-04-28",
+      "escalation_rate": null,
+      "success_rate": null,
+      "successes": 0,
+      "total": 0
     }
   ],
   "sources": {
@@ -214,7 +214,7 @@
     },
     "production_feedback": {
       "available": true,
-      "generated_at": null,
+      "generated_at": "2026-04-27T04:30:02.314079+00:00",
       "path": "PRODUCTION_FEEDBACK.md"
     }
   },
