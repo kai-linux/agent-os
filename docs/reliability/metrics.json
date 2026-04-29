@@ -42,7 +42,7 @@
     ],
     "total_spend_usd": 6.869502
   },
-  "generated_at": "2026-04-28T03:00:02.196525+00:00",
+  "generated_at": "2026-04-29T03:00:01.963417+00:00",
   "github": {
     "forks": 0,
     "open_issues": 33,
@@ -51,18 +51,18 @@
   },
   "momentum": {
     "current_week": {
-      "escalation_rate": 0.12631578947368421,
-      "mean_completion_hours": 0.09865752032520327,
-      "success_rate": 0.8631578947368421,
-      "successes": 82,
-      "total": 95
+      "escalation_rate": 0.1,
+      "mean_completion_hours": 0.10083384773662551,
+      "success_rate": 0.9,
+      "successes": 54,
+      "total": 60
     },
     "prior_week": {
-      "escalation_rate": 0.16666666666666666,
-      "mean_completion_hours": 0.09720238095238096,
-      "success_rate": 0.5833333333333334,
-      "successes": 35,
-      "total": 60
+      "escalation_rate": 0.17777777777777778,
+      "mean_completion_hours": 0.09921455938697318,
+      "success_rate": 0.6444444444444445,
+      "successes": 58,
+      "total": 90
     }
   },
   "per_agent": [
@@ -74,9 +74,9 @@
     },
     {
       "agent": "claude",
-      "rate": 0.7692307692307693,
-      "successes": 50,
-      "total": 65
+      "rate": 0.75,
+      "successes": 45,
+      "total": 60
     },
     {
       "agent": "deepseek",
@@ -92,14 +92,6 @@
     }
   ],
   "rolling_14_day": [
-    {
-      "blocked": 0,
-      "date": "2026-04-15",
-      "escalation_rate": 0.0,
-      "success_rate": 1.0,
-      "successes": 5,
-      "total": 5
-    },
     {
       "blocked": 0,
       "date": "2026-04-16",
@@ -203,6 +195,14 @@
       "success_rate": null,
       "successes": 0,
       "total": 0
+    },
+    {
+      "blocked": 0,
+      "date": "2026-04-29",
+      "escalation_rate": null,
+      "success_rate": null,
+      "successes": 0,
+      "total": 0
     }
   ],
   "sources": {
@@ -210,7 +210,7 @@
       "available": true,
       "latest_timestamp": "2026-04-24T14:04:24.017592+00:00",
       "path": "runtime/metrics/agent_stats.jsonl",
-      "records": 155
+      "records": 150
     },
     "production_feedback": {
       "available": true,
@@ -221,14 +221,14 @@
   "summary": {
     "escalation_rate": {
       "escalated": 22,
-      "rate": 0.14193548387096774,
-      "total": 155
+      "rate": 0.14666666666666667,
+      "total": 150
     },
-    "mean_completion_time_hours": 0.09822222222222222,
+    "mean_completion_time_hours": 0.0999952876984127,
     "task_success_rate": {
-      "rate": 0.7548387096774194,
-      "successes": 117,
-      "total": 155
+      "rate": 0.7466666666666667,
+      "successes": 112,
+      "total": 150
     }
   },
   "top_blockers": [
