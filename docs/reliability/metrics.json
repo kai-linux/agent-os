@@ -20,29 +20,11 @@
         "remaining_usd": null,
         "soft_warn_usd": null,
         "spend_usd": 0.0
-      },
-      {
-        "agent": "deepseek",
-        "hard_stop_usd": null,
-        "hard_stopped": false,
-        "month_key": "2026-05",
-        "remaining_usd": null,
-        "soft_warn_usd": null,
-        "spend_usd": 0.0
-      },
-      {
-        "agent": "gemini",
-        "hard_stop_usd": null,
-        "hard_stopped": false,
-        "month_key": "2026-05",
-        "remaining_usd": null,
-        "soft_warn_usd": null,
-        "spend_usd": 0.0
       }
     ],
     "total_spend_usd": 0
   },
-  "generated_at": "2026-05-01T03:00:02.385042+00:00",
+  "generated_at": "2026-05-02T03:00:01.835362+00:00",
   "github": {
     "forks": 0,
     "open_issues": 33,
@@ -51,55 +33,35 @@
   },
   "momentum": {
     "current_week": {
-      "escalation_rate": 0.0,
-      "mean_completion_hours": 0.08734413580246914,
-      "success_rate": 1.0,
-      "successes": 18,
-      "total": 18
+      "escalation_rate": null,
+      "mean_completion_hours": null,
+      "success_rate": null,
+      "successes": 0,
+      "total": 0
     },
     "prior_week": {
-      "escalation_rate": 0.1732283464566929,
-      "mean_completion_hours": 0.10409644194756555,
-      "success_rate": 0.7007874015748031,
-      "successes": 89,
-      "total": 127
+      "escalation_rate": 0.109375,
+      "mean_completion_hours": 0.09653850385038504,
+      "success_rate": 0.7890625,
+      "successes": 101,
+      "total": 128
     }
   },
   "per_agent": [
     {
       "agent": "codex",
-      "rate": 0.7901234567901234,
+      "rate": 0.8205128205128205,
       "successes": 64,
-      "total": 81
+      "total": 78
     },
     {
       "agent": "claude",
-      "rate": 0.7272727272727273,
-      "successes": 40,
-      "total": 55
-    },
-    {
-      "agent": "deepseek",
-      "rate": 0.4,
-      "successes": 2,
-      "total": 5
-    },
-    {
-      "agent": "gemini",
-      "rate": 0.25,
-      "successes": 1,
-      "total": 4
+      "rate": 0.74,
+      "successes": 37,
+      "total": 50
     }
   ],
   "rolling_14_day": [
-    {
-      "blocked": 2,
-      "date": "2026-04-18",
-      "escalation_rate": 0.0714,
-      "success_rate": 0.5,
-      "successes": 14,
-      "total": 28
-    },
     {
       "blocked": 0,
       "date": "2026-04-19",
@@ -203,6 +165,14 @@
       "success_rate": null,
       "successes": 0,
       "total": 0
+    },
+    {
+      "blocked": 0,
+      "date": "2026-05-02",
+      "escalation_rate": null,
+      "success_rate": null,
+      "successes": 0,
+      "total": 0
     }
   ],
   "sources": {
@@ -210,7 +180,7 @@
       "available": true,
       "latest_timestamp": "2026-04-24T14:04:24.017592+00:00",
       "path": "runtime/metrics/agent_stats.jsonl",
-      "records": 145
+      "records": 128
     },
     "production_feedback": {
       "available": true,
@@ -220,25 +190,21 @@
   },
   "summary": {
     "escalation_rate": {
-      "escalated": 22,
-      "rate": 0.15172413793103448,
-      "total": 145
+      "escalated": 14,
+      "rate": 0.109375,
+      "total": 128
     },
-    "mean_completion_time_hours": 0.10127829698857736,
+    "mean_completion_time_hours": 0.09653850385038504,
     "task_success_rate": {
-      "rate": 0.7379310344827587,
-      "successes": 107,
-      "total": 145
+      "rate": 0.7890625,
+      "successes": 101,
+      "total": 128
     }
   },
   "top_blockers": [
     {
       "code": "no_diff_produced",
       "count": 8
-    },
-    {
-      "code": "dependency_blocked",
-      "count": 7
     },
     {
       "code": "invalid_result_contract",
@@ -249,8 +215,12 @@
       "count": 6
     },
     {
-      "code": "missing_credentials",
-      "count": 5
+      "code": "dependency_blocked",
+      "count": 4
+    },
+    {
+      "code": "quota_limited",
+      "count": 2
     }
   ],
   "window_days": 14
