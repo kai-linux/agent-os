@@ -24,7 +24,7 @@
     ],
     "total_spend_usd": 0
   },
-  "generated_at": "2026-05-03T03:00:01.959722+00:00",
+  "generated_at": "2026-05-04T03:00:02.210714+00:00",
   "github": {
     "forks": 0,
     "open_issues": 33,
@@ -40,19 +40,19 @@
       "total": 0
     },
     "prior_week": {
-      "escalation_rate": 0.12,
-      "mean_completion_hours": 0.09949999999999999,
-      "success_rate": 0.87,
-      "successes": 87,
-      "total": 100
+      "escalation_rate": 0.12631578947368421,
+      "mean_completion_hours": 0.09865752032520327,
+      "success_rate": 0.8631578947368421,
+      "successes": 82,
+      "total": 95
     }
   },
   "per_agent": [
     {
       "agent": "claude",
-      "rate": 0.9583333333333334,
-      "successes": 23,
-      "total": 24
+      "rate": 0.9473684210526315,
+      "successes": 18,
+      "total": 19
     },
     {
       "agent": "codex",
@@ -62,14 +62,6 @@
     }
   ],
   "rolling_14_day": [
-    {
-      "blocked": 0,
-      "date": "2026-04-20",
-      "escalation_rate": null,
-      "success_rate": null,
-      "successes": 0,
-      "total": 0
-    },
     {
       "blocked": 6,
       "date": "2026-04-21",
@@ -173,6 +165,14 @@
       "success_rate": null,
       "successes": 0,
       "total": 0
+    },
+    {
+      "blocked": 0,
+      "date": "2026-05-04",
+      "escalation_rate": null,
+      "success_rate": null,
+      "successes": 0,
+      "total": 0
     }
   ],
   "sources": {
@@ -180,7 +180,7 @@
       "available": true,
       "latest_timestamp": "2026-04-24T14:04:24.017592+00:00",
       "path": "runtime/metrics/agent_stats.jsonl",
-      "records": 100
+      "records": 95
     },
     "production_feedback": {
       "available": true,
@@ -191,14 +191,14 @@
   "summary": {
     "escalation_rate": {
       "escalated": 12,
-      "rate": 0.12,
-      "total": 100
+      "rate": 0.12631578947368421,
+      "total": 95
     },
-    "mean_completion_time_hours": 0.09949999999999999,
+    "mean_completion_time_hours": 0.09865752032520327,
     "task_success_rate": {
-      "rate": 0.87,
-      "successes": 87,
-      "total": 100
+      "rate": 0.8631578947368421,
+      "successes": 82,
+      "total": 95
     }
   },
   "top_blockers": [
