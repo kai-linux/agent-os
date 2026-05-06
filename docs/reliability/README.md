@@ -1,14 +1,14 @@
 # Reliability Dashboard
 
-Updated: 2026-05-05T03:00:02.457682+00:00
+Updated: 2026-05-06T03:00:02.046420+00:00
 Window: rolling 14 days
 Sources: `runtime/metrics/agent_stats.jsonl` + `PRODUCTION_FEEDBACK.md`
 
 | Metric | Value |
 |---|---|
-| Task success rate | 86% (82/95) |
+| Task success rate | 90% (54/60) |
 | Mean completion time | 0.1h |
-| Escalation rate | 13% (12/95) |
+| Escalation rate | 10% (6/60) |
 | GitHub stars | 3 |
 | GitHub forks | 0 |
 
@@ -17,13 +17,12 @@ Sources: `runtime/metrics/agent_stats.jsonl` + `PRODUCTION_FEEDBACK.md`
 | Period | Success | Mean time | Escalation |
 |---|---|---|---|
 | Last 7 days | n/a (0/0) | n/a | n/a |
-| Prior 7 days | 86% (82/95) | 0.1h | 13% |
+| Prior 7 days | 90% (54/60) | 0.1h | 10% |
 
 ## Daily Trend
 
 | Date | Success | Escalation | Volume |
 |---|---|---|---|
-| 2026-04-22 | `######......` 50% | `######......` 50% | 10 |
 | 2026-04-23 | `############` 97% | `............` 3% | 32 |
 | 2026-04-24 | `############` 100% | `............` 0% | 18 |
 | 2026-04-25 | `............` n/a | `............` n/a | 0 |
@@ -37,19 +36,18 @@ Sources: `runtime/metrics/agent_stats.jsonl` + `PRODUCTION_FEEDBACK.md`
 | 2026-05-03 | `............` n/a | `............` n/a | 0 |
 | 2026-05-04 | `............` n/a | `............` n/a | 0 |
 | 2026-05-05 | `............` n/a | `............` n/a | 0 |
+| 2026-05-06 | `............` n/a | `............` n/a | 0 |
 
 ## Per-Agent Breakdown
 
 | Agent | Success | Volume |
 |---|---|---|
-| claude | 95% (18/19) | 19 |
-| codex | 84% (64/76) | 76 |
+| claude | 92% (12/13) | 13 |
+| codex | 89% (42/47) | 47 |
 
 ## Top Blocker Categories
 
 - `invalid_result_contract`: 7
-- `prompt_too_large`: 6
-- `no_diff_produced`: 1
 
 ## Notes
 
