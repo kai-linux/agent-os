@@ -24,7 +24,7 @@
     ],
     "total_spend_usd": 0
   },
-  "generated_at": "2026-05-07T03:00:02.248826+00:00",
+  "generated_at": "2026-05-08T03:00:02.194104+00:00",
   "github": {
     "forks": 0,
     "open_issues": 33,
@@ -40,36 +40,28 @@
       "total": 0
     },
     "prior_week": {
-      "escalation_rate": 0.02,
-      "mean_completion_hours": 0.08126814058956916,
-      "success_rate": 0.98,
-      "successes": 49,
-      "total": 50
+      "escalation_rate": 0.0,
+      "mean_completion_hours": 0.08734413580246914,
+      "success_rate": 1.0,
+      "successes": 18,
+      "total": 18
     }
   },
   "per_agent": [
     {
       "agent": "codex",
       "rate": 1.0,
-      "successes": 42,
-      "total": 42
+      "successes": 15,
+      "total": 15
     },
     {
       "agent": "claude",
-      "rate": 0.875,
-      "successes": 7,
-      "total": 8
+      "rate": 1.0,
+      "successes": 3,
+      "total": 3
     }
   ],
   "rolling_14_day": [
-    {
-      "blocked": 0,
-      "date": "2026-04-24",
-      "escalation_rate": 0.0,
-      "success_rate": 1.0,
-      "successes": 18,
-      "total": 18
-    },
     {
       "blocked": 0,
       "date": "2026-04-25",
@@ -173,6 +165,14 @@
       "success_rate": null,
       "successes": 0,
       "total": 0
+    },
+    {
+      "blocked": 0,
+      "date": "2026-05-08",
+      "escalation_rate": null,
+      "success_rate": null,
+      "successes": 0,
+      "total": 0
     }
   ],
   "sources": {
@@ -180,7 +180,7 @@
       "available": true,
       "latest_timestamp": "2026-04-24T14:04:24.017592+00:00",
       "path": "runtime/metrics/agent_stats.jsonl",
-      "records": 50
+      "records": 18
     },
     "production_feedback": {
       "available": true,
@@ -190,21 +190,37 @@
   },
   "summary": {
     "escalation_rate": {
-      "escalated": 1,
-      "rate": 0.02,
-      "total": 50
+      "escalated": 0,
+      "rate": 0.0,
+      "total": 18
     },
-    "mean_completion_time_hours": 0.08126814058956916,
+    "mean_completion_time_hours": 0.08734413580246914,
     "task_success_rate": {
-      "rate": 0.98,
-      "successes": 49,
-      "total": 50
+      "rate": 1.0,
+      "successes": 18,
+      "total": 18
     }
   },
   "top_blockers": [
     {
+      "code": "no_diff_produced",
+      "count": 8
+    },
+    {
+      "code": "dependency_blocked",
+      "count": 7
+    },
+    {
       "code": "invalid_result_contract",
-      "count": 2
+      "count": 7
+    },
+    {
+      "code": "prompt_too_large",
+      "count": 6
+    },
+    {
+      "code": "missing_credentials",
+      "count": 5
     }
   ],
   "window_days": 14
