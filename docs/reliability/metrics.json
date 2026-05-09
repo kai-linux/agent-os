@@ -20,11 +20,29 @@
         "remaining_usd": null,
         "soft_warn_usd": null,
         "spend_usd": 0.0
+      },
+      {
+        "agent": "deepseek",
+        "hard_stop_usd": null,
+        "hard_stopped": false,
+        "month_key": "2026-05",
+        "remaining_usd": null,
+        "soft_warn_usd": null,
+        "spend_usd": 0.0
+      },
+      {
+        "agent": "gemini",
+        "hard_stop_usd": null,
+        "hard_stopped": false,
+        "month_key": "2026-05",
+        "remaining_usd": null,
+        "soft_warn_usd": null,
+        "spend_usd": 0.0
       }
     ],
     "total_spend_usd": 0
   },
-  "generated_at": "2026-05-08T03:00:02.194104+00:00",
+  "generated_at": "2026-05-09T03:00:02.409649+00:00",
   "github": {
     "forks": 0,
     "open_issues": 33,
@@ -40,36 +58,40 @@
       "total": 0
     },
     "prior_week": {
-      "escalation_rate": 0.0,
-      "mean_completion_hours": 0.08734413580246914,
-      "success_rate": 1.0,
-      "successes": 18,
-      "total": 18
+      "escalation_rate": null,
+      "mean_completion_hours": null,
+      "success_rate": null,
+      "successes": 0,
+      "total": 0
     }
   },
   "per_agent": [
     {
-      "agent": "codex",
-      "rate": 1.0,
-      "successes": 15,
-      "total": 15
+      "agent": "claude",
+      "rate": 0.77,
+      "successes": 50,
+      "total": 65
     },
     {
-      "agent": "claude",
-      "rate": 1.0,
-      "successes": 3,
-      "total": 3
+      "agent": "codex",
+      "rate": 0.79,
+      "successes": 64,
+      "total": 81
+    },
+    {
+      "agent": "deepseek",
+      "rate": 0.4,
+      "successes": 2,
+      "total": 5
+    },
+    {
+      "agent": "gemini",
+      "rate": 0.25,
+      "successes": 1,
+      "total": 4
     }
   ],
   "rolling_14_day": [
-    {
-      "blocked": 0,
-      "date": "2026-04-25",
-      "escalation_rate": null,
-      "success_rate": null,
-      "successes": 0,
-      "total": 0
-    },
     {
       "blocked": 0,
       "date": "2026-04-26",
@@ -173,14 +195,22 @@
       "success_rate": null,
       "successes": 0,
       "total": 0
+    },
+    {
+      "blocked": 0,
+      "date": "2026-05-09",
+      "escalation_rate": null,
+      "success_rate": null,
+      "successes": 0,
+      "total": 0
     }
   ],
   "sources": {
     "agent_stats": {
       "available": true,
-      "latest_timestamp": "2026-04-24T14:04:24.017592+00:00",
+      "latest_timestamp": null,
       "path": "runtime/metrics/agent_stats.jsonl",
-      "records": 18
+      "records": 0
     },
     "production_feedback": {
       "available": true,
@@ -190,15 +220,15 @@
   },
   "summary": {
     "escalation_rate": {
-      "escalated": 0,
-      "rate": 0.0,
-      "total": 18
+      "escalated": 22,
+      "rate": 0.14,
+      "total": 155
     },
-    "mean_completion_time_hours": 0.08734413580246914,
+    "mean_completion_time_hours": 0.1,
     "task_success_rate": {
-      "rate": 1.0,
-      "successes": 18,
-      "total": 18
+      "rate": 0.75,
+      "successes": 117,
+      "total": 155
     }
   },
   "top_blockers": [
