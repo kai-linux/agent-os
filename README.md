@@ -15,6 +15,8 @@ You give it a backlog. It ships product.
 
 ### See it work - real task, end-to-end execution
 
+Live Kanban Board: https://github.com/users/kai-linux/projects/6/views/1
+
 <p align="center">
   <img src="docs/demo.svg" alt="Agent OS autonomously completing issue #115: from dispatch to merged PR in 12 minutes" width="800">
 </p>
