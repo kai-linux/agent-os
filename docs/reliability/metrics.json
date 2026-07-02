@@ -1,13 +1,13 @@
 {
   "budgets": {
     "enabled": false,
-    "month_key": "2026-05",
+    "month_key": "2026-07",
     "per_agent": [
       {
         "agent": "claude",
         "hard_stop_usd": null,
         "hard_stopped": false,
-        "month_key": "2026-05",
+        "month_key": "2026-07",
         "remaining_usd": null,
         "soft_warn_usd": null,
         "spend_usd": 0.0
@@ -16,7 +16,7 @@
         "agent": "codex",
         "hard_stop_usd": null,
         "hard_stopped": false,
-        "month_key": "2026-05",
+        "month_key": "2026-07",
         "remaining_usd": null,
         "soft_warn_usd": null,
         "spend_usd": 0.0
@@ -25,7 +25,7 @@
         "agent": "deepseek",
         "hard_stop_usd": null,
         "hard_stopped": false,
-        "month_key": "2026-05",
+        "month_key": "2026-07",
         "remaining_usd": null,
         "soft_warn_usd": null,
         "spend_usd": 0.0
@@ -34,7 +34,7 @@
         "agent": "gemini",
         "hard_stop_usd": null,
         "hard_stopped": false,
-        "month_key": "2026-05",
+        "month_key": "2026-07",
         "remaining_usd": null,
         "soft_warn_usd": null,
         "spend_usd": 0.0
@@ -42,12 +42,12 @@
     ],
     "total_spend_usd": 0
   },
-  "generated_at": "2026-05-15T03:00:01.967849+00:00",
+  "generated_at": "2026-07-02T03:00:02.395103+00:00",
   "github": {
     "forks": 0,
-    "open_issues": 33,
+    "open_issues": 34,
     "repo": "kai-linux/agent-os",
-    "stars": 3
+    "stars": 4
   },
   "momentum": {
     "current_week": {
@@ -94,7 +94,7 @@
   "rolling_14_day": [
     {
       "blocked": 0,
-      "date": "2026-05-02",
+      "date": "2026-06-19",
       "escalation_rate": null,
       "success_rate": null,
       "successes": 0,
@@ -102,7 +102,7 @@
     },
     {
       "blocked": 0,
-      "date": "2026-05-03",
+      "date": "2026-06-20",
       "escalation_rate": null,
       "success_rate": null,
       "successes": 0,
@@ -110,7 +110,7 @@
     },
     {
       "blocked": 0,
-      "date": "2026-05-04",
+      "date": "2026-06-21",
       "escalation_rate": null,
       "success_rate": null,
       "successes": 0,
@@ -118,7 +118,7 @@
     },
     {
       "blocked": 0,
-      "date": "2026-05-05",
+      "date": "2026-06-22",
       "escalation_rate": null,
       "success_rate": null,
       "successes": 0,
@@ -126,7 +126,7 @@
     },
     {
       "blocked": 0,
-      "date": "2026-05-06",
+      "date": "2026-06-23",
       "escalation_rate": null,
       "success_rate": null,
       "successes": 0,
@@ -134,7 +134,7 @@
     },
     {
       "blocked": 0,
-      "date": "2026-05-07",
+      "date": "2026-06-24",
       "escalation_rate": null,
       "success_rate": null,
       "successes": 0,
@@ -142,7 +142,7 @@
     },
     {
       "blocked": 0,
-      "date": "2026-05-08",
+      "date": "2026-06-25",
       "escalation_rate": null,
       "success_rate": null,
       "successes": 0,
@@ -150,7 +150,7 @@
     },
     {
       "blocked": 0,
-      "date": "2026-05-09",
+      "date": "2026-06-26",
       "escalation_rate": null,
       "success_rate": null,
       "successes": 0,
@@ -158,7 +158,7 @@
     },
     {
       "blocked": 0,
-      "date": "2026-05-10",
+      "date": "2026-06-27",
       "escalation_rate": null,
       "success_rate": null,
       "successes": 0,
@@ -166,7 +166,7 @@
     },
     {
       "blocked": 0,
-      "date": "2026-05-11",
+      "date": "2026-06-28",
       "escalation_rate": null,
       "success_rate": null,
       "successes": 0,
@@ -174,7 +174,7 @@
     },
     {
       "blocked": 0,
-      "date": "2026-05-12",
+      "date": "2026-06-29",
       "escalation_rate": null,
       "success_rate": null,
       "successes": 0,
@@ -182,7 +182,7 @@
     },
     {
       "blocked": 0,
-      "date": "2026-05-13",
+      "date": "2026-06-30",
       "escalation_rate": null,
       "success_rate": null,
       "successes": 0,
@@ -190,7 +190,7 @@
     },
     {
       "blocked": 0,
-      "date": "2026-05-14",
+      "date": "2026-07-01",
       "escalation_rate": null,
       "success_rate": null,
       "successes": 0,
@@ -198,7 +198,7 @@
     },
     {
       "blocked": 0,
-      "date": "2026-05-15",
+      "date": "2026-07-02",
       "escalation_rate": null,
       "success_rate": null,
       "successes": 0,
