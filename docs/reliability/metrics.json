@@ -42,7 +42,7 @@
     ],
     "total_spend_usd": 0
   },
-  "generated_at": "2026-07-04T03:00:02.223535+00:00",
+  "generated_at": "2026-07-05T03:00:02.240299+00:00",
   "github": {
     "forks": 0,
     "open_issues": 34,
@@ -92,14 +92,6 @@
     }
   ],
   "rolling_14_day": [
-    {
-      "blocked": 0,
-      "date": "2026-06-21",
-      "escalation_rate": null,
-      "success_rate": null,
-      "successes": 0,
-      "total": 0
-    },
     {
       "blocked": 0,
       "date": "2026-06-22",
@@ -199,6 +191,14 @@
     {
       "blocked": 0,
       "date": "2026-07-04",
+      "escalation_rate": null,
+      "success_rate": null,
+      "successes": 0,
+      "total": 0
+    },
+    {
+      "blocked": 0,
+      "date": "2026-07-05",
       "escalation_rate": null,
       "success_rate": null,
       "successes": 0,
