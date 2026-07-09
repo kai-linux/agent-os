@@ -1,6 +1,6 @@
 # Reliability Dashboard
 
-Updated: 2026-07-08T03:00:02.456495+00:00
+Updated: 2026-07-09T03:00:01.911749+00:00
 Window: rolling 14 days
 Sources: `runtime/metrics/agent_stats.jsonl` + `PRODUCTION_FEEDBACK.md`
 
@@ -23,7 +23,6 @@ Sources: `runtime/metrics/agent_stats.jsonl` + `PRODUCTION_FEEDBACK.md`
 
 | Date | Success | Escalation | Volume |
 |---|---|---|---|
-| 2026-06-25 | `............` n/a | `............` n/a | 0 |
 | 2026-06-26 | `............` n/a | `............` n/a | 0 |
 | 2026-06-27 | `............` n/a | `............` n/a | 0 |
 | 2026-06-28 | `............` n/a | `............` n/a | 0 |
@@ -37,6 +36,7 @@ Sources: `runtime/metrics/agent_stats.jsonl` + `PRODUCTION_FEEDBACK.md`
 | 2026-07-06 | `............` n/a | `............` n/a | 0 |
 | 2026-07-07 | `............` n/a | `............` n/a | 0 |
 | 2026-07-08 | `............` n/a | `............` n/a | 0 |
+| 2026-07-09 | `............` n/a | `............` n/a | 0 |
 
 ## Per-Agent Breakdown
 
