@@ -569,22 +569,8 @@ def test_get_conflicted_files_none(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_try_union_resolve_strips_markers(tmp_path, monkeypatch):
-    """Union resolve keeps both sides and strips conflict markers."""
-    import subprocess as _sp
-    git_add_calls = []
-    orig_run = _sp.run
-
-    def mock_run(cmd, **kw):
-        if "add" in cmd:
-            git_add_calls.append(cmd)
-            r = Mock()
-            r.returncode = 0
-            return r
-        return orig_run(cmd, **kw)
-
-    monkeypatch.setattr(_sp, "run", mock_run)
-
+def test_try_union_resolve_rejects_source_conflicts(tmp_path):
+    """Arbitrary source conflicts must never be concatenated automatically."""
     conflicted = tmp_path / "foo.py"
     conflicted.write_text(
         "import os\n"
@@ -599,15 +585,8 @@ def test_try_union_resolve_strips_markers(tmp_path, monkeypatch):
     )
 
     result = _try_union_resolve(tmp_path, ["foo.py"])
-    assert result is True
-
-    resolved = conflicted.read_text()
-    assert "<<<<<<" not in resolved
-    assert "=======" not in resolved
-    assert ">>>>>>>" not in resolved
-    assert "def hello():" in resolved
-    assert "def world():" in resolved
-    assert "# end" in resolved
+    assert result is False
+    assert "<<<<<<< HEAD" in conflicted.read_text()
 
 
 def test_try_union_resolve_missing_file(tmp_path, monkeypatch):
@@ -616,15 +595,12 @@ def test_try_union_resolve_missing_file(tmp_path, monkeypatch):
     assert result is False
 
 
-def test_try_union_resolve_no_markers(tmp_path, monkeypatch):
-    """Files without markers are skipped (considered already resolved)."""
-    import subprocess as _sp
-    monkeypatch.setattr(_sp, "run", lambda cmd, **kw: Mock(returncode=0))
-
+def test_try_union_resolve_rejects_any_non_allowlisted_file(tmp_path):
+    """Only separately handled metadata files may be auto-resolved."""
     clean = tmp_path / "clean.py"
     clean.write_text("def foo():\n    pass\n")
 
     result = _try_union_resolve(tmp_path, ["clean.py"])
-    assert result is True
+    assert result is False
     # Content unchanged
     assert clean.read_text() == "def foo():\n    pass\n"

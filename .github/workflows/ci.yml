@@ -13,6 +13,8 @@ jobs:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -36,6 +38,10 @@ jobs:
         run: |
           set -o pipefail
           python -m py_compile orchestrator/*.py 2>&1 | tee "$CI_ARTIFACT_DIR/lint.log"
+
+      - name: Scan added content for secrets
+        shell: bash
+        run: python bin/secret_scan.py --base "${{ github.event.pull_request.base.sha || github.event.before }}"
 
       - name: Run tests
         shell: bash

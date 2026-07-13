@@ -1735,7 +1735,24 @@ def test_handle_telegram_callback_plan_approve():
         resolved = approval_path.read_text(encoding="utf-8")
         assert "decision: approve" in resolved
         audit_lines = (Path(d) / "runtime" / "audit" / "audit.jsonl").read_text(encoding="utf-8").splitlines()
-        assert any('"event_type":"telegram_callback"' in line for line in audit_lines)
+    assert any('"event_type":"telegram_callback"' in line for line in audit_lines)
+
+
+def test_handle_telegram_callback_high_risk_pr_is_sha_bound(tmp_path):
+    cfg = {"root_dir": str(tmp_path)}
+    record = approvals.request(
+        cfg,
+        kind="high_risk_pr",
+        approval_id="abcdef123456",
+        context={"repo": "owner/repo", "pr_number": 7, "head_sha": "abc123"},
+    )
+    outcome = handle_telegram_callback(
+        cfg, tmp_path / "telegram_actions", f"hrp:{record['id']}:approve"
+    )
+    assert outcome["remove_keyboard"] is True
+    resolved = approvals.get(cfg, record["id"])
+    assert resolved["decision"] == "approve"
+    assert resolved["context"]["head_sha"] == "abc123"
 
 
 def test_handle_telegram_callback_revert_approve(tmp_path, monkeypatch):

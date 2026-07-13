@@ -52,12 +52,15 @@ if [[ -n "$diff_blob" ]]; then
     if [[ "$line" =~ ^\+[^+] ]]; then
       if [[ "$line" =~ [0-9]{9,10}:[A-Za-z0-9_-]{35} ]]; then
         red "✖ staged diff contains what looks like a Telegram bot token."
-        red "   line: ${line:0:120}"
         fail=1
         break
       fi
     fi
   done <<< "$diff_blob"
+fi
+
+if ! python3 bin/secret_scan.py --staged; then
+  fail=1
 fi
 
 if [[ "$fail" -ne 0 ]]; then

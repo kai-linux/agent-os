@@ -223,7 +223,7 @@ def test_monitor_prs_work_verifier_block_clears_poisoned_attempts(monkeypatch, t
 def test_send_risk_telegram_creates_high_risk_approval(tmp_path, monkeypatch):
     sent = []
 
-    monkeypatch.setattr("orchestrator.queue.send_telegram", lambda cfg, text: sent.append(text) or 321)
+    monkeypatch.setattr("orchestrator.queue.send_telegram", lambda cfg, text, **kwargs: sent.append((text, kwargs)) or 321)
     cfg = {"root_dir": str(tmp_path), "telegram_chat_id": "-100123"}
     risk = RiskAssessment(
         level="high",
@@ -234,7 +234,7 @@ def test_send_risk_telegram_creates_high_risk_approval(tmp_path, monkeypatch):
         has_test_changes=False,
     )
 
-    pr_monitor._send_risk_telegram(cfg, "owner/repo", 77, risk)
+    pr_monitor._send_risk_telegram(cfg, "owner/repo", 77, "abc123", risk)
 
     assert sent
     approval_files = list((tmp_path / "runtime" / "approvals").glob("approval-*.md"))
@@ -242,3 +242,20 @@ def test_send_risk_telegram_creates_high_risk_approval(tmp_path, monkeypatch):
     text = approval_files[0].read_text(encoding="utf-8")
     assert "kind: high_risk_pr" in text
     assert "pr_number: 77" in text
+    assert "head_sha: abc123" in text
+    assert sent[0][1]["reply_markup"]["inline_keyboard"]
+
+
+def test_work_verifier_exception_fails_closed(monkeypatch):
+    monkeypatch.setattr(
+        pr_monitor,
+        "verify_pull_request",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("judge unavailable")),
+    )
+    state = {}
+    allowed, reason = pr_monitor._work_verifier_gate(
+        {}, "owner/repo", {"number": 77, "body": ""}, state
+    )
+    assert allowed is False
+    assert reason == "work verifier unavailable (RuntimeError)"
+    assert state["work_verifier_verdict"] == "error"
