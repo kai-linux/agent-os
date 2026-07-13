@@ -42,10 +42,10 @@
     ],
     "total_spend_usd": 0
   },
-  "generated_at": "2026-07-12T03:00:02.507151+00:00",
+  "generated_at": "2026-07-13T03:00:02.420882+00:00",
   "github": {
     "forks": 0,
-    "open_issues": 34,
+    "open_issues": 33,
     "repo": "kai-linux/agent-os",
     "stars": 4
   },
@@ -92,14 +92,6 @@
     }
   ],
   "rolling_14_day": [
-    {
-      "blocked": 0,
-      "date": "2026-06-29",
-      "escalation_rate": null,
-      "success_rate": null,
-      "successes": 0,
-      "total": 0
-    },
     {
       "blocked": 0,
       "date": "2026-06-30",
@@ -199,6 +191,14 @@
     {
       "blocked": 0,
       "date": "2026-07-12",
+      "escalation_rate": null,
+      "success_rate": null,
+      "successes": 0,
+      "total": 0
+    },
+    {
+      "blocked": 0,
+      "date": "2026-07-13",
       "escalation_rate": null,
       "success_rate": null,
       "successes": 0,
