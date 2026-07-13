@@ -9,12 +9,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CODEX_BIN="${CODEX_BIN:-codex}"
 CLAUDE_BIN="${CLAUDE_BIN:-claude}"
 GEMINI_BIN="${GEMINI_BIN:-gemini}"
-DEEPSEEK_RUNNER="${DEEPSEEK_RUNNER:-${SCRIPT_DIR}/run_deepseek.sh}"
+OMP_BIN="${OMP_BIN:-omp}"
+OMP_MODEL="${OMP_MODEL:-openrouter/z-ai/glm-5.2}"
 GEMINI_MODEL="${GEMINI_MODEL:-gemini-2.5-flash}"
 
-# DeepSeek configuration
-export DEEPSEEK_OPENROUTER_CONFIG="${DEEPSEEK_OPENROUTER_CONFIG:-$HOME/.config/openrouter}"
-export DEEPSEEK_OPENROUTER_MODEL="${DEEPSEEK_OPENROUTER_MODEL:-deepseek/deepseek-v3.2}"
+# OMP (Oh My Pi) harness — GLM-5.2 via OpenRouter as the fast first-attempt agent.
+# Override the binary or model via OMP_BIN / OMP_MODEL if needed.
 
 cd "$WORKDIR"
 
@@ -24,13 +24,8 @@ elif [ "$AGENT" = "claude" ]; then
     "$CLAUDE_BIN" --dangerously-skip-permissions -p < "$PROMPT"
 elif [ "$AGENT" = "gemini" ]; then
     "$GEMINI_BIN" -p "" -m "$GEMINI_MODEL" --output-format json < "$PROMPT"
-elif [ "$AGENT" = "deepseek" ]; then
-    if [ -x "$DEEPSEEK_RUNNER" ]; then
-        "$DEEPSEEK_RUNNER" "$WORKDIR" "$PROMPT"
-    else
-        echo "DeepSeek requested but runner is missing or not executable: $DEEPSEEK_RUNNER"
-        exit 1
-    fi
+elif [ "$AGENT" = "omp" ]; then
+    "$OMP_BIN" -p --model "$OMP_MODEL" --approval-mode yolo --no-session --no-title "@$PROMPT"
 else
     echo "Unknown agent: $AGENT"
     exit 1

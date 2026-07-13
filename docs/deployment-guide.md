@@ -43,7 +43,7 @@ gh auth refresh -s project    # required for GitHub Projects integration
 **Optional agents** (extend the fallback chain):
 - [Codex CLI](https://github.com/openai/codex) — `codex --version`
 - Gemini CLI — `gemini --version`
-- DeepSeek via OpenRouter — requires `openRouterApiKey` in DeepSeek config
+- [OMP](https://github.com/can1357/oh-my-pi) — `omp --version` (runs GLM-5.2 via OpenRouter)
 
 You only need Claude to get started. Additional agents become optional
 fallbacks after the core loop is working reliably in your environment.
@@ -424,7 +424,7 @@ Get real-time task status, escalations, and daily digests on Telegram.
 
 - **Claude** — run `claude --version` and verify it responds
 - **Codex** — ensure `OPENAI_API_KEY` is set in the environment
-- **DeepSeek** — needs `openRouterApiKey` in its config directory
+- **OMP** — run `omp --version` and verify the `OMP_BIN` env var points to the binary (or that `omp` is on PATH). OMP uses OpenRouter credentials stored in `~/.omp/agent/`.
 - **Gemini** — ensure `GOOGLE_API_KEY` is set
 
 Agents that fail auth are automatically skipped in the fallback chain.

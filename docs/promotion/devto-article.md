@@ -22,7 +22,7 @@ I built [Agent OS](https://github.com/kai-linux/agent-os) to find out. It bootst
 | PRs merged | 85 of 90 (94% merge rate) |
 | Total commits | 352 in 30 days (~12/day) |
 | Agent tasks executed | 146+ during the historical 30-day case study |
-| Agents in pool | 4 (Claude, Codex, Gemini, DeepSeek) |
+| Agents in pool | 4 (OMP/GLM-5.2, Claude, Codex, Gemini) |
 | Infrastructure cost | $5/month VPS |
 
 Every number is verifiable from public GitHub data: [commits](https://github.com/kai-linux/agent-os/commits/main), [closed issues](https://github.com/kai-linux/agent-os/issues?q=is%3Aissue+is%3Aclosed), [merged PRs](https://github.com/kai-linux/agent-os/pulls?q=is%3Apr+is%3Amerged).

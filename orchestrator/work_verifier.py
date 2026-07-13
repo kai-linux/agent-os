@@ -506,7 +506,7 @@ def verify_pull_request(
             name = ""
             if isinstance(label, dict):
                 name = str(label.get("name") or "").strip().lower()
-            if name in {"claude", "codex", "gemini", "deepseek"}:
+            if name in {"omp", "claude", "codex", "gemini"}:
                 worker_agent = name
                 break
     scope_findings = _scope_findings(risk, issue_body=issue_body)

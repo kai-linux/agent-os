@@ -115,7 +115,7 @@ def _cfg(fallbacks=None):
         "default_task_type": "implementation",
         "root_dir": "/tmp/nonexistent-agent-os-test-root",
         "agent_fallbacks": fallbacks or {
-            "implementation": ["codex", "claude", "gemini", "deepseek"],
+            "implementation": ["omp", "codex", "claude", "gemini"],
         },
     }
 
@@ -124,7 +124,7 @@ def test_get_agent_chain_auto():
     from unittest.mock import patch
     with patch("orchestrator.queue.agent_available", return_value=(True, None)):
         chain = get_agent_chain({"task_type": "implementation"}, _cfg())
-    assert chain == ["codex", "claude", "gemini", "deepseek"]
+    assert chain == ["omp", "codex", "claude", "gemini"]
 
 
 def test_get_agent_chain_requested_first():
@@ -132,7 +132,7 @@ def test_get_agent_chain_requested_first():
     with patch("orchestrator.queue.agent_available", return_value=(True, None)):
         chain = get_agent_chain({"agent": "claude", "task_type": "implementation"}, _cfg())
     assert chain[0] == "claude"
-    assert set(chain) == {"codex", "claude", "gemini", "deepseek"}
+    assert set(chain) == {"omp", "codex", "claude", "gemini"}
 
 
 def test_get_agent_chain_unknown_type_falls_back_to_default():
@@ -159,29 +159,24 @@ def test_get_agent_chain_skips_invalid_fallback_entries():
     assert chain == ["codex", "claude"]
 
 
-def test_get_agent_chain_skips_unavailable_deepseek(monkeypatch):
-    cfg = _cfg({"debugging": ["claude", "deepseek", "codex"]})
+def test_get_agent_chain_skips_unavailable_omp(monkeypatch):
+    cfg = _cfg({"debugging": ["claude", "omp", "codex"]})
 
     def fake_available(agent):
-        return (agent != "deepseek", None if agent != "deepseek" else "not configured")
+        return (agent != "omp", None if agent != "omp" else "not configured")
 
     monkeypatch.setattr("orchestrator.queue.agent_available", fake_available)
     chain = get_agent_chain({"task_type": "debugging"}, cfg)
     assert chain == ["claude", "codex"]
 
 
-def test_get_agent_chain_skips_deepseek_when_openrouter_credential_missing(monkeypatch, tmp_path):
-    cfg = _cfg({"implementation": ["deepseek", "codex", "claude"]})
-    openrouter_dir = tmp_path / "openrouter"
-    openrouter_dir.mkdir()
-    (openrouter_dir / "secrets.json").write_text("{}", encoding="utf-8")
+def test_get_agent_chain_skips_omp_when_binary_missing(monkeypatch):
+    cfg = _cfg({"implementation": ["omp", "codex", "claude"]})
 
-    monkeypatch.setenv("CLINE_BIN", "cline")
-    monkeypatch.setenv("DEEPSEEK_OPENROUTER_CONFIG", str(openrouter_dir))
-    monkeypatch.delenv("DEEPSEEK_NANOGPT_CONFIG", raising=False)
-    monkeypatch.delenv("DEEPSEEK_CHUTES_CONFIG", raising=False)
-    monkeypatch.setattr("orchestrator.queue._command_available", lambda cmd: True)
+    def fake_available(agent):
+        return (agent != "omp", None if agent != "omp" else "omp not found on PATH")
 
+    monkeypatch.setattr("orchestrator.queue.agent_available", fake_available)
     chain = get_agent_chain({"task_type": "implementation"}, cfg)
     assert chain == ["codex", "claude"]
 
@@ -446,11 +441,11 @@ def test_get_agent_chain_skips_agents_below_adaptive_health_threshold(tmp_path):
     metrics_dir = tmp_path / "runtime" / "metrics"
     metrics_dir.mkdir(parents=True)
     now = datetime.now(timezone.utc).isoformat()
-    # deepseek: 0% success (all blocked), claude: 100% success
+    # omp: 0% success (all blocked), claude: 100% success
     records = [
-        {"timestamp": now, "agent": "deepseek", "status": "blocked"},
-        {"timestamp": now, "agent": "deepseek", "status": "blocked"},
-        {"timestamp": now, "agent": "deepseek", "status": "blocked"},
+        {"timestamp": now, "agent": "omp", "status": "blocked"},
+        {"timestamp": now, "agent": "omp", "status": "blocked"},
+        {"timestamp": now, "agent": "omp", "status": "blocked"},
         {"timestamp": now, "agent": "claude", "status": "complete"},
         {"timestamp": now, "agent": "claude", "status": "complete"},
         {"timestamp": now, "agent": "claude", "status": "complete"},
@@ -465,10 +460,10 @@ def test_get_agent_chain_skips_agents_below_adaptive_health_threshold(tmp_path):
     with patch("orchestrator.queue.agent_available", return_value=(True, None)):
         chain = get_agent_chain(
             {"task_type": "implementation"},
-            {**_cfg({"implementation": ["deepseek", "claude"]}), "root_dir": str(tmp_path)},
+            {**_cfg({"implementation": ["omp", "claude"]}), "root_dir": str(tmp_path)},
         )
 
-    assert "deepseek" not in chain
+    assert "omp" not in chain
     assert "claude" in chain
 
 
@@ -507,15 +502,15 @@ def test_get_agent_chain_prefers_repo_specific_fallbacks():
     cfg = {
         **_cfg(
             {
-                "implementation": ["claude", "codex", "gemini", "deepseek"],
-                "debugging": ["claude", "codex", "gemini", "deepseek"],
+                "implementation": ["claude", "codex", "gemini", "omp"],
+                "debugging": ["claude", "codex", "gemini", "omp"],
             }
         ),
         "github_projects": {
             "agent-os": {
                 "agent_fallbacks": {
-                    "implementation": ["codex", "claude", "gemini", "deepseek"],
-                    "debugging": ["codex", "claude", "gemini", "deepseek"],
+                    "implementation": ["codex", "claude", "gemini", "omp"],
+                    "debugging": ["codex", "claude", "gemini", "omp"],
                 }
             }
         },
@@ -529,7 +524,7 @@ def test_get_agent_chain_prefers_repo_specific_fallbacks():
             cfg,
         )
 
-    assert chain == ["codex", "claude", "gemini", "deepseek"]
+    assert chain == ["codex", "claude", "gemini", "omp"]
 
 
 def test_write_prompt_includes_layered_repo_context(tmp_path):
@@ -1568,52 +1563,22 @@ def test_validate_workflow_files_allows_runner_temp_via_step_env(tmp_path):
     _validate_workflow_files(tmp_path)
 
 
-def test_agent_available_deepseek_requires_provider_config(monkeypatch):
-    monkeypatch.setenv("CLINE_BIN", "cline")
-    monkeypatch.delenv("DEEPSEEK_OPENROUTER_CONFIG", raising=False)
-    monkeypatch.delenv("DEEPSEEK_NANOGPT_CONFIG", raising=False)
-    monkeypatch.delenv("DEEPSEEK_CHUTES_CONFIG", raising=False)
-    monkeypatch.setattr("orchestrator.queue._command_available", lambda cmd: True)
-    monkeypatch.setattr("orchestrator.queue.Path.home", lambda: Path("/tmp/no-home-config"))
+def test_agent_available_omp_requires_binary(monkeypatch):
+    monkeypatch.setenv("OMP_BIN", "omp-not-on-path")
+    monkeypatch.setattr("orchestrator.queue._command_available", lambda cmd: False)
 
-    available, reason = agent_available("deepseek")
+    available, reason = agent_available("omp")
     assert available is False
-    assert "OpenRouter config dir missing" in reason
+    assert "omp-not-on-path not found on PATH" in reason
 
 
-def test_agent_available_deepseek_requires_openrouter_api_key(monkeypatch, tmp_path):
-    openrouter_dir = tmp_path / "openrouter"
-    openrouter_dir.mkdir()
-    (openrouter_dir / "secrets.json").write_text("{}", encoding="utf-8")
-
-    monkeypatch.setenv("CLINE_BIN", "cline")
-    monkeypatch.setenv("DEEPSEEK_OPENROUTER_CONFIG", str(openrouter_dir))
-    monkeypatch.delenv("DEEPSEEK_NANOGPT_CONFIG", raising=False)
-    monkeypatch.delenv("DEEPSEEK_CHUTES_CONFIG", raising=False)
+def test_agent_available_omp_available_when_binary_present(monkeypatch):
+    monkeypatch.setenv("OMP_BIN", "omp")
     monkeypatch.setattr("orchestrator.queue._command_available", lambda cmd: True)
 
-    available, reason = agent_available("deepseek")
-    assert available is False
-    assert "has no openRouterApiKey" in reason
-
-
-def test_agent_available_deepseek_rejects_placeholder_openrouter_api_key(monkeypatch, tmp_path):
-    openrouter_dir = tmp_path / "openrouter"
-    openrouter_dir.mkdir()
-    (openrouter_dir / "secrets.json").write_text(
-        '{"openRouterApiKey": "YOUR_OPENROUTER_API_KEY"}',
-        encoding="utf-8",
-    )
-
-    monkeypatch.setenv("CLINE_BIN", "cline")
-    monkeypatch.setenv("DEEPSEEK_OPENROUTER_CONFIG", str(openrouter_dir))
-    monkeypatch.delenv("DEEPSEEK_NANOGPT_CONFIG", raising=False)
-    monkeypatch.delenv("DEEPSEEK_CHUTES_CONFIG", raising=False)
-    monkeypatch.setattr("orchestrator.queue._command_available", lambda cmd: True)
-
-    available, reason = agent_available("deepseek")
-    assert available is False
-    assert "placeholder text" in reason
+    available, reason = agent_available("omp")
+    assert available is True
+    assert reason is None
 
 
 def test_rescue_git_progress_marks_result_complete(tmp_path, monkeypatch):
@@ -2008,7 +1973,7 @@ def test_create_followup_task_defaults_auto_without_resolved_agent(tmp_path):
     summary_log = tmp_path / "summary.log"
     summary_log.touch()
 
-    path = create_followup_task(meta, "original body", result, logfile, 3, ["deepseek"], inbox, summary_log)
+    path = create_followup_task(meta, "original body", result, logfile, 3, ["omp"], inbox, summary_log)
     assert path is not None
     content = path.read_text(encoding="utf-8")
     assert "agent: auto" in content

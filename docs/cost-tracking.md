@@ -23,7 +23,7 @@ Current built-in model families:
 - `claude-sonnet-4` via Anthropic: `$3.00` input, `$15.00` output per 1M tokens
 - `claude-opus-4` via Anthropic: `$15.00` input, `$75.00` output per 1M tokens
 - `gemini-2.5-flash` via Google: `$0.30` input, `$2.50` output per 1M tokens
-- `deepseek/deepseek-v3.2` via DeepSeek-family baseline: `$0.27` input, `$1.10` output per 1M tokens
+- `z-ai/glm-5.2` via OpenRouter: `$1.40` input, `$4.40` output per 1M tokens
 - `codex` via OpenAI: `$15.00` input, `$60.00` output per 1M tokens
 
 These are governance-grade approximations, not billing-grade invoices.
@@ -33,7 +33,7 @@ These are governance-grade approximations, not billing-grade invoices.
 - Token counts are estimated as `characters / 4`, rounded up
 - Input tokens are estimated from the final prompt snapshot passed to the runner
 - Output tokens are estimated from `.agent_result.md`, not raw provider transcripts
-- DeepSeek may run through `openrouter`, `nanogpt`, or `chutes`; current tracking uses one shared DeepSeek-family baseline unless you override it
+- OMP runs GLM-5.2 through OpenRouter; current tracking uses the OpenRouter baseline price unless you override it
 - Historical `agent_stats.jsonl` rows written before this feature have no `model_attempt_details`, so they rebuild as zero-cost task records
 
 ## Updating Prices

@@ -29,7 +29,7 @@ Live Kanban Board: https://github.com/users/kai-linux/projects/6/views/1
 |:---:|:---:|:---:|:---:|
 | **69%** (61/88) | **0.1h** | **11%** (10/88) | **88** |
 
-Current pool: Claude · Codex (Gemini and DeepSeek were retired from rotation after quality review). Metrics above are from the public reliability dashboard updated on 2026-04-21.
+Current pool: OMP (GLM-5.2) · Claude · Codex. Gemini and DeepSeek were retired from rotation after quality review. Metrics above are from the public reliability dashboard updated on 2026-04-21.
 [Full reliability dashboard →](docs/reliability/README.md) · [Multi-agent case study →](docs/case-study-agent-os.md)
 
 ---
@@ -349,7 +349,7 @@ A dedicated poller (`bin/run_telegram_control.sh`) runs every minute with `AGENT
 | `product_inspector.py` | Live product-health + adoption probes | Daily (06:00) |
 | `daily_digest.py` | Operator digest to Telegram | Daily (08:00) |
 
-2 agents in the active pool: **Claude, Codex** — routed by task type with automatic fallback chains. Gemini and DeepSeek were retired from rotation after quality review; the adapter contracts remain in `orchestrator/` so either can be re-enabled by updating `agent_fallbacks` in `config.yaml`.
+3 agents in the active pool: **OMP (GLM-5.2), Claude, Codex** — routed by task type with automatic fallback chains. OMP is the fast first-attempt agent; Claude and Codex are the fallback. Gemini and DeepSeek were retired from rotation after quality review; the adapter contracts remain in `orchestrator/` so either can be re-enabled by updating `agent_fallbacks` in `config.yaml`.
 
 The backlog is GitHub Issues. The sprint board is GitHub Projects. The standup is Telegram. The office is a **$5/month VPS**.
 

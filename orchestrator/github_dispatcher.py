@@ -56,9 +56,9 @@ PUSH_NOT_READY_CODE = "push_not_ready"
 RETRY_DECISION_SECTION = "retry decision"
 RETRY_DECISION_APPLIED_MARKER = "<!-- agent-os-retry-decision-applied -->"
 VALID_RETRY_ACTIONS = {"retry", "reroute", "stop"}
-VALID_REROUTE_AGENTS = {"auto", "claude", "codex", "gemini", "deepseek"}
+VALID_REROUTE_AGENTS = {"auto", "omp", "claude", "codex", "gemini"}
 UNASSIGNED_BLOCKED_SEEN_AT = "unassigned_blocked_seen_at"
-VALID_ASSIGNABLE_AGENTS = {"auto", "claude", "codex", "gemini", "deepseek"}
+VALID_ASSIGNABLE_AGENTS = {"auto", "omp", "claude", "codex", "gemini"}
 VALID_FALLBACK_AGENTS = VALID_ASSIGNABLE_AGENTS - {"auto"}
 AGENT_UNAVAILABLE_LABEL = "dispatch:agent-unavailable"
 AGENT_UNAVAILABLE_CODE = "agent_unavailable"
@@ -418,7 +418,7 @@ def _build_requested_agent_chain(cfg: dict, project_key: str, task_type: str, re
     task_chain = list(
         fallback_map.get(
             task_type,
-            fallback_map.get(default_task_type, ["codex", "claude", "gemini", "deepseek"]),
+            fallback_map.get(default_task_type, ["omp", "codex", "claude", "gemini"]),
         )
     )
     if requested_agent in {"", "auto"}:
@@ -595,10 +595,10 @@ def build_mailbox_task(cfg: dict, project_key: str, repo_cfg: dict, issue: dict)
             priority = lbl
             break
 
-    # Determine agent from issue labels (claude, codex, gemini, deepseek)
+    # Determine agent from issue labels (omp, claude, codex, gemini)
     # Takes precedence over agent_preference in issue body
     agent = parsed["agent_preference"] or "auto"
-    valid_agents = {"claude", "codex", "gemini", "deepseek"}
+    valid_agents = {"omp", "claude", "codex", "gemini"}
     for lbl in label_names:
         if lbl in valid_agents:
             agent = lbl

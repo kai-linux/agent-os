@@ -434,7 +434,7 @@ Original issue: #{issue_number}
     # Carry over the resolved agent so follow-up issues are dispatched to a
     # concrete agent instead of defaulting to unassigned.
     resolved_agent = str(meta.get("resolved_agent", "") or "").strip().lower()
-    if resolved_agent in {"claude", "codex", "gemini", "deepseek"}:
+    if resolved_agent in {"omp", "claude", "codex", "gemini"}:
         labels.append(resolved_agent)
     issue_url = _create_issue(repo, title, body, labels)
     _set_issue_ready(cfg, repo, issue_url)

@@ -65,29 +65,30 @@ default_agent: auto
 default_task_type: implementation
 
 agent_fallbacks:
-  implementation: [codex, claude, gemini, deepseek]
-  debugging:      [claude, codex, gemini, deepseek]   # claude first for bugs
-  architecture:   [claude, codex]                     # planning needs context
-  research:       [claude, codex]
-  docs:           [claude, codex]
-  design:         [claude, codex]
-  content:        [claude, codex]
-  browser_automation: [claude, codex, gemini, deepseek]
+  implementation: [omp, codex, claude, gemini]
+  debugging:      [omp, claude, codex, gemini]   # omp first (fast), claude fallback for bugs
+  architecture:   [omp, claude, codex]            # planning needs context
+  research:       [omp, claude, codex]
+  docs:           [omp, claude, codex]
+  design:         [omp, claude, codex]
+  content:        [omp, claude, codex]
+  browser_automation: [omp, claude, codex, gemini]
 
 # The strategic planner has its own narrow list (it is control-plane, not task-plane):
-planner_agents: [claude, codex]
+planner_agents: [omp, claude, codex]
 ```
 
-Valid agents today: `claude`, `codex`, `gemini`, `deepseek`
-(`VALID_ASSIGNABLE_AGENTS` in `orchestrator/queue.py:2349`).
+Valid agents today: `omp`, `claude`, `codex`, `gemini`
+(`VALID_ASSIGNABLE_AGENTS` in `orchestrator/queue.py`).
+OMP runs GLM-5.2 via OpenRouter as the fast first-attempt agent; the rest are fallbacks.
 
 **Per-agent timeout:**
 ```yaml
 agent_timeout_minutes:
+  omp: 30
   codex: 40
   claude: 45
   gemini: 35
-  deepseek: 30
 ```
 
 **Pinning one task to one agent.** Put this in the GitHub issue body:
@@ -112,7 +113,7 @@ elif [ "$AGENT" = "llama" ]; then
 
 **Step B — register it** in `orchestrator/queue.py:2349`:
 ```python
-VALID_ASSIGNABLE_AGENTS = {"auto", "claude", "codex", "gemini", "deepseek", "llama"}
+VALID_ASSIGNABLE_AGENTS = {"auto", "omp", "claude", "codex", "gemini", "llama"}
 ```
 
 **Step C — add to a fallback chain** in `config.yaml`:

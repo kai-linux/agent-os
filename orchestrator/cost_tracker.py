@@ -26,7 +26,7 @@ PRICING_CATALOG = {
     "claude-sonnet-4": {"provider": "anthropic", "input_per_million_tokens": 3.00, "output_per_million_tokens": 15.00},
     "claude-opus-4": {"provider": "anthropic", "input_per_million_tokens": 15.00, "output_per_million_tokens": 75.00},
     "gemini-2.5-flash": {"provider": "google", "input_per_million_tokens": 0.30, "output_per_million_tokens": 2.50},
-    "deepseek/deepseek-v3.2": {"provider": "deepseek", "input_per_million_tokens": 0.27, "output_per_million_tokens": 1.10},
+    "z-ai/glm-5.2": {"provider": "openrouter", "input_per_million_tokens": 1.40, "output_per_million_tokens": 4.40},
     "codex": {"provider": "openai", "input_per_million_tokens": 15.00, "output_per_million_tokens": 60.00},
 }
 
@@ -38,8 +38,9 @@ MODEL_ALIASES = {
     "claude-opus-4": "claude-opus-4",
     "gemini": "gemini-2.5-flash",
     "gemini-2.5-flash": "gemini-2.5-flash",
-    "deepseek": "deepseek/deepseek-v3.2",
-    "deepseek/deepseek-v3.2": "deepseek/deepseek-v3.2",
+    "omp": "z-ai/glm-5.2",
+    "z-ai/glm-5.2": "z-ai/glm-5.2",
+    "openrouter/z-ai/glm-5.2": "z-ai/glm-5.2",
     "codex": "codex",
 }
 
@@ -47,7 +48,7 @@ DEFAULT_AGENT_MODELS = {
     "claude": "claude-sonnet-4",
     "opus": "claude-opus-4",
     "gemini": "gemini-2.5-flash",
-    "deepseek": "deepseek/deepseek-v3.2",
+    "omp": "z-ai/glm-5.2",
     "codex": "codex",
 }
 
@@ -55,7 +56,7 @@ DEFAULT_AGENT_PROVIDERS = {
     "claude": "anthropic",
     "opus": "anthropic",
     "gemini": "google",
-    "deepseek": "deepseek",
+    "omp": "openrouter",
     "codex": "openai",
 }
 
@@ -70,7 +71,7 @@ def estimate_text_tokens(text: str) -> int:
 def _cost_tracking_cfg(cfg: dict | None) -> dict:
     section = ((cfg or {}).get("cost_tracking") or {}).copy()
     agent_models = {**DEFAULT_AGENT_MODELS, **(section.get("agent_models") or {})}
-    provider_multipliers = {"anthropic": 1.0, "google": 1.0, "deepseek": 1.0, "openai": 1.0}
+    provider_multipliers = {"anthropic": 1.0, "google": 1.0, "openrouter": 1.0, "openai": 1.0}
     provider_multipliers.update(section.get("provider_multipliers") or {})
     section["agent_models"] = agent_models
     section["provider_multipliers"] = provider_multipliers
@@ -83,8 +84,8 @@ def resolve_attempt_model(agent: str, cfg: dict | None) -> str:
     section = _cost_tracking_cfg(cfg)
     if agent == "gemini":
         return str(os.environ.get("GEMINI_MODEL", "")).strip() or str(section["agent_models"].get(agent, DEFAULT_AGENT_MODELS["gemini"]))
-    if agent == "deepseek":
-        return str(os.environ.get("DEEPSEEK_OPENROUTER_MODEL", "")).strip() or str(section["agent_models"].get(agent, DEFAULT_AGENT_MODELS["deepseek"]))
+    if agent == "omp":
+        return str(os.environ.get("OMP_MODEL", "")).strip() or str(section["agent_models"].get(agent, DEFAULT_AGENT_MODELS["omp"]))
     return str(section["agent_models"].get(agent, agent or "unknown")).strip() or "unknown"
 
 

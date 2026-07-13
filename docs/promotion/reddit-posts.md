@@ -26,7 +26,7 @@ The interesting part is the recursive self-improvement loop: the log analyzer re
 **Key design choices:**
 - GitHub Issues is the entire control plane — no second system
 - Markdown files instead of message brokers — you can `ls` the queue
-- 4 agents (Claude, Codex, Gemini, DeepSeek) with automatic fallback routing
+- 4 agents (OMP/GLM-5.2, Claude, Codex, Gemini) with automatic fallback routing
 - `.agent_result.md` is the only interface contract
 
 Everything is auditable from public GitHub data. The README, CI pipeline, and backlog groomer were all written by agents.
@@ -56,7 +56,7 @@ After 30 days of autonomous operation managing its own repo:
 - **352 commits** (~12/day)
 - Runs on a **$5/month VPS** with cron jobs
 
-**How it works:** GitHub Issues are the backlog. A dispatcher triages and routes tasks to one of 4 AI agents (Claude, Codex, Gemini, DeepSeek). Each agent works in an isolated worktree, writes code, runs tests, opens a PR. A PR monitor checks CI and auto-merges on green. A log analyzer files fix tickets about failures weekly. Those tickets enter the same pipeline. The system improves itself.
+**How it works:** GitHub Issues are the backlog. A dispatcher triages and routes tasks to one of 4 AI agents (OMP/GLM-5.2, Claude, Codex, Gemini). Each agent works in an isolated worktree, writes code, runs tests, opens a PR. A PR monitor checks CI and auto-merges on green. A log analyzer files fix tickets about failures weekly. Those tickets enter the same pipeline. The system improves itself.
 
 **The honest version:** the self-managed repo case study is strong, but a fresh external repo should still start in `dispatcher_only` mode and expand only after a supervised pilot. The [case study](https://github.com/kai-linux/agent-os/blob/main/docs/case-study-agent-os.md) documents both the wins and the failure cascades.
 

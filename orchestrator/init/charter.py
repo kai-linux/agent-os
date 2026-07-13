@@ -37,7 +37,7 @@ USER + SUCCESS CRITERIA:
 Your job: propose a stack and the first 3-5 seed issues that will take this project from empty repo to first deployable vertical slice. Optimize for:
 - Solo-operator friendliness (no heavy infra)
 - Thin first slice over complete scaffolding (so the stack choice is revisable)
-- Issues the existing Agent OS agents (claude/codex/gemini/deepseek) can complete in 10-40 minutes each
+- Issues the existing Agent OS agents (omp/claude/codex/gemini) can complete in 10-40 minutes each
 
 The operator may be non-technical, unsure, or relying on defaults. You must handle vague input gracefully:
 - If the project kind is unclear or set to `other`, infer the most plausible product shape from the idea and success criteria.

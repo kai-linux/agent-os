@@ -687,27 +687,6 @@ def _command_available(cmd: str) -> bool:
     first = shlex.split(str(cmd))[0]
     return shutil.which(first) is not None
 
-def _load_json_file(path: Path) -> dict | None:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    return data if isinstance(data, dict) else None
-
-def _openrouter_api_key_status(config_dir: Path) -> tuple[bool, str | None]:
-    secrets_path = config_dir / "secrets.json"
-    if not secrets_path.is_file():
-        return False, f"OpenRouter secrets file missing: {secrets_path}"
-    data = _load_json_file(secrets_path)
-    if data is None:
-        return False, f"OpenRouter secrets file is unreadable or invalid JSON: {secrets_path}"
-    api_key = str(data.get("openRouterApiKey", "")).strip()
-    if not api_key:
-        return False, f"OpenRouter credential missing: {secrets_path} has no openRouterApiKey"
-    lowered = api_key.lower()
-    if lowered in {"your_openrouter_api_key", "your-api-key", "changeme"} or "your_openrouter_api_key" in lowered:
-        return False, f"OpenRouter credential is placeholder text in {secrets_path}"
-    return True, None
 
 def agent_available(agent: str) -> tuple[bool, str | None]:
     agent = str(agent).strip().lower()
@@ -720,39 +699,9 @@ def agent_available(agent: str) -> tuple[bool, str | None]:
     if agent == "gemini":
         cmd = os.environ.get("GEMINI_BIN", "gemini")
         return (_command_available(cmd), None if _command_available(cmd) else f"{cmd} not found on PATH")
-    if agent == "deepseek":
-        cline_cmd = os.environ.get("CLINE_BIN", "cline")
-        if not _command_available(cline_cmd):
-            return False, f"{cline_cmd} not found on PATH"
-        provider_reasons: list[str] = []
-
-        openrouter_cfg = Path(
-            os.environ.get("DEEPSEEK_OPENROUTER_CONFIG", str(Path.home() / ".config" / "openrouter"))
-        )
-        if openrouter_cfg.is_dir():
-            available, reason = _openrouter_api_key_status(openrouter_cfg)
-            if available:
-                return True, None
-            if reason:
-                provider_reasons.append(reason)
-        else:
-            provider_reasons.append(f"OpenRouter config dir missing: {openrouter_cfg}")
-
-        for provider_name, env_key in (
-            ("NanoGPT", "DEEPSEEK_NANOGPT_CONFIG"),
-            ("Chutes", "DEEPSEEK_CHUTES_CONFIG"),
-        ):
-            raw_cfg = os.environ.get(env_key, "").strip()
-            if not raw_cfg:
-                provider_reasons.append(f"{provider_name} config dir not set")
-                continue
-            if Path(raw_cfg).is_dir():
-                return True, None
-            provider_reasons.append(f"{provider_name} config dir missing: {raw_cfg}")
-
-        if provider_reasons:
-            return False, "; ".join(provider_reasons)
-        return True, None
+    if agent == "omp":
+        cmd = os.environ.get("OMP_BIN", "omp")
+        return (_command_available(cmd), None if _command_available(cmd) else f"{cmd} not found on PATH")
     return True, None
 
 def run(cmd, *, cwd=None, logfile: Path | None = None, check=True, timeout=None, queue_summary_log: Path | None = None):
@@ -2800,13 +2749,13 @@ def _repo_agent_fallbacks(meta: dict, cfg: dict) -> dict:
                 return fallbacks
     return {}
 
-VALID_ASSIGNABLE_AGENTS = {"auto", "claude", "codex", "gemini", "deepseek"}
+VALID_ASSIGNABLE_AGENTS = {"auto", "omp", "claude", "codex", "gemini"}
 VALID_FALLBACK_AGENTS = VALID_ASSIGNABLE_AGENTS - {"auto"}
 
 def get_agent_chain(meta: dict, cfg: dict) -> list[str]:
     task_type = meta.get("task_type", cfg["default_task_type"])
     fallback_map = _repo_agent_fallbacks(meta, cfg) or cfg.get("agent_fallbacks", {})
-    task_chain = list(fallback_map.get(task_type, fallback_map.get(cfg["default_task_type"], ["codex", "claude", "gemini", "deepseek"])))
+    task_chain = list(fallback_map.get(task_type, fallback_map.get(cfg["default_task_type"], ["omp", "codex", "claude", "gemini"])))
 
     requested = str(meta.get("agent", cfg["default_agent"])).strip().lower()
     if requested not in VALID_ASSIGNABLE_AGENTS:

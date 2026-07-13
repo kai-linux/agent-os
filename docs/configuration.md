@@ -43,9 +43,9 @@ Execution uses the same context model with different depth:
 
 ## Fallbacks
 
-DeepSeek has its own provider fallback: `openrouter → nanogpt → chutes`. It is kept last in the chain by default because it depends on extra provider configuration and should not consume retries when those providers are unavailable.
+OMP (Oh My Pi harness) runs GLM-5.2 via OpenRouter as the fast first-attempt agent. It is placed first in every fallback chain so cheap, high-throughput attempts run before the more expensive Claude/Codex fallbacks. The queue preflights the `omp` binary on PATH — if it is missing, OMP is skipped and the task routes to the next configured fallback agent instead of spending an execution attempt on a runner failure.
 
-Before the queue dispatches DeepSeek, it now preflights the configured providers. For OpenRouter, the queue requires a readable `secrets.json` with a non-placeholder `openRouterApiKey`; if that credential is missing or invalid, DeepSeek is skipped in the agent chain and the task routes to the next configured fallback agent instead of spending an execution attempt on an authentication failure.
+DeepSeek and its Cline-based runner have been removed entirely. The agent pool is now OMP, Claude, Codex, and Gemini.
 
 Strategic planning uses its own narrow fallback chain (`planner_agents`) so the control plane does not stall on a single Claude quota event and does not spray planning work across every model.
 

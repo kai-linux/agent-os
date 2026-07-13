@@ -116,17 +116,17 @@ repo_configs:
     test_command: "pytest"          # e.g. "npm test", "make test", "pytest -q"
 
 agent_fallbacks:
-  implementation: [codex, claude, gemini, deepseek]
-  debugging: [claude, codex, gemini, deepseek]
-  architecture: [claude, codex]
-  research: [claude, codex]
-  docs: [claude, codex]
-  design: [claude, codex]
-  content: [claude, codex]
-  browser_automation: [claude, codex, gemini, deepseek]
+  implementation: [omp, codex, claude, gemini]
+  debugging: [omp, claude, codex, gemini]
+  architecture: [omp, claude, codex]
+  research: [omp, claude, codex]
+  docs: [omp, claude, codex]
+  design: [omp, claude, codex]
+  content: [omp, claude, codex]
+  browser_automation: [omp, claude, codex, gemini]
 
 # Strategic planning is a control-plane task. Keep its LLM fallback narrow.
-planner_agents: [claude, codex]
+planner_agents: [omp, claude, codex]
 # planner_claude_model: opus
 
 cost_tracking:
@@ -134,13 +134,13 @@ cost_tracking:
   provider_multipliers:              # Optional per-provider adjustment layer applied after baseline pricing
     anthropic: 1.0
     google: 1.0
-    deepseek: 1.0
+    openrouter: 1.0
     openai: 1.0
   agent_models:                      # Default model family recorded in agent_stats.jsonl attempt metadata
     claude: "claude-sonnet-4"
     opus: "claude-opus-4"
     gemini: "gemini-2.5-flash"
-    deepseek: "deepseek/deepseek-v3.2"
+    omp: "z-ai/glm-5.2"
     codex: "codex"
   model_overrides: {}                # Example:
                                      # codex:
@@ -409,7 +409,7 @@ agent_timeout_minutes:
   codex: 40
   claude: 45
   gemini: 35
-  deepseek: 30
+  omp: 30
 
 github_owner: "yourname"
 github_project_number: 1

@@ -38,7 +38,7 @@ def test_log_gate_decision_creates_jsonl(tmp_path):
     log_gate_decision(
         metrics_dir,
         gate="adaptive_7d_25pct",
-        skipped={"deepseek": {"total": 5, "successes": 0, "rate": 0.0}},
+        skipped={"omp": {"total": 5, "successes": 0, "rate": 0.0}},
         passed=["claude", "codex"],
         context="test",
     )
@@ -47,7 +47,7 @@ def test_log_gate_decision_creates_jsonl(tmp_path):
     records = [json.loads(l) for l in log_path.read_text().strip().splitlines()]
     assert len(records) == 1
     assert records[0]["gate"] == "adaptive_7d_25pct"
-    assert "deepseek" in records[0]["skipped"]
+    assert "omp" in records[0]["skipped"]
     assert records[0]["passed"] == ["claude", "codex"]
 
 
@@ -76,12 +76,12 @@ def test_compute_baseline():
         _make_record("claude", "complete"),
         _make_record("codex", "complete"),
         _make_record("codex", "partial", "missing_context"),
-        _make_record("deepseek", "blocked", "missing_credentials"),
+        _make_record("omp", "blocked", "missing_credentials"),
     ]
     rates = _compute_baseline(records)
     assert rates["claude"]["rate"] == 1.0
     assert rates["codex"]["rate"] == 0.5
-    assert rates["deepseek"]["rate"] == 0.0
+    assert rates["omp"]["rate"] == 0.0
 
 
 def test_count_blocker_codes():
@@ -98,12 +98,12 @@ def test_count_blocker_codes():
 
 def test_gate_decision_summary():
     decisions = [
-        {"skipped": {"deepseek": {"total": 5, "successes": 0, "rate": 0.0}}, "passed": ["claude"], "context": "dispatcher:resolve_agent"},
-        {"skipped": {"deepseek": {"total": 5, "successes": 0, "rate": 0.0}}, "passed": ["claude"], "context": "queue:get_agent_chain"},
+        {"skipped": {"omp": {"total": 5, "successes": 0, "rate": 0.0}}, "passed": ["claude"], "context": "dispatcher:resolve_agent"},
+        {"skipped": {"omp": {"total": 5, "successes": 0, "rate": 0.0}}, "passed": ["claude"], "context": "queue:get_agent_chain"},
     ]
     summary = _gate_decision_summary(decisions)
     assert summary["total_invocations"] == 2
-    assert summary["agents_skipped"]["deepseek"] == 2
+    assert summary["agents_skipped"]["omp"] == 2
 
 
 def test_generate_report_with_metrics(tmp_path):
@@ -117,7 +117,7 @@ def test_generate_report_with_metrics(tmp_path):
         _make_record("claude", "complete", hours_ago=2),
         _make_record("codex", "complete", hours_ago=3),
         _make_record("codex", "partial", "missing_context", hours_ago=4),
-        _make_record("deepseek", "blocked", "missing_credentials", hours_ago=5),
+        _make_record("omp", "blocked", "missing_credentials", hours_ago=5),
     ]
     metrics_file.write_text("\n".join(json.dumps(r) for r in records) + "\n")
 

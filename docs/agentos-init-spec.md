@@ -33,7 +33,7 @@ These are **required** — the script must verify and halt with an actionable in
 - Do not support non-GitHub code hosts.
 - Do not support non-Telegram control planes.
 - Do not generate a full multi-repo `github_projects` config; init handles exactly one repo, one project.
-- Do not invent new fallback-agent chains; use the default `[claude]`-only fallback (user can add codex/gemini/deepseek later).
+- Do not invent new fallback-agent chains; use the default `[omp, claude]`-only fallback (user can add codex/gemini later).
 - Do not merge into an existing multi-repo `config.yaml` — if one exists at the target path, back it up to `config.yaml.bak.<ts>` and write a fresh single-repo config, warning the user.
 - Do not install the `gh`, `claude`, `python3`, or `crontab` binaries automatically — only detect and instruct.
 
@@ -314,7 +314,7 @@ USER + SUCCESS CRITERIA:
 Your job: propose a stack and the first 3-5 seed issues that will take this project from empty repo to first deployable vertical slice. Optimize for:
 - Solo-operator friendliness (no heavy infra)
 - Thin first slice over complete scaffolding (so the stack choice is revisable)
-- Issues the existing Agent OS agents (claude/codex/gemini/deepseek) can complete in 10-40 minutes each
+- Issues the existing Agent OS agents (omp/claude/codex/gemini) can complete in 10-40 minutes each
 
 Output EXACTLY one JSON object, no code fences, no prose before or after. Schema:
 

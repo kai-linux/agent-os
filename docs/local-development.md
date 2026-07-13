@@ -21,7 +21,7 @@ This guide is the shared baseline linked from
 | Git      | any recent | Clone, worktrees, pre-commit hook    | `git --version`      |
 | GitHub CLI | 2.x+     | Only if running dispatcher/PR paths  | `gh --version`       |
 
-Claude / Codex / Gemini / DeepSeek CLIs are only required for actual agent
+OMP / Claude / Codex / Gemini CLIs are only required for actual agent
 execution. You do **not** need them to develop, run tests, or change
 orchestrator code.
 

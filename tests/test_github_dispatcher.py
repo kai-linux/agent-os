@@ -769,7 +769,7 @@ none
         gd.build_mailbox_task(cfg, "proj", repo_cfg, issue)
         assert False, "expected build_mailbox_task() to reject agent preference 'none'"
     except ValueError as exc:
-        assert str(exc) == "Unsupported agent preference: none. Expected one of: auto, claude, codex, deepseek, gemini."
+        assert str(exc) == "Unsupported agent preference: none. Expected one of: auto, claude, codex, gemini, omp."
 
 
 def test_build_mailbox_task_rejects_when_no_healthy_agent_available(tmp_path, monkeypatch):
@@ -927,10 +927,10 @@ def test_build_mailbox_task_skips_agent_below_adaptive_threshold(tmp_path, monke
     metrics_dir = tmp_path / "runtime" / "metrics"
     metrics_dir.mkdir(parents=True)
     now = gd.datetime.now().isoformat()
-    # deepseek: 0% (all blocked), claude: 100%
+    # omp: 0% (all blocked), claude: 100%
     records = [
-        {"timestamp": now, "agent": "deepseek", "status": "blocked"},
-        {"timestamp": now, "agent": "deepseek", "status": "blocked"},
+        {"timestamp": now, "agent": "omp", "status": "blocked"},
+        {"timestamp": now, "agent": "omp", "status": "blocked"},
         {"timestamp": now, "agent": "claude", "status": "complete"},
         {"timestamp": now, "agent": "claude", "status": "complete"},
     ]
@@ -948,7 +948,7 @@ def test_build_mailbox_task_skips_agent_below_adaptive_threshold(tmp_path, monke
         "default_max_attempts": 4,
         "max_runtime_minutes": 40,
         "formatter_model": None,
-        "agent_fallbacks": {"implementation": ["deepseek", "claude"]},
+        "agent_fallbacks": {"implementation": ["omp", "claude"]},
     }
     repo_cfg = {"local_repo": "/tmp/repo", "github_repo": "owner/repo"}
     issue = {
@@ -962,7 +962,7 @@ def test_build_mailbox_task_skips_agent_below_adaptive_threshold(tmp_path, monke
     monkeypatch.setattr(gd, "format_task", lambda title, body, model=None: None)
 
     task_id, task_md = gd.build_mailbox_task(cfg, "proj", repo_cfg, issue)
-    # deepseek should be skipped, claude assigned
+    # omp should be skipped, claude assigned
     assert "agent: claude" in task_md or "agent: auto" in task_md
 
 
@@ -1371,7 +1371,7 @@ def test_dispatch_item_blocks_task_when_agent_fallbacks_are_invalid(tmp_path, mo
         "code": gd.AGENT_UNAVAILABLE_CODE,
         "detail": (
             "Unsupported agent fallback(s) for task_type='implementation': "
-            "bogus-agent. Expected only: claude, codex, deepseek, gemini."
+            "bogus-agent. Expected only: claude, codex, gemini, omp."
         ),
     }
 

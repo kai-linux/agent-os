@@ -78,7 +78,7 @@ eliminate that overhead — and the first repository it managed was itself.
 - **352 commits** in 30 days (~12 commits/day)
 - **146+ agent tasks executed**, 91% rolling 14-day success rate (up from 61%)
 
-- **4 agents in pool**: Claude, Codex, Gemini, DeepSeek — with automatic fallback routing
+- **4 agents in pool**: OMP (GLM-5.2), Claude, Codex, Gemini — with automatic fallback routing
 
 ## What the System Built
 

@@ -86,7 +86,7 @@ export PATH
 export CODEX_BIN="${CODEX_BIN:-$(pick_bin "${CODEX_BIN:-}" codex)}"
 export CLAUDE_BIN="${CLAUDE_BIN:-$(pick_bin "${CLAUDE_BIN:-}" claude)}"
 export GEMINI_BIN="${GEMINI_BIN:-$(pick_bin "${GEMINI_BIN:-}" gemini)}"
-export CLINE_BIN="${CLINE_BIN:-$(pick_bin "${CLINE_BIN:-}" cline)}"
+export OMP_BIN="${OMP_BIN:-$(pick_bin "${OMP_BIN:-}" omp)}"
 
 log_cron_start() {
   local job_name="${1:-$(basename "$0")}"

@@ -5,7 +5,7 @@ set -euo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common_env.sh"
 
 # Agent binaries — override via env vars or ensure they're on PATH
-export DEEPSEEK_RUNNER="$ROOT/bin/run_deepseek.sh"
+export OMP_MODEL="${OMP_MODEL:-openrouter/z-ai/glm-5.2}"
 export GEMINI_MODEL="gemini-2.5-flash"
 
 log_cron_start "queue"

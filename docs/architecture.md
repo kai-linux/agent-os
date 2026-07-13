@@ -28,7 +28,7 @@ Every startup needs roles. Agent OS fills them all:
 
 | Role | Who | What they do | When |
 |---|---|---|---|
-| **Engineers** | Codex, Claude, Gemini, DeepSeek | Write code, fix bugs, implement features | Continuously |
+| **Engineers** | OMP, Claude, Codex, Gemini | Write code, fix bugs, implement features | Continuously |
 | **Project Manager** | `github_dispatcher.py` | Triages the backlog, assigns work, reformats sloppy tickets | Every minute |
 | **Tech Lead** | `queue.py` | Picks the right engineer for the job, manages retries and handoffs | Per task |
 | **Code Reviewer** | `pr_monitor.py` | Watches CI, approves merges, resolves conflicts | Every 5 min |
@@ -55,16 +55,16 @@ The backlog is GitHub Issues. The sprint board is GitHub Projects. The standup i
 
 ```yaml
 agent_fallbacks:
-  implementation:     [codex, claude, gemini, deepseek]
-  debugging:          [claude, codex, gemini, deepseek]
-  architecture:       [claude, codex]
-  research:           [claude, codex]
-  docs:               [claude, codex]
-  design:             [claude, codex]
-  content:            [claude, codex]
-  browser_automation: [claude, codex, gemini, deepseek]
+  implementation:     [omp, codex, claude, gemini]
+  debugging:          [omp, claude, codex, gemini]
+  architecture:       [omp, claude, codex]
+  research:           [omp, claude, codex]
+  docs:               [omp, claude, codex]
+  design:             [omp, claude, codex]
+  content:            [omp, claude, codex]
+  browser_automation: [omp, claude, codex, gemini]
 
-planner_agents: [claude, codex]
+planner_agents: [omp, claude, codex]
 ```
 
 Issues can specify a preferred agent. The dispatcher can auto-detect task type. Priority labels (`prio:high`, `prio:normal`, `prio:low`) influence scheduling order.
