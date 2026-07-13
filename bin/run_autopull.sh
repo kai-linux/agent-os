@@ -7,9 +7,28 @@ set -euo pipefail
 log_cron_start "autopull"
 
 cd "$ROOT"
-git pull --rebase --autostash || true
 
-# Push any local-only commits (e.g. CODEBASE.md updates from agents)
-if [ "$(git rev-list --count @{u}..HEAD 2>/dev/null)" -gt 0 ] 2>/dev/null; then
-  git push
+# Runtime deploys are immutable and operator-approved. Write a full commit SHA
+# to runtime/deploy-approved-sha during an explicit deployment. This checkout
+# never pushes and never follows a mutable branch tip.
+APPROVED_SHA_FILE="${AGENTOS_APPROVED_SHA_FILE:-$ROOT/runtime/deploy-approved-sha}"
+if [[ ! -f "$APPROVED_SHA_FILE" ]]; then
+  echo "No approved deploy SHA at $APPROVED_SHA_FILE; leaving runtime unchanged."
+  exit 0
+fi
+
+APPROVED_SHA="$(tr -d '[:space:]' < "$APPROVED_SHA_FILE")"
+if [[ ! "$APPROVED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "Invalid approved deploy SHA; expected 40 lowercase hexadecimal characters." >&2
+  exit 1
+fi
+
+git fetch --quiet origin main
+if ! git merge-base --is-ancestor "$APPROVED_SHA" origin/main; then
+  echo "Approved SHA is not an ancestor of origin/main; refusing deployment." >&2
+  exit 1
+fi
+
+if [[ "$(git rev-parse HEAD)" != "$APPROVED_SHA" ]]; then
+  git checkout --detach "$APPROVED_SHA"
 fi

@@ -139,6 +139,11 @@ def get(cfg: dict, approval_id: str) -> dict[str, Any] | None:
     return None
 
 
+def list_records(cfg: dict, *, include_resolved: bool = False) -> list[dict[str, Any]]:
+    """Return approval records without exposing the private storage helper."""
+    return _iter_records(cfg, include_resolved=include_resolved)
+
+
 def request(
     cfg: dict,
     *,

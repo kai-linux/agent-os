@@ -10,6 +10,9 @@ import shlex
 import subprocess
 import tempfile
 import traceback
+import urllib.error
+import urllib.parse
+import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -735,23 +738,25 @@ def telegram_api(
 
     url = f"https://api.telegram.org/bot{token}/{method}"
     try:
-        cmd = ["curl", "-sS", "-X", "POST", url]
+        encoded_payload: dict[str, str] = {}
         for key, value in (payload or {}).items():
             if isinstance(value, (dict, list)):
                 value = json.dumps(value, separators=(",", ":"))
             elif isinstance(value, bool):
                 value = "true" if value else "false"
-            cmd.extend(["--data-urlencode", f"{key}={value}"])
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
-        if result.returncode != 0:
-            log(f"Telegram {method} failed: {result.stderr}", logfile, queue_summary_log=queue_summary_log)
-            return None
-        data = json.loads(result.stdout) if result.stdout else {}
+            encoded_payload[key] = str(value)
+        request = urllib.request.Request(
+            url,
+            data=urllib.parse.urlencode(encoded_payload).encode("utf-8"),
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=20) as response:
+            data = json.loads(response.read().decode("utf-8"))
         if not data.get("ok"):
             log(f"Telegram {method} error: {data}", logfile, queue_summary_log=queue_summary_log)
             return None
         return data
-    except Exception as e:
+    except (OSError, urllib.error.URLError, json.JSONDecodeError) as e:
         log(f"Telegram {method} exception: {e}", logfile, queue_summary_log=queue_summary_log)
         return None
 
@@ -992,23 +997,16 @@ def _save_telegram_offset(offset_path: Path, update_id: int):
     offset_path.write_text(str(update_id), encoding="utf-8")
 
 def _get_telegram_updates(cfg: dict, offset: int, logfile: Path | None = None, queue_summary_log: Path | None = None) -> list[dict]:
-    token = str(cfg.get("telegram_bot_token", "")).strip()
-    if not token:
+    data = telegram_api(
+        cfg,
+        "getUpdates",
+        {"offset": offset, "timeout": 0},
+        logfile,
+        queue_summary_log,
+    )
+    if not data:
         return []
-    url = f"https://api.telegram.org/bot{token}/getUpdates?offset={offset}&timeout=0"
-    try:
-        result = subprocess.run(["curl", "-sS", url], capture_output=True, text=True, timeout=20)
-        if result.returncode != 0:
-            log(f"Telegram getUpdates failed: {result.stderr}", logfile, queue_summary_log=queue_summary_log)
-            return []
-        data = json.loads(result.stdout) if result.stdout else {}
-        if not data.get("ok"):
-            log(f"Telegram getUpdates error: {data}", logfile, queue_summary_log=queue_summary_log)
-            return []
-        return data.get("result", [])
-    except Exception as e:
-        log(f"Telegram getUpdates exception: {e}", logfile, queue_summary_log=queue_summary_log)
-        return []
+    return data.get("result", [])
 
 def _project_cfg(cfg: dict, project_key: str) -> dict:
     project_cfg = cfg.get("github_projects", {}).get(project_key)
@@ -1103,11 +1101,30 @@ def handle_telegram_callback(
     from orchestrator.audit_log import append_audit_event
     from orchestrator import approvals
 
-    m = re.fullmatch(r"(esc|plan|rvt):([a-f0-9]{12}):(requeue|retry|close|skip|approve|reject|cancel)", callback_data or "")
+    m = re.fullmatch(r"(esc|plan|rvt|hrp):([a-f0-9]{12}):(requeue|retry|close|skip|approve|reject|cancel)", callback_data or "")
     if not m:
         return {"text": "Unknown action.", "show_alert": True, "remove_keyboard": False}
 
     action_type, action_id, operation = m.groups()
+    if action_type == "hrp":
+        if operation not in {"approve", "reject"}:
+            return {"text": "Unknown approval action.", "show_alert": True, "remove_keyboard": True}
+        record = approvals.get(cfg, action_id)
+        if not record or record.get("kind") != "high_risk_pr":
+            return {"text": "This approval is no longer available.", "show_alert": True, "remove_keyboard": True}
+        if record.get("status") == "resolved":
+            return {"text": "This approval was already handled.", "show_alert": True, "remove_keyboard": True}
+        decision = "approve" if operation == "approve" else "hold"
+        approvals.resolve(cfg, action_id, decision, f"{decision.title()} from Telegram callback.")
+        append_audit_event(cfg, "telegram_callback", {
+            "action_type": action_type,
+            "action_id": action_id,
+            "operation": operation,
+            "repo": (record.get("context") or {}).get("repo"),
+            "head_sha": (record.get("context") or {}).get("head_sha"),
+        })
+        return {"text": f"High-risk PR {decision} recorded.", "show_alert": False, "remove_keyboard": True}
+
     action = load_telegram_action(actions_dir, action_id)
     if not action:
         return {"text": "This escalation action is no longer available.", "show_alert": True, "remove_keyboard": True}

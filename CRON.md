@@ -14,6 +14,11 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # Auto-pull latest orchestrator code
 * * * * * /path/to/agent-os/bin/run_autopull.sh >> /path/to/agent-os/logs/autopull.log 2>&1
 
+`run_autopull.sh` deploys only the exact 40-character commit recorded in
+`runtime/deploy-approved-sha`. Update that file as an explicit operator action
+after reviewing a release; the runtime checkout never pushes or follows a
+mutable branch tip.
+
 # Dispatch ready issues from GitHub Project → mailbox
 * * * * * /path/to/agent-os/bin/run_dispatcher.sh >> /path/to/agent-os/runtime/logs/dispatcher.log 2>&1
 
@@ -71,7 +76,7 @@ Each wrapper emits a timestamp banner like `[2026-03-30T12:34:56+0200] queue sta
 
 | Schedule | Script | Role |
 |---|---|---|
-| `* * * * *` | `run_autopull.sh` | Fast-forwards the orchestrator checkout so cron always runs the latest code |
+| `* * * * *` | `run_autopull.sh` | Checks out the explicitly approved, SHA-pinned release |
 | `* * * * *` | `run_dispatcher.sh` | Picks up Ready issues, formats them, writes to mailbox |
 | `* * * * *` | `run_queue.sh` | Executes tasks in isolated worktrees, manages agent fallback |
 | `*/5 * * * *` | `run_pr_monitor.sh` | CI gate + auto-merge + auto-rebase for agent PRs |
