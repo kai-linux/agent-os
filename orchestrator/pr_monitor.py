@@ -214,7 +214,7 @@ def _rebase_pr_onto_main(repo: str, pr: dict) -> bool:
                 subprocess.run(["git", "-C", str(worktree_path), "rm", "-f", ".agent_result.md"], capture_output=True)
                 subprocess.run(["git", "-C", str(worktree_path), "checkout", "--theirs", "CODEBASE.md"], capture_output=True)
 
-                # For remaining conflicted files, try union merge (keep both sides)
+                # Any remaining source conflict is unsafe to auto-resolve.
                 conflict_files = _get_conflicted_files(worktree_path)
                 if conflict_files:
                     had_real_content_merge = True

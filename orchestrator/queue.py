@@ -997,23 +997,16 @@ def _save_telegram_offset(offset_path: Path, update_id: int):
     offset_path.write_text(str(update_id), encoding="utf-8")
 
 def _get_telegram_updates(cfg: dict, offset: int, logfile: Path | None = None, queue_summary_log: Path | None = None) -> list[dict]:
-    token = str(cfg.get("telegram_bot_token", "")).strip()
-    if not token:
+    data = telegram_api(
+        cfg,
+        "getUpdates",
+        {"offset": offset, "timeout": 0},
+        logfile,
+        queue_summary_log,
+    )
+    if not data:
         return []
-    url = f"https://api.telegram.org/bot{token}/getUpdates?offset={offset}&timeout=0"
-    try:
-        result = subprocess.run(["curl", "-sS", url], capture_output=True, text=True, timeout=20)
-        if result.returncode != 0:
-            log(f"Telegram getUpdates failed: {result.stderr}", logfile, queue_summary_log=queue_summary_log)
-            return []
-        data = json.loads(result.stdout) if result.stdout else {}
-        if not data.get("ok"):
-            log(f"Telegram getUpdates error: {data}", logfile, queue_summary_log=queue_summary_log)
-            return []
-        return data.get("result", [])
-    except Exception as e:
-        log(f"Telegram getUpdates exception: {e}", logfile, queue_summary_log=queue_summary_log)
-        return []
+    return data.get("result", [])
 
 def _project_cfg(cfg: dict, project_key: str) -> dict:
     project_cfg = cfg.get("github_projects", {}).get(project_key)

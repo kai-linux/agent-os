@@ -41,7 +41,18 @@ jobs:
 
       - name: Scan added content for secrets
         shell: bash
-        run: python bin/secret_scan.py --base "${{ github.event.pull_request.base.sha || github.event.before }}"
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          base="$PR_BASE_SHA"
+          if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
+            base="$PUSH_BEFORE_SHA"
+          fi
+          if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
+            base="HEAD^"
+          fi
+          python bin/secret_scan.py --base "$base"
 
       - name: Run tests
         shell: bash
