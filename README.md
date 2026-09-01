@@ -1,4 +1,4 @@
-# Agent OS
+# Agent-OS
 
 [![CI](https://github.com/kai-linux/agent-os/actions/workflows/ci.yml/badge.svg)](https://github.com/kai-linux/agent-os/actions/workflows/ci.yml)
 [![GitHub stars](https://img.shields.io/github/stars/kai-linux/agent-os?style=social)](https://github.com/kai-linux/agent-os)
