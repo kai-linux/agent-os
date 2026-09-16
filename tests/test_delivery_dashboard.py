@@ -1,4 +1,5 @@
 import http.client
+import json
 import sys
 from pathlib import Path
 from threading import Thread
@@ -65,6 +66,25 @@ def test_real_http_dashboard_and_live_snapshot(server):
     status, _, body = request(server, "/api/delivery")
     assert status == 200
     assert b"proof.operations.v1" in body
+
+
+def test_historical_reconciliation_is_not_new_delivery_activity(server, tmp_path):
+    store = DeliveryStore(store_path({"root_dir": str(tmp_path)}))
+    goal = store.upsert(
+        "historical-issue",
+        "Previously delivered",
+        "Historical request",
+        metadata={"historical_import": True},
+    )
+    store.record_evidence(goal["id"], 1, "human_acceptance", True, "test", {})
+    assert store.verify(goal["id"])
+    status, _, body = request(server, "/api/delivery")
+    assert status == 200
+    snapshot = json.loads(body)
+    assert snapshot["goals"][0]["verified"] is True
+    assert snapshot["metrics"]["historical_imports"] == 1
+    assert snapshot["metrics"]["verified_delivery"]["denominator"] == 0
+    assert snapshot["timeline"] == []
 
 
 def test_dns_rebinding_host_rejected(server):

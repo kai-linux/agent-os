@@ -229,3 +229,30 @@ company. Remaining boundaries include OS-enforced tool isolation, a real media
 capture/publication pilot, provider billing receipts, domain-specific quality and
 business-impact evaluations, and distributed-host ownership. These are reported
 as unproven, not inferred from the presence of modules or dashboard cards.
+
+## Deployment Gates
+
+A merged PR is not automatically a deployed runtime. `bin/run_autopull.sh` follows
+the immutable commit in `runtime/deploy-approved-sha`, not the newest `main`.
+Only advance this pin for an explicitly approved release after testing and checking
+active workers. Updating the checkout alone is temporary: the next autopull will
+restore the approved commit. Keep the guard, dispatcher-only setting and existing
+schedules intact during a dashboard rollout.
+
+Read-only monitoring can run independently of that execution release. Export a
+reviewed commit with `git archive` into a private persistent release directory,
+install its pinned dependencies into that directory's `.venv`, and set the user
+service's `WorkingDirectory` and `ExecStart` to that release. Set
+`Environment=ORCH_ROOT=%h/agent-os` so observations still read the real runtime.
+Do not point a lasting service at a temporary development worktree. This starts
+only `orchestrator.dashboard.server`, not the coordinator or queue. A stale
+coordinator alert is expected until the execution release is actually enabled.
+
+The GitHub identity used by the runtime needs Project read/write access in
+addition to repository access. Reading issues and posting comments can work while
+Project updates fail. Inspect scopes with `gh auth status` under the runtime
+identity and check whether `GH_TOKEN` or `GITHUB_TOKEN` overrides the stored login;
+never print token values. For an OAuth login, the account owner can grant the
+missing access with `gh auth refresh --hostname github.com --scopes project`.
+That requires an account authorization, not a code retry or GitHub Actions job.
+Pending updates stay in the outbox and retry after access is restored.
