@@ -1,10 +1,20 @@
 # Roadmap
 
-Agent OS is not meant to stop at task execution. Its job is to bootstrap itself from a reliable execution engine into an evidence-driven, closed-loop operator that can grow products with decreasing human supervision.
+Agent-OS should persistently translate human intent into verified outcomes,
+including work outside software development. GitHub can remain the workspace
+and project-management interface without defining the limits of execution.
 
-That means the repository should be evolved intentionally toward Level 4 and beyond. New orchestration, planning, research, memory, and feedback systems should be judged by whether they move Agent OS up this ladder.
+The [2026-09-16 intent-to-outcome audit](intent-outcome-audit.md) documents the
+current gaps, reusable foundations, delivery order, and proposed acceptance
+scenarios. The immediate priority is truthful completion and durable goal
+ownership before expanding autonomous activity. This is a design direction,
+not a claim that the runtime or its existing planning objectives have changed.
 
-## Capability Ladder
+## Earlier Capability Ladder
+
+This ladder describes the earlier product-growth direction. It is useful as a
+capability inventory, but module presence alone does not establish readiness at
+any level. Progress now needs end-to-end evidence against human goals.
 
 ### Level 1: Reliable execution engine
 - dispatch, queue, retries, CI, merge, memory
@@ -34,4 +44,10 @@ That means the repository should be evolved intentionally toward Level 4 and bey
 
 ## Current Position
 
-Approximately Level 2. The system already has reliable execution, persistent memory, backlog grooming, strategic planning, retrospectives, and self-healing CI remediation. The next bottleneck is evidence: richer product inspection, research, analytics, and measurable outcomes.
+Execution, repository memory, backlog grooming, strategic planning,
+retrospectives, and CI remediation components exist. Their presence does not
+establish reliable end-to-end execution: the audit found conflicting completion
+states, intent drift, premature parent closure, and limited outcome evidence.
+No overall autonomy level is established. Readiness should be assessed through
+the audit's behavioral acceptance gates, including recovery, authority, and
+non-coding work.
