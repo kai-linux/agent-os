@@ -1,0 +1,16 @@
+[Unit]
+Description=Agent-OS private delivery operations dashboard
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/agent-os
+ExecStart=/bin/bash %h/agent-os/bin/run_delivery_dashboard.sh
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

@@ -1,3 +1,4 @@
 PyYAML>=6.0
 pytest>=8.0
 duckduckgo-search>=7.0
+proof @ git+https://github.com/kai-linux/proof.git@1daeef95bd820cf1f0e93d4daf6f3211cf092446

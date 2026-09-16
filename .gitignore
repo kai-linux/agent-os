@@ -217,6 +217,7 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 .agent_result.md
+.agent_actions.json
 PLANNING_RESEARCH.md
 PLANNING_SIGNALS.md
 PRODUCT_INSPECTION.md

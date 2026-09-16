@@ -371,6 +371,17 @@ def evaluate_system_architect(cfg: dict) -> dict:
                     )
                 )
 
+    operational = {"state": "unobserved", "alerts": [], "note": "Component inventory is not behavioral readiness."}
+    from orchestrator.delivery_store import store_path
+    if store_path(cfg).exists():
+        try:
+            from orchestrator.delivery_metrics import operational_snapshot
+            snapshot = operational_snapshot(cfg)
+            operational = {"state": "observed" if snapshot["metrics"]["attempts"] else "unobserved",
+                           "alerts": snapshot["alerts"], "metrics": snapshot["metrics"],
+                           "observed_at": snapshot["observed_at"]}
+        except Exception as exc:
+            operational = {"state": "unavailable", "alerts": [], "error": type(exc).__name__}
     capability_gaps = [f for f in findings if f.get("kind") == "capability_gap"]
     sensor_gaps = [f for f in findings if f.get("kind") == "sensor_gap"]
     return {
@@ -379,6 +390,7 @@ def evaluate_system_architect(cfg: dict) -> dict:
         "target_model_path": str(target_path),
         "cadence_days": float(resolve_system_architect_config(cfg, repo).get("cadence_days") or DEFAULT_CADENCE_DAYS),
         "current_state": current,
+        "operational_assessment": operational,
         "findings": findings,
         "capability_gaps": capability_gaps,
         "sensor_gaps": sensor_gaps,

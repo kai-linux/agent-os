@@ -14,6 +14,13 @@ objectives_dir: "~/agent-os/objectives"
 evidence_dir: "~/.local/share/agent-os/evidence"
 
 automation_mode: full # choose dispatcher_only to skip the sprint loop
+planning_policy: scoped_delivery # accepted goals only; legacy_growth explicitly opts into speculative planner/groomer work
+
+# Optional reservation per worker attempt, shared across each goal's ancestry.
+# Required when a Delivery Contract declares budget_usd. Reservations are not actual provider charges.
+delivery_attempt_reservation_usd: 0
+delivery_actions: {} # Operator-installed fixed-argv adapters; see docs/delivery.md
+delivery_verifiers: {} # Independent allowlisted checks; never shell text from issue bodies
 
 # Optional explicit overrides when the default objectives_dir lookup is not enough.
 # repo_objectives:
@@ -41,6 +48,8 @@ max_parallel_workers: 1
 test_timeout_minutes: 5             # Timeout for test commands (default: 5)
 
 dashboard_bind_address: "127.0.0.1" # Set to a non-local address only with dashboard_auth_backend configured
+# dashboard_allowed_hosts: ["agent-os.example.internal"]
+# dashboard_trusted_proxies: ["127.0.0.1", "::1"] # Only these peers may supply Tailscale identity headers
 # dashboard_auth_backend: "tailscale" # "tailscale" or "shared_secret"
 # dashboard_allowed_users:
 #   - "operator@example.com"

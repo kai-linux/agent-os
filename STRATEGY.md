@@ -4,20 +4,24 @@
 
 ## Product Vision
 
-Agent OS should win by being the most credible autonomous software
-organization for technical founders and solo builders.
+Agent-OS should persistently manage human intent from agreed scope to verified
+delivery, including complete projects and programs across coding and non-coding
+work. GitHub is a planning interface; it is not the boundary of execution.
 
-The strategic target is GitHub stars as the primary proxy for trusted adoption.
-Stars measure whether technical builders find Agent OS credible enough to
-bookmark. Growing stars requires: clear proof the system works, fast activation,
-a compelling demo, and a README that sells in 10 seconds.
+The mandate is scoped delivery, not autonomous backlog growth. Preserve the
+original intent, own the full dependency graph, keep explicit budgets and
+authority, and verify outcomes at their intended targets. Report uncertainty and
+specific human decisions without discarding completed work or repeating side
+effects. Acceptance of child work does not establish program acceptance.
 
-Sprint selection should balance:
+Measure verified delivery, elapsed time, retries, human intervention, resource
+coverage and operational reliability. Missing evidence is not success; unknown
+provider spending is not zero. GitHub stars and repository activity are not
+proxies for fulfillment of a person's intent.
 
-- adoption and credibility work (demos, README, quickstart, public proof) — at least 40% of sprint capacity
-- execution reliability and recovery quality — as needed to maintain trust
-- evidence-driven planning including external adoption metrics (stars, forks, traffic)
-- structural fixes that prevent the system from only optimizing its own plumbing
+The default planning policy is `scoped_delivery`. The earlier growth planner is
+available only through explicit `planning_policy: legacy_growth` configuration.
+The sprint history below is historical context, not the current mandate.
 
 ## Current Focus Areas
 
@@ -634,4 +638,3 @@ PRs merged:
 
 **Plan:**
 - [prio:high] Bootstrap STRATEGY.md from repo state: This week should establish product foundations, and an auto-generated initial strategy closes the biggest planning gap by giving the strategic planner a durable source of direction instead of operating without a strategy document.
-

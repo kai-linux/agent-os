@@ -5,19 +5,20 @@ import json
 import os
 import subprocess
 
-DECOMPOSE_PROMPT = """You are a task decomposer for an AI coding agent orchestrator.
+DECOMPOSE_PROMPT = """You plan scoped delivery for a persistent autonomous operator.
 Given a GitHub issue, decide whether it is an ATOMIC task (single well-defined deliverable)
 or an EPIC (multiple independent deliverables that should be worked on separately).
 
 Rules:
 - An issue is ATOMIC if it has a single clear goal that can be completed in one work session.
-- An issue is EPIC only if it clearly contains 2+ independent deliverables that do NOT
-  depend on each other's implementation details to be useful.
+- Projects and programs are EPICs with owned work packages, milestones and dependencies.
+- Preserve the entire requested scope. Include integration, acceptance and delivery work.
+- Work packages may depend on each other; name those dependencies explicitly.
 - Do NOT split issues that are already well-scoped, even if large.
 - Do NOT split issues just because they have multiple success criteria — those may all
   relate to a single deliverable.
-- When splitting, create at most 5 sub-issues.
-- Each sub-issue must be self-contained and independently deliverable.
+- Create at most 20 work packages. Larger programs should first split into projects.
+- Each work package must state a deliverable and how its contribution is verified.
 - Order sub-issues by logical priority (most foundational first).
 
 Return ONLY valid JSON (no markdown fences, no commentary) with exactly this structure:
@@ -26,8 +27,8 @@ For ATOMIC tasks:
 {{"type": "atomic"}}
 
 For EPIC tasks:
-{{"type": "epic", "sub_issues": [
-  {{"title": "Short descriptive title", "body": "## Goal\\n\\nClear goal\\n\\n## Success Criteria\\n\\n- Criterion 1\\n- Criterion 2\\n\\n## Constraints\\n\\n- Prefer minimal diffs"}},
+{{"type": "epic", "kind": "project", "sub_issues": [
+  {{"key": "1", "kind": "task", "depends_on": [], "title": "Short descriptive title", "body": "## Goal\\n\\nClear goal\\n\\n## Success Criteria\\n\\n- Criterion 1\\n- Criterion 2"}},
   ...
 ]}}
 
@@ -90,21 +91,24 @@ def decompose_issue(title: str, body: str, model: str | None = None) -> dict | N
         if not sub_issues or not isinstance(sub_issues, list):
             return {"type": "atomic"}
 
-        # Cap at 5 sub-issues
-        sub_issues = sub_issues[:5]
+        if len(sub_issues) > 20:
+            raise ValueError("Plan exceeds 20 work packages; do not silently discard requested scope")
 
         # Validate each sub-issue has title and body
         validated = []
         for si in sub_issues:
+            if not isinstance(si, dict):
+                raise ValueError("Every work package must be an object")
             t = str(si.get("title", "")).strip()
             b = str(si.get("body", "")).strip()
-            if t and b:
-                validated.append({"title": t, "body": b})
+            if not t or not b:
+                raise ValueError("Incomplete work package; reject the plan instead of dropping scope")
+            validated.append({**si, "title": t, "body": b})
 
         if len(validated) < 2:
             return {"type": "atomic"}
 
-        return {"type": "epic", "sub_issues": validated}
+        return {"type": "epic", "kind": data.get("kind", "project"), "sub_issues": validated}
 
     except Exception as e:
         print(f"Warning: task decomposition failed ({e}), treating as atomic")

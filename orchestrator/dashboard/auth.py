@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hmac
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
@@ -130,7 +131,7 @@ class DashboardAuth:
             if scheme.lower() != "bearer":
                 return None
             token = token.strip()
-            if token and token == self.shared_secret:
+            if token and hmac.compare_digest(token, self.shared_secret):
                 return DashboardActor(actor="shared_secret", backend=SHARED_SECRET_BACKEND)
             return None
 

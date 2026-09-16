@@ -443,6 +443,21 @@ Original issue: #{issue_number}
 
 def sync_result(meta: dict, result: dict, commit_hash: str | None):
     cfg = load_config()
+    if meta.get("goal_id"):
+        from orchestrator.delivery_store import DeliveryStore, store_path
+        from orchestrator.delivery_checks import verify_goal
+        store = DeliveryStore(store_path(cfg))
+        store.bind_execution(meta["goal_id"], meta["goal_revision"], {
+            "branch": meta.get("branch"), "prepared_commit": commit_hash,
+        })
+        if meta.get("github_repo") and commit_hash and result.get("status") == "complete" and not verify_goal(store, meta["goal_id"], cfg):
+            store.bind_execution(meta["goal_id"], meta["goal_revision"], {"pr_delivery_pending": True})
+            pr_url = create_pr_for_branch(meta["github_repo"], meta["branch"],
+                f"Agent: {meta['task_id']}", f"Closes #{meta['github_issue_number']}\n\nGoal: {meta['goal_id']} revision {meta['goal_revision']}")
+            if not pr_url:
+                raise RuntimeError("Prepared work is pushed, but PR delivery has not been acknowledged")
+            store.bind_execution(meta["goal_id"], meta["goal_revision"], {"pr_url": pr_url, "pr_delivery_pending": False})
+        return {"delivery_managed": True}
 
     project_key = meta.get("github_project_key")
     repo = meta.get("github_repo")
