@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -583,8 +584,8 @@ def build_mailbox_task(cfg: dict, project_key: str, repo_cfg: dict, issue: dict)
         },
     )
 
-    criteria = parsed["success_criteria"] or "- Match the issue goal\n- Keep the diff minimal\n- Leave a valid .agent_result.md"
-    constraints = parsed["constraints"] or "- Work only inside the repo\n- Prefer minimal diffs"
+    criteria = raw_parsed.get("success_criteria") or "- Demonstrate the original requested outcome at its intended target."
+    constraints = raw_parsed.get("constraints") or "- Preserve the original scope and delegated authority."
     context = parsed["context"] or "None"
 
     # Determine priority from issue labels (prio:high / prio:normal / prio:low)
@@ -631,6 +632,15 @@ def build_mailbox_task(cfg: dict, project_key: str, repo_cfg: dict, issue: dict)
         "prompt_snapshot_path": str(Path(cfg.get("root_dir", Path.cwd())) / "runtime" / "prompts" / f"{task_id}.txt"),
         "outcome_check_ids": parsed.get("outcome_checks", []),
     }
+    if cfg.get("root_dir"):
+        from orchestrator.delivery_contract import register_issue, issue_source
+        from orchestrator.delivery_store import DeliveryStore, goal_id, store_path
+        parent = re.search(r"(?im)^Part of (?:(\S+/\S+))?#(\d+)\s*$", body_text)
+        parent_id = goal_id(issue_source(parent[1] or repo_cfg["github_repo"], int(parent[2]))) if parent else None
+        goal = register_issue(cfg, project_key, repo_cfg, issue, task_type, parent_id=parent_id)
+        frontmatter.update(goal_id=goal["id"], goal_revision=goal["revision"])
+        if goal["metadata"].get("mailbox_payload"):
+            return goal["metadata"]["task_id"], goal["metadata"]["mailbox_payload"]
     for key in ("objective_id", "sprint_id", "parent_issue", "parent_goal_summary"):
         value = str(ancestry.get(key) or "").strip()
         if value:
@@ -668,7 +678,7 @@ def build_mailbox_task(cfg: dict, project_key: str, repo_cfg: dict, issue: dict)
 
 # Goal
 
-{parsed["goal"] or title}
+{raw_parsed.get("goal") or title}
 
 # Success Criteria
 
@@ -683,7 +693,23 @@ def build_mailbox_task(cfg: dict, project_key: str, repo_cfg: dict, issue: dict)
 # Context
 
 {context}
+
+# Original Human Request
+
+{title}
+
+{body_text}
+
+# Interpretation (proposed, not authority)
+
+{parsed.get("goal", title)}
+
+Assumptions: {json.dumps(parsed.get("assumptions", []))}
+Questions: {json.dumps(parsed.get("questions", []))}
 """
+    if frontmatter.get("goal_id"):
+        DeliveryStore(store_path(cfg)).bind_execution(frontmatter["goal_id"], frontmatter["goal_revision"],
+                                                       {"task_id": task_id, "mailbox_payload": body})
     return task_id, body
 
 
@@ -1130,6 +1156,9 @@ def _escalate_over_retried_blocked_tasks(cfg: dict, paths: dict) -> bool:
         except Exception:
             continue
 
+        if meta.get("goal_id"):
+            continue  # The delivery coordinator owns waits, controls and notices.
+
         repo_full = str(meta.get("github_repo", "")).strip()
         issue_number = meta.get("github_issue_number")
         project_key = str(meta.get("github_project_key", "")).strip()
@@ -1267,6 +1296,9 @@ def _escalate_unassigned_blocked_tasks(cfg: dict, paths: dict) -> bool:
         try:
             meta, body = _parse_mailbox_task(task_path)
         except Exception:
+            continue
+
+        if meta.get("goal_id"):
             continue
 
         if str(meta.get("agent", "")).strip().lower() != "none":
@@ -1424,6 +1456,8 @@ def _apply_retry_decision_to_task(
     body: str,
     decision: dict,
 ):
+    if meta.get("goal_id"):
+        return  # Legacy model-written retry decisions cannot change delegated scope.
     meta = dict(meta)
     meta["escalation_note"] = note_path.name
     meta["escalation_decision"] = decision["action"]
@@ -1818,7 +1852,7 @@ def _skip_ci_artifacts_missing(
     )
 
 
-def _reconcile_closed_items_to_done(queried):
+def _reconcile_closed_items_to_done(queried, cfg=None):
     """Set project status to Done for any CLOSED issue whose board status drifted.
 
     Closed issues never dispatch (get_ready_items filters state==OPEN), but the
@@ -1835,6 +1869,14 @@ def _reconcile_closed_items_to_done(queried):
         for item in info.get("items", []):
             if item.get("state") != "CLOSED":
                 continue
+            if cfg and item.get("repo") and item.get("number"):
+                from orchestrator.delivery_contract import issue_source
+                from orchestrator.delivery_store import DeliveryConflict, DeliveryStore, goal_id, store_path
+                try:
+                    DeliveryStore(store_path(cfg)).get(goal_id(issue_source(item["repo"], item["number"])))
+                    continue
+                except DeliveryConflict:
+                    pass
             if item.get("status") == "Done":
                 continue
             try:
@@ -1845,7 +1887,7 @@ def _reconcile_closed_items_to_done(queried):
                 print(f"Warning: failed to reconcile {item.get('repo','?')}#{item.get('number','?')}: {e}")
 
 
-def _requeue_unblocked_items(queried, repo_to_project, issue_lookup):
+def _requeue_unblocked_items(queried, repo_to_project, issue_lookup, cfg=None):
     for info, _ready_items in queried.values():
         for item in info.get("items", []):
             if item.get("state") != "OPEN":
@@ -1854,6 +1896,14 @@ def _requeue_unblocked_items(queried, repo_to_project, issue_lookup):
             repo_full = item.get("repo")
             if repo_full not in repo_to_project:
                 continue
+            if cfg:
+                from orchestrator.delivery_store import DeliveryConflict, DeliveryStore, goal_id, store_path
+                from orchestrator.delivery_contract import issue_source
+                try:
+                    DeliveryStore(store_path(cfg)).get(goal_id(issue_source(repo_full, item["number"])))
+                    continue
+                except DeliveryConflict:
+                    pass
 
             _project_key, project_cfg, _repo_cfg = repo_to_project[repo_full]
             blocked_value = project_cfg.get("blocked_value", "Blocked")
@@ -1879,6 +1929,34 @@ def _try_decompose(cfg, repo_full, item, info, pcfg) -> list[dict] | None:
     Returns list of created child issue dicts (first = to dispatch, rest = backlog),
     or None if the issue is atomic or decomposition fails.
     """
+    if cfg.get("root_dir"):
+        from orchestrator.delivery_contract import issue_contract, issue_source, register_issue
+        from orchestrator.delivery_store import DeliveryConflict, DeliveryStore, goal_id, store_path
+        from orchestrator.delivery_program import manage_decomposition
+        store = DeliveryStore(store_path(cfg))
+        try:
+            parent = store.get(goal_id(issue_source(repo_full, item["number"])))
+        except DeliveryConflict:
+            parent = None
+        project_key, repo_cfg = next((pk, r) for pk, p in cfg["github_projects"].items()
+                                    for r in p.get("repos", []) if r["github_repo"] == repo_full)
+        if parent is None and issue_contract(item, repo_cfg, "architecture")[0] != "task":
+            parent = register_issue(cfg, project_key, repo_cfg, item, "architecture")
+        if parent and parent["metadata"].get("plan_materialized"):
+            return []
+        plan = ({"type": "epic", "kind": parent["kind"], "sub_issues": parent["metadata"]["delivery_plan"]}
+                if parent and parent["metadata"].get("delivery_plan") else
+                decompose_issue(item["title"], item["body"], model=cfg.get("decomposer_model")))
+        if plan is None or plan["type"] == "atomic":
+            if parent and parent["kind"] != "task":
+                tries = int(parent["metadata"].get("planning_attempts", 0)) + 1
+                store.bind_execution(parent["id"], parent["revision"], {"planning_attempts": tries})
+                store.wait(parent["id"], parent["revision"], "A project/program requires a delivery plan; decomposition did not produce one",
+                           wake_at=time.time() + 300 if tries < 3 else None)
+                return []
+            return None
+        return manage_decomposition(cfg, repo_full, item, plan, project_key)
+
     decomposer_model = cfg.get("decomposer_model")
     result = decompose_issue(item["title"], item["body"], model=decomposer_model)
     if result is None or result["type"] == "atomic":
@@ -1923,12 +2001,7 @@ def _try_decompose(cfg, repo_full, item, info, pcfg) -> list[dict] | None:
         f"🤖 Decomposed into sub-issues:\n\n{child_list}\n\nDispatching #{created[0]['number']} first.",
     )
 
-    # Close the parent epic (work is tracked in sub-issues now)
-    try:
-        gh(["issue", "close", str(item["number"]), "-R", repo_full,
-            "--comment", "Closed — tracked via sub-issues above."], check=False)
-    except Exception as e:
-        print(f"Warning: failed to close parent #{item['number']}: {e}")
+    # Decomposition does not satisfy the parent's acceptance criteria.
 
     # Send remaining sub-issues (index 1+) to Backlog
     backlog_value = pcfg.get("backlog_value", "Backlog")
@@ -1998,6 +2071,9 @@ def _dispatch_item(cfg, paths, owner, repo_to_project, info, ready_items, issue_
             continue
 
         pk, pcfg, rcfg = repo_to_project[repo_full]
+        from orchestrator.delivery_program import dispatchable
+        if not dispatchable(cfg, repo_full, item["number"]):
+            continue
 
         # Per-repo Telegram switch — operator can pause a single repo without
         # touching config or the global kill-switch.
@@ -2062,17 +2138,21 @@ def _dispatch_item(cfg, paths, owner, repo_to_project, info, ready_items, issue_
         # --- Task decomposition: split epics into sub-issues ---
         decomp = _try_decompose(cfg, repo_full, item, info, pcfg)
         if decomp is not None:
+            if not decomp:
+                continue
             # Epic was decomposed — dispatch the first sub-issue
             first_child = decomp[0]
+            child_repo = first_child.get("repo", repo_full)
+            child_pk, child_pcfg, child_rcfg = repo_to_project[child_repo]
             child_issue = {
                 "number": first_child["number"],
                 "title": first_child["title"],
                 "body": first_child.get("body", ""),
                 "url": first_child["url"],
-                "labels": [{"name": l} for l in item["labels"]],
+                "labels": [{"name": l} for l in item["labels"] if not l.startswith("task:")],
             }
             try:
-                task_id, task_md = build_mailbox_task(cfg, pk, rcfg, child_issue)
+                task_id, task_md = build_mailbox_task(cfg, child_pk, child_rcfg, child_issue)
             except ValueError as exc:
                 _skip_agent_unavailable(repo_full, first_child, info, pcfg, exc)
                 print(f"Skipped {repo_full}#{first_child['number']} — {AGENT_UNAVAILABLE_CODE}: {exc}")
@@ -2081,11 +2161,11 @@ def _dispatch_item(cfg, paths, owner, repo_to_project, info, ready_items, issue_
             task_path.write_text(task_md, encoding="utf-8")
 
             edit_issue_labels(
-                repo_full, first_child["number"],
-                add=["in-progress", "agent-dispatched"],
+                child_repo, first_child["number"],
+                add=["agent-dispatched"],
             )
             add_issue_comment(
-                repo_full, first_child["number"],
+                child_repo, first_child["number"],
                 f"🤖 Dispatched to orchestrator.\n\nTask ID: `{task_id}`\nProject key: `{pk}`",
             )
             print(f"Dispatched (decomposed child) {repo_full}#{first_child['number']} -> {task_path}")
@@ -2113,7 +2193,7 @@ def _dispatch_item(cfg, paths, owner, repo_to_project, info, ready_items, issue_
         edit_issue_labels(
             repo_full,
             item["number"],
-            add=["in-progress", "agent-dispatched"],
+            add=["agent-dispatched"] if "goal_id:" in task_md else ["in-progress", "agent-dispatched"],
             remove=pcfg.get("required_labels", []),
         )
 
@@ -2126,7 +2206,8 @@ def _dispatch_item(cfg, paths, owner, repo_to_project, info, ready_items, issue_
         # Set project Status to In Progress
         in_progress_value = pcfg.get("in_progress_value", "In Progress")
         try:
-            _set_project_status(info, item["item_id"], in_progress_value)
+            if "goal_id:" not in task_md:
+                _set_project_status(info, item["item_id"], in_progress_value)
         except Exception as e:
             print(f"Warning: failed to set project status: {e}")
 
@@ -2186,6 +2267,8 @@ def _close_untrusted_issues(cfg: dict):
 def dispatch_one():
     cfg = load_config()
     paths = runtime_paths(cfg)
+    from orchestrator.delivery import tick as delivery_tick
+    delivery_tick(cfg)
     owner = cfg["github_owner"]
 
     # Housekeeping: close issues from untrusted authors
@@ -2213,10 +2296,10 @@ def dispatch_one():
             graphql_ok = False
             continue
 
-    _reconcile_closed_items_to_done(queried)
+    _reconcile_closed_items_to_done(queried, cfg)
 
     issue_lookup = _build_issue_lookup(queried)
-    _requeue_unblocked_items(queried, repo_to_project, issue_lookup)
+    _requeue_unblocked_items(queried, repo_to_project, issue_lookup, cfg)
     if _escalate_unassigned_blocked_tasks(cfg, paths):
         return
     if _escalate_over_retried_blocked_tasks(cfg, paths):
@@ -2243,6 +2326,9 @@ def dispatch_one():
                     continue
                 issues = list_ready_issues(repo_full, limit=20)
                 for issue in issues:
+                    from orchestrator.delivery_program import dispatchable
+                    if not dispatchable(cfg, repo_full, issue["number"]):
+                        continue
                     author = (issue.get("author") or {}).get("login", "")
                     if not is_trusted(author, cfg):
                         print(f"Skipped #{issue['number']} — untrusted author: {author!r}")
@@ -2287,7 +2373,7 @@ def dispatch_one():
                     task_path.write_text(task_md, encoding="utf-8")
                     edit_issue_labels(
                         repo_full, issue["number"],
-                        add=["in-progress", "agent-dispatched"],
+                        add=["agent-dispatched"] if "goal_id:" in task_md else ["in-progress", "agent-dispatched"],
                         remove=project_cfg.get("required_labels", []),
                     )
                     add_issue_comment(

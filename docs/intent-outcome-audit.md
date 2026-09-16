@@ -1,5 +1,11 @@
 # From Tasks to Persistent Intent
 
+Implementation follow-up: [Persistent Delivery And Operations](delivery.md)
+describes the new goal controller, program hierarchy, evidence gates, bounded
+actions, durable notifications and Proof dashboard. The findings below remain
+the historical audit baseline; the follow-up documents implemented behavior,
+tests and residual boundaries rather than declaring every capability proven.
+
 ## Scope and Verdict
 
 Audit date: 2026-09-16. Source baseline: `94fd9b3` on `origin/main`.

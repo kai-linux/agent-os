@@ -2167,6 +2167,11 @@ def groom_repo(cfg: dict, github_slug: str, repo_path: Path) -> dict:
 
 def run():
     cfg = load_config()
+    if cfg.get("planning_policy", "scoped_delivery") == "scoped_delivery":
+        from orchestrator.delivery import tick
+        tick(cfg)
+        print("Scoped delivery: accepted goals own follow-through; no unscoped backlog generation.")
+        return
     with job_lock(cfg, "backlog_groomer") as acquired:
         if not acquired:
             print("Backlog groomer already running; skipping overlapping cron invocation.")

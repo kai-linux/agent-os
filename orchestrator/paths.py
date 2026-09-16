@@ -43,6 +43,9 @@ def load_config():
     cfg.setdefault("max_processing_minutes", 30)
     cfg.setdefault("stall_watchdog_interval_minutes", 5)
     cfg.setdefault("automation_mode", "full")
+    cfg.setdefault("planning_policy", "scoped_delivery")
+    if cfg["planning_policy"] not in {"scoped_delivery", "legacy_growth"}:
+        raise ValueError("planning_policy must be scoped_delivery or explicitly opted-in legacy_growth")
     cfg.setdefault("dashboard_bind_address", "127.0.0.1")
     cfg.setdefault("github_owner", "")
     cfg.setdefault("github_projects", {})

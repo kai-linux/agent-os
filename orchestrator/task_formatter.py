@@ -8,7 +8,7 @@ from pathlib import Path
 import subprocess
 import re
 
-FORMAT_PROMPT = """You are a task formatter for an AI coding agent orchestrator.
+FORMAT_PROMPT = """You structure human intent for a persistent delivery system.
 Given a raw GitHub issue (which may be poorly formatted notes, a quick one-liner,
 or a well-structured spec), extract and structure it into a clean task specification.
 
@@ -19,17 +19,19 @@ Return ONLY valid JSON (no markdown fences, no commentary) with exactly these fi
   "success_criteria": "- Criterion 1\\n- Criterion 2\\n- Criterion 3",
   "task_type": "implementation",
   "agent_preference": "auto",
-  "constraints": "- Constraint 1\\n- Prefer minimal diffs",
-  "context": "Any additional context, or None"
+  "constraints": "Only constraints actually stated by the requester",
+  "context": "Any additional context, or None",
+  "assumptions": ["Clearly mark any interpretation not explicitly stated"],
+  "questions": ["Only questions whose answers materially change scope or authority"]
 }}
 
 Rules:
 - goal: expand terse notes into a clear, actionable objective. Keep the original intent.
-- success_criteria: infer 2-4 concrete, testable criteria from the goal if not stated.
-- task_type: one of implementation, debugging, architecture, research, docs, browser_automation, design, content.
+- success_criteria: extract stated criteria. Proposed criteria are assumptions, never new requirements.
+- task_type: one of implementation, debugging, architecture, research, docs, browser_automation, design, content, project, program.
   Infer from the nature of the work.
 - agent_preference: "auto" unless the issue explicitly names an agent.
-- constraints: always include "Prefer minimal diffs". Add others only if stated or clearly implied.
+- constraints: preserve stated constraints, authority and exclusions. Do not assume work is coding.
 - context: preserve any useful background info. Write "None" if there is nothing extra.
 - Do NOT add scope or features that were not implied by the issue.
 
@@ -83,8 +85,10 @@ def format_task(title: str, body: str, model: str | None = None) -> dict | None:
             "success_criteria": str(data.get("success_criteria", "")).strip(),
             "task_type": str(data.get("task_type", "implementation")).strip().lower(),
             "agent_preference": str(data.get("agent_preference", "auto")).strip().lower(),
-            "constraints": str(data.get("constraints", "- Prefer minimal diffs")).strip(),
+            "constraints": str(data.get("constraints", "")).strip(),
             "context": str(data.get("context", "None")).strip(),
+            "assumptions": data.get("assumptions", []) if isinstance(data.get("assumptions", []), list) else [],
+            "questions": data.get("questions", []) if isinstance(data.get("questions", []), list) else [],
         }
     except Exception as e:
         print(f"Warning: LLM formatting failed ({e}), falling back to raw parse")

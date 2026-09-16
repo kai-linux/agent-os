@@ -44,7 +44,7 @@ class TestDecomposeIssue:
         assert len(result["sub_issues"]) == 2
         assert result["sub_issues"][0]["title"] == "Part A"
 
-    def test_epic_capped_at_5(self):
+    def test_epic_preserves_scope_beyond_five_work_packages(self):
         payload = {
             "type": "epic",
             "sub_issues": [
@@ -56,7 +56,7 @@ class TestDecomposeIssue:
             run.return_value = _mock_claude_run(json.dumps(payload))
             result = decompose_issue("Huge epic", "Many things")
         assert result["type"] == "epic"
-        assert len(result["sub_issues"]) == 5
+        assert len(result["sub_issues"]) == 8
 
     def test_single_sub_issue_treated_as_atomic(self):
         payload = {
@@ -93,7 +93,7 @@ class TestDecomposeIssue:
             result = decompose_issue("Fenced", "Body")
         assert result == {"type": "atomic"}
 
-    def test_missing_body_in_sub_issue_filtered(self):
+    def test_missing_body_rejects_plan_instead_of_dropping_scope(self):
         payload = {
             "type": "epic",
             "sub_issues": [
@@ -105,8 +105,7 @@ class TestDecomposeIssue:
         with mock.patch("orchestrator.task_decomposer.subprocess.run") as run:
             run.return_value = _mock_claude_run(json.dumps(payload))
             result = decompose_issue("Mixed", "Body")
-        assert result["type"] == "epic"
-        assert len(result["sub_issues"]) == 2
+        assert result is None
 
 
 # ---------------------------------------------------------------------------

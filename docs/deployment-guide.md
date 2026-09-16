@@ -10,6 +10,12 @@ has earned it.
 
 ## Recommended Rollout
 
+The default planning policy is now `scoped_delivery`: execute and reconcile
+accepted commitments instead of inventing growth backlog. See
+[persistent delivery and operations](delivery.md) for project/program contracts,
+the private KPI dashboard, migration and security boundaries. Dispatcher-only
+still leaves PR review/merge to the operator; preparation is not verified delivery.
+
 For a new external repo, the safest path is:
 
 1. Run the demo and confirm the toolchain works.

@@ -452,6 +452,7 @@ def test_run_does_not_send_telegram_for_due_skips_only(tmp_path, monkeypatch):
 
 def test_run_sends_telegram_when_repo_created_items(tmp_path, monkeypatch):
     cfg = {
+        "planning_policy": "legacy_growth",
         "root_dir": str(tmp_path),
         "github_owner": "owner",
         "github_projects": {
@@ -480,6 +481,16 @@ def test_run_sends_telegram_when_repo_created_items(tmp_path, monkeypatch):
     bg.run()
 
     assert len(sent) == 1
+
+
+def test_default_policy_manages_accepted_scope_not_speculative_growth(tmp_path, monkeypatch):
+    cfg = {"root_dir": str(tmp_path)}
+    monkeypatch.setattr(bg, "load_config", lambda: cfg)
+    calls = []
+    monkeypatch.setattr("orchestrator.delivery.tick", lambda config: calls.append(config))
+    monkeypatch.setattr(bg, "groom_repo", lambda *args: pytest.fail("Unexpected speculative work"))
+    bg.run()
+    assert calls == [cfg]
 
 
 def test_call_haiku_falls_back_to_codex_when_claude_fails(monkeypatch):

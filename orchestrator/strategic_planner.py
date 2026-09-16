@@ -3985,6 +3985,11 @@ def apply_plan_promotions(
 def run():
     cfg = load_config()
     paths = runtime_paths(cfg)
+    if cfg.get("planning_policy", "scoped_delivery") == "scoped_delivery":
+        from orchestrator.delivery import tick
+        tick(cfg)
+        print("Scoped delivery: manage accepted program commitments; no speculative growth sprint.")
+        return
     with job_lock(cfg, "strategic_planner") as acquired:
         if not acquired:
             print("Strategic planner already running; skipping overlapping cron invocation.")
