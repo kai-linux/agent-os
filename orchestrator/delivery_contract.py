@@ -18,13 +18,17 @@ from orchestrator.delivery_store import (
 CODE_TASKS = {"implementation", "debugging", "architecture", "docs"}
 
 
-def _attach_dependencies(store, goal):
+def _attach_dependencies(store, goal, cfg):
     try:
         for dependency in goal["contract"].get("depends_on", []):
             ref = str(dependency)
+            dependency_id = ref if ref.startswith("g-") else goal_id("github:" + ref.lower())
+            from orchestrator.reliability import enforced, tenant_for
+            if enforced(cfg) and tenant_for(cfg, store.get(dependency_id)) != tenant_for(cfg, goal):
+                raise DeliveryConflict("Dependency belongs to another tenant")
             store.depend(
                 goal["id"],
-                ref if ref.startswith("g-") else goal_id("github:" + ref.lower()),
+                dependency_id,
             )
     except DeliveryConflict as exc:
         store.wait(
@@ -165,7 +169,7 @@ def register_issue(
             raise DeliveryConflict(
                 "Existing goal belongs to a different scope baseline"
             )
-        _attach_dependencies(store, existing)
+        _attach_dependencies(store, existing, cfg)
         return existing
     kind, contract = issue_contract(issue, repo_cfg, task_type)
     if kind_override and kind != kind_override:
@@ -187,6 +191,11 @@ def register_issue(
         "workspace": repo_cfg["local_repo"],
         "task_type": task_type,
     }
+    from orchestrator.reliability import tenant_for, enforced
+    if enforced(cfg):
+        tenant = tenant_for(cfg, {"metadata": metadata})
+        if parent_id and tenant_for(cfg, store.get(parent_id)) != tenant:
+            raise DeliveryConflict("Parent and child must belong to the same tenant")
     goal = store.upsert(
         source,
         issue["title"],
@@ -197,22 +206,24 @@ def register_issue(
         parent_id=parent_id,
         ready=ready,
     )
-    _attach_dependencies(store, goal)
+    _attach_dependencies(store, goal, cfg)
     return goal
 
 
-def delivery_prompt(root, meta):
+def delivery_prompt(root, meta, cfg=None):
     if not meta.get("goal_id"):
         return ""
     store = DeliveryStore(store_path({"root_dir": str(root)}))
     context = store.context(meta["goal_id"])
     goal = context["lineage"][0]
+    from orchestrator.reliability import memory_context
+    retained = memory_context(cfg, goal) if cfg else ""
     lineage = "\n".join(
         f"- {g['kind']} {g['id']}: {g['title']}" for g in reversed(context["lineage"])
     )
     decisions = "\n".join(e["payload"] for e in context["decisions"])
     return (
-        f"\n# Persistent Delivery Contract\nGoal: {goal['id']} revision {goal['revision']}\n"
+        retained + f"\n# Persistent Delivery Contract\nGoal: {goal['id']} revision {goal['revision']}\n"
         f"{lineage}\n\nOriginal human request (authoritative):\n{goal['original']}\n\n"
         f"Operator contract:\n{yaml.safe_dump(goal['contract'], sort_keys=False)}\n"
         f"Sourced decisions and observations:\n{decisions or 'None recorded'}\n"

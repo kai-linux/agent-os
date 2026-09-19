@@ -209,6 +209,18 @@ def observe(check, goal, cfg):
         repo = goal["metadata"].get("github_repo")
         if repo not in command.get("repos", []):
             raise ValueError("Verifier is not allowed for this workspace")
+        from orchestrator.reliability import enforced, profile, profile_for
+        if enforced(cfg):
+            from orchestrator.worker_isolation import bounded_command, sandbox_command
+            cwd = goal["metadata"].get("worktree") or goal["metadata"]["workspace"]
+            policy = {**profile(cfg, profile_for(cfg, goal))["sandbox"], "env_keys": []}
+            argv, env = sandbox_command(command["argv"], cwd, policy, controller_root=cfg.get("root_dir"))
+            try:
+                bounded_command(argv, cwd=cwd, env=env, timeout=min(300, int(command.get("timeout_seconds", 60))))
+                code = 0
+            except subprocess.CalledProcessError as exc:
+                code = exc.returncode
+            return code == 0, {"type": kind, "name": name, "returncode": code, "isolated": True}
         result = subprocess.run(
             command["argv"],
             cwd=goal["metadata"].get("worktree") or goal["metadata"]["workspace"],
@@ -227,6 +239,13 @@ def observe(check, goal, cfg):
 
 
 def verify_goal(store, ident, cfg):
+    from orchestrator.reliability_store import ReliabilityStore
+    records, goal = ReliabilityStore(cfg), store.get(ident)
+    with records.span(goal, "verification", parent=records.worker_parent(goal)):
+        return _verify_goal(store, ident, cfg)
+
+
+def _verify_goal(store, ident, cfg):
     goal = store.get(ident)
     if goal["state"] in {"succeeded", "failed", "cancelled", "paused", "backlog"}:
         return goal["state"] == "succeeded"

@@ -559,7 +559,8 @@ def build_mailbox_task(cfg: dict, project_key: str, repo_cfg: dict, issue: dict)
     raw_parsed = parse_issue_body(body_text)
     # Try LLM formatting first, then fill any missing control fields from the raw issue body.
     formatter_model = cfg.get("formatter_model")
-    parsed = format_task(title, body_text, model=formatter_model)
+    from orchestrator.reliability import enforced
+    parsed = None if enforced(cfg) else format_task(title, body_text, model=formatter_model)
     if parsed is None:
         parsed = raw_parsed
     else:
@@ -605,7 +606,11 @@ def build_mailbox_task(cfg: dict, project_key: str, repo_cfg: dict, issue: dict)
             agent = lbl
             break
     task_type = parsed["task_type"] or cfg["default_task_type"]
-    agent = _validated_agent_assignment(cfg, project_key, task_type, agent)
+    if enforced(cfg):
+        from orchestrator.reliability import worker_adapter
+        agent = worker_adapter(cfg, {"github_repo": repo_cfg["github_repo"], "task_type": task_type})
+    else:
+        agent = _validated_agent_assignment(cfg, project_key, task_type, agent)
 
     frontmatter = {
         "task_id": task_id,
@@ -1944,6 +1949,16 @@ def _try_decompose(cfg, repo_full, item, info, pcfg) -> list[dict] | None:
             parent = register_issue(cfg, project_key, repo_cfg, item, "architecture")
         if parent and parent["metadata"].get("plan_materialized"):
             return []
+        from orchestrator.reliability import enforced
+        if enforced(cfg):
+            if parent is None:
+                return None
+            from orchestrator.delivery_program import qualified_plan
+            plan = ({"type": "epic", "kind": parent["kind"], "sub_issues": parent["metadata"]["delivery_plan"]}
+                    if parent["metadata"].get("delivery_plan") else qualified_plan(cfg, parent))
+            if plan is None:
+                return []
+            return manage_decomposition(cfg, repo_full, item, plan, project_key)
         plan = ({"type": "epic", "kind": parent["kind"], "sub_issues": parent["metadata"]["delivery_plan"]}
                 if parent and parent["metadata"].get("delivery_plan") else
                 decompose_issue(item["title"], item["body"], model=cfg.get("decomposer_model")))
