@@ -20,6 +20,16 @@ from orchestrator.delivery_store import DeliveryConflict, DeliveryStore, store_p
 
 
 def execute_action(cfg, ident, revision, proposal):
+    from orchestrator.reliability_store import ReliabilityStore
+    from orchestrator.reliability import execution_gate
+    records = ReliabilityStore(cfg)
+    goal = records.delivery.get(ident)
+    execution_gate(cfg, goal)
+    with records.span(goal, "action", parent=records.worker_parent(goal)):
+        return _execute_action(cfg, ident, revision, proposal)
+
+
+def _execute_action(cfg, ident, revision, proposal):
     capability, target = proposal.get("capability"), proposal.get("target")
     adapter = (cfg.get("delivery_actions") or {}).get(capability)
     if not isinstance(adapter, dict):
@@ -123,6 +133,10 @@ def execute_action(cfg, ident, revision, proposal):
                 except subprocess.TimeoutExpired:
                     os.killpg(proc.pid, signal.SIGKILL)
                     proc.wait()
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
     receipt = response.get("receipt") if isinstance(response, dict) else None
     if not isinstance(receipt, dict) or not receipt:
         raise DeliveryConflict(f"Action {key} returned no durable receipt")

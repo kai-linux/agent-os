@@ -1,0 +1,71 @@
+# Merge into private operator config after substituting absolute paths and identities.
+# This is a template, NOT evidence or authorization. Never commit credentials.
+reliability:
+  mode: observe
+  notify: true
+  recovery_operators: ["local:1000"]
+  planning_model_adapter: measured-planner
+  principals:
+    "local:1000":
+      tenants: [example, controller]
+      roles: [operator, memory, billing, administrator]
+    "telegram:123456789":
+      tenants: [example]
+      roles: [approver, reader]
+  tenants:
+    example:
+      repos: [owner/workspace]
+      profiles:
+        implementation: example-code
+        architecture: example-code
+        research: example-research
+        external_action: example-action
+  profiles:
+    example-code: &base
+      release: REPLACE_WITH_REVIEWED_40_CHARACTER_GIT_SHA
+      python: /path/to/controller/.venv/bin/python
+      model_adapter: measured-worker
+      evaluator: /path/to/controller/bin/evaluate_orchestration.py
+      rollback_plan: /path/to/controller/docs/runbooks/recovery.md
+      incident_playbook: /path/to/controller/docs/runbooks/incidents.md
+      artifacts: []
+      scenarios: [end_to_end, restart, duplicate_effect, denied_action, stale_revision, provider_failure, restore, isolation, approval_expiry, qualified_worker]
+      min_samples: 10
+      min_quality: 1.0
+      max_quality_drop: 0.0
+      evaluation_timeout_seconds: 120
+      evaluation_ttl_seconds: 86400
+      evaluation_interval_seconds: 3600
+      auto_evaluate: false
+      require_sealed_usage: true
+      slo_window_seconds: 2592000
+      slo_min_samples: 20
+      min_success_rate: 0.95
+      max_delivery_seconds: 14400
+      memory_ttl_seconds: 2592000
+      sandbox:
+        backend: bubblewrap
+        network: none
+        readonly: []
+        environment: {}
+        env_keys: []
+    example-research:
+      <<: *base
+      max_delivery_seconds: 86400
+    example-action:
+      <<: *base
+      max_delivery_seconds: 3600
+# Model adapters are operator-owned executables, outside worker-writable directories.
+# model_adapters:
+#   measured-worker:
+#     argv: [/absolute/python, -I, /operator-owned/worker_provider_adapter.py]
+#     cwd: /operator-owned
+#     tenants: [example]
+#     env_keys: [PROVIDER_API_KEY]
+#     timeout_seconds: 120
+#   measured-planner:
+#     argv: [/absolute/python, -I, /operator-owned/provider_adapter.py]
+#     cwd: /operator-owned
+#     tenants: [example]
+#     env_keys: [PROVIDER_API_KEY]
+#     timeout_seconds: 120

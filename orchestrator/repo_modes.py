@@ -17,6 +17,9 @@ def _normalize_mode(value: object) -> str:
 
 
 def repo_automation_mode(cfg: dict, github_slug: str) -> str:
+    if cfg.get("reliability", {}).get("mode") == "enforce":
+        # Legacy self-directed jobs do not participate in the qualified boundary.
+        return DISPATCHER_ONLY_AUTOMATION_MODE
     mode = _normalize_mode(cfg.get("automation_mode"))
 
     for project_cfg in cfg.get("github_projects", {}).values():

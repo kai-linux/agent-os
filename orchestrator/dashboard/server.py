@@ -53,9 +53,22 @@ def make_server(cfg, *, port=8765):
 
                     self._send(
                         200,
-                        render_operations_dashboard().encode(),
+                        render_operations_dashboard().replace("<body>", '<body><nav style="padding:12px 4vw"><a href="/reliability">Release readiness and service targets</a></nav>', 1).encode(),
                         "text/html; charset=utf-8",
                     )
+                elif path in {"/reliability", "/api/reliability"}:
+                    from orchestrator.reliability import snapshot
+                    from orchestrator.dashboard.reliability import render
+                    data = snapshot(cfg)
+                    self._send(200, render(data).encode() if path == "/reliability" else json.dumps(data, allow_nan=False).encode(),
+                               "text/html; charset=utf-8" if path == "/reliability" else "application/json")
+                elif path.startswith("/api/traces/"):
+                    from orchestrator.reliability_store import ReliabilityStore
+                    ident = path.removeprefix("/api/traces/")
+                    if not re.fullmatch(r"g-[a-f0-9]{20}", ident):
+                        self._send(400, b"Invalid goal id", "text/plain")
+                        return
+                    self._send(200, json.dumps({"schema": "agent-os.traces.v1", "spans": ReliabilityStore(cfg).traces(ident)}).encode(), "application/json")
                 elif path in {"/api/delivery", "/api/observations"}:
                     result = (
                         operational_snapshot(cfg)

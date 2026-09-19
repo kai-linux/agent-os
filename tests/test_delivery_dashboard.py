@@ -105,3 +105,28 @@ def test_dashboard_cannot_mutate_goals(server):
     connection.request("POST", "/api/delivery", body='{"state":"succeeded"}')
     assert connection.getresponse().status == 405
     connection.close()
+
+
+def test_readiness_view_reports_missing_evidence_and_validates_trace_ids(server):
+    status, headers, page = request(server, "/reliability")
+    assert status == 200
+    assert b"No release profiles configured" in page
+    assert b"not satisfied" in page
+    assert headers["Cache-Control"] == "no-store"
+    assert "script-src 'none'" in headers["Content-Security-Policy"]
+    status, _, raw = request(server, "/api/reliability")
+    assert status == 200
+    data = json.loads(raw)
+    assert data["ready"] is False and data["configured"] is False
+    assert request(server, "/api/traces/not-a-goal")[0] == 400
+    assert request(server, "/api/traces/g-" + "a" * 20)[0] == 200
+    assert request(server, "/api/reliability", host="evil.example")[0] == 403
+
+
+def test_readiness_page_escapes_profile_names():
+    from orchestrator.dashboard.reliability import render
+    page = render({"mode": "observe", "ready": False, "profiles": [
+        {"profile": "<script>unsafe</script>", "ready": False, "reasons": ["<bad>"]}],
+        "usage_receipts": 0, "sealed_attempts": 0, "attempts": 0, "unfinished_spans": 0})
+    assert "<script>" not in page
+    assert "&lt;bad&gt;" in page

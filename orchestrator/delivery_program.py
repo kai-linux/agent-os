@@ -75,6 +75,11 @@ def manage_decomposition(cfg, repo, item, plan, project_key):
     # Model-generated plans cannot widen the delivery target beyond the human
     # contract. Installed workspaces alone are not delegated scope.
     allowed = {repo} | (set(parent["contract"].get("targets", [])) & set(mapping))
+    from orchestrator.reliability import enforced, tenant_for, execution_gate
+    if enforced(cfg):
+        execution_gate(cfg, parent)
+        tenant = tenant_for(cfg, parent)
+        allowed = {r for r in allowed if tenant_for(cfg, {"metadata": {"github_repo": r}}) == tenant}
     try:
         children = validate_plan(plan, allowed, repo)
     except ValueError as exc:
@@ -182,6 +187,39 @@ def manage_decomposition(cfg, repo, item, plan, project_key):
     # use the graph; splitting a program is never reported as delivery.
     store.bind_execution(parent["id"], parent["revision"], {"plan_materialized": True})
     return [created[c["key"]][1] for c in children if not c["depends_on"]]
+
+
+def qualified_plan(cfg, parent):
+    """Enforced planning uses the same ownership, trace and billing boundary as work."""
+    import json
+    from orchestrator.delivery import begin_worker, finish_worker
+    from orchestrator.model_gateway import call_model
+    from orchestrator.reliability_store import ReliabilityStore
+    from orchestrator.task_decomposer import DECOMPOSE_PROMPT
+    records = ReliabilityStore(cfg)
+    adapter = cfg.get("reliability", {}).get("planning_model_adapter")
+    if not adapter:
+        records.delivery.wait(parent["id"], parent["revision"], "Configure a tenant-scoped planning model adapter; unmetered CLI planning is disabled")
+        return None
+    meta = {"goal_id": parent["id"], "goal_revision": parent["revision"],
+            "task_id": "plan-" + parent["id"], "branch": "planning"}
+    key = None
+    try:
+        key = begin_worker(cfg, meta, "planner", adapter, 3, parent["metadata"]["workspace"])
+        response = call_model(cfg, key, adapter, {"prompt": DECOMPOSE_PROMPT.format(title=parent["title"], body=parent["original"])})
+        plan = response["output"]
+        if isinstance(plan, str):
+            plan = json.loads(plan)
+        if not isinstance(plan, dict) or plan.get("type") != "epic":
+            raise ValueError("A program needs structured work packages")
+        finish_worker(cfg, meta, key, {"status": "complete"})
+        records.seal_usage(key, [response["receipt_key"]], actor="planning-adapter")
+        return plan
+    except Exception as exc:
+        if key:
+            finish_worker(cfg, meta, key, {"status": "blocked", "blocker_code": "planning_failed"})
+        records.delivery.wait(parent["id"], parent["revision"], "Planning requires reconciliation: " + type(exc).__name__)
+        return None
 
 
 def dispatchable(cfg, repo, number):

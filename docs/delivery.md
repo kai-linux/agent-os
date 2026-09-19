@@ -117,9 +117,12 @@ exactly-once guarantee is claimed for a provider without idempotency support.
 There is no preinstalled video recording/upload adapter in this change. Workers
 must inspect available capabilities, preserve intermediate work and ask a specific
 access/approval question when needed. A script alone cannot pass a recording check.
-General CLI workers still run as trusted host processes; these action gates are
-**not an OS sandbox** against a malicious CLI or shell escape. Do not delegate
-unrestricted accounts or untrusted tasks under a stronger security assumption.
+Legacy CLI workers in observation mode still run as trusted host processes;
+action gates alone are **not an OS sandbox**. The opt-in
+[general reliability contract](reliability.md) adds a measured model gateway,
+network-off isolated tools and verifiers, scoped operator roles, release
+qualification, drift and service-target gates. Missing qualification fails closed.
+Do not treat a merged implementation as an activated or proven production release.
 
 ## Controls And Recovery
 

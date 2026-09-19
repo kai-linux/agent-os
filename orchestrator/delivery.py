@@ -29,8 +29,13 @@ def managed_store(cfg, meta):
 def begin_worker(cfg, meta, worker, agent, timeout_minutes, worktree):
     store = managed_store(cfg, meta)
     if store is None:
+        from orchestrator.reliability import enforced
+        if enforced(cfg):
+            raise DeliveryConflict("Unmanaged legacy work cannot bypass enforced delivery controls")
         return None
     ident, revision = meta["goal_id"], int(meta["goal_revision"])
+    from orchestrator.reliability import execution_gate
+    execution_gate(cfg, store.get(ident))
     store.bind_execution(
         ident,
         revision,
@@ -49,6 +54,12 @@ def begin_worker(cfg, meta, worker, agent, timeout_minutes, worktree):
         lease_seconds=timeout_minutes * 60 + 60,
         reserve_usd=float(cfg.get("delivery_attempt_reservation_usd", 0)),
     )
+    from orchestrator.reliability_store import ReliabilityStore
+    ReliabilityStore(cfg).start_span(ident, revision, "worker", key="attempt:" + key,
+                                    attributes={"attempt_id": key})
+    meta["delivery_attempt_id"] = key
+    meta.pop("usage_receipts", None)
+    meta.pop("usage_complete", None)
     return key
 
 
@@ -64,6 +75,13 @@ def finish_worker(cfg, meta, key, result, *, retry=False):
             "summary": redact_text(result.get("summary", "")),
         },
     )
+    from orchestrator.reliability_store import ReliabilityStore
+    ReliabilityStore(cfg).end_span("attempt:" + key, error=None if result.get("status") == "complete" else RuntimeError())
+    if meta.get("delivery_attempt_id") == key and meta.get("usage_complete") and meta.get("usage_receipts"):
+        try:
+            ReliabilityStore(cfg).seal_usage(key, meta["usage_receipts"], actor="qualified-worker-collector")
+        except DeliveryConflict:
+            store.heartbeat("usage_reconciliation", "Provider receipts remain provisional; costs are unknown")
     if retry and store.get(meta["goal_id"])["state"] == "verifying":
         store.retry(
             meta["goal_id"],
@@ -87,19 +105,33 @@ def recover_verified_outcome(cfg, meta, result):
     return None
 
 
-def run_monitored(argv, cwd, logfile, *, timeout_seconds, store, ident, revision):
+def run_monitored(argv, cwd, logfile, *, timeout_seconds, store, ident, revision, cfg=None):
     """Fence stale work and stop the actual process group on pause/cancellation."""
     started = time.monotonic()
+    environment = None
+    from orchestrator.reliability import enforced, execution_gate, profile, profile_for
+    if cfg and enforced(cfg):
+        from orchestrator.worker_isolation import sandbox_command
+        goal = store.get(ident)
+        execution_gate(cfg, goal)
+        policy = profile(cfg, profile_for(cfg, goal))["sandbox"]
+        argv, environment = sandbox_command(argv, cwd, policy, readonly=[argv[0], argv[-1]], controller_root=cfg.get("root_dir"))
+    next_gate = started + 5
     with Path(logfile).open("a", encoding="utf-8") as output:
+        os.chmod(logfile, 0o600)
         proc = subprocess.Popen(
             argv,
             cwd=cwd,
             stdout=output,
             stderr=subprocess.STDOUT,
             start_new_session=True,
+            env=environment,
         )
         try:
             while proc.poll() is None:
+                if cfg and enforced(cfg) and time.monotonic() >= next_gate:
+                    execution_gate(cfg, store.get(ident))
+                    next_gate = time.monotonic() + 5
                 if not store.execution_allowed(ident, revision):
                     raise DeliveryConflict(
                         "Goal paused or cancelled while worker was running",
@@ -123,6 +155,10 @@ def run_monitored(argv, cwd, logfile, *, timeout_seconds, store, ident, revision
                 except subprocess.TimeoutExpired:
                     os.killpg(proc.pid, signal.SIGKILL)
                     proc.wait()
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
 
 
 def settle_result(cfg, meta, result):
@@ -654,16 +690,19 @@ def _tick(cfg, *, publish=True):
             pass
     if publish:
         flush_outbox(cfg)
+    from orchestrator.reliability import monitor
+    monitor(cfg)
     store.heartbeat("delivery_coordinator")
 
 
 def command(cfg, args, *, actor):
+    from orchestrator.reliability import authorize, tenant_for
     store = DeliveryStore(store_path(cfg))
     if not args or args[0] == "list":
         return (
             "\n".join(
                 f"{g['id']} {g['kind']} {g['state']}: {g['title']}"
-                for g in store.list_goals()
+                for g in store.list_goals() if _visible_goal(cfg, g, actor)
             )
             or "No managed goals yet."
         )
@@ -674,6 +713,7 @@ def command(cfg, args, *, actor):
         from orchestrator.delivery_contract import register_issue
 
         repo, number = ident.rsplit("#", 1)
+        authorize(cfg, tenant_for(cfg, {"metadata": {"github_repo": repo}}), actor, "control")
         location = next(
             (
                 (pk, r)
@@ -725,6 +765,10 @@ def command(cfg, args, *, actor):
         goal = store.get(goal["id"])
         return f"{goal['id']}: {goal['state']}\n{goal['reason']}"
     goal = store.get(ident)
+    authorize(cfg, tenant_for(cfg, goal), actor,
+              "read" if action in {"status", "actions"} else action if action in {"accept", "receipt"} else "control")
+    from orchestrator.reliability_store import ReliabilityStore
+    ReliabilityStore(cfg).audit(tenant_for(cfg, goal), actor, "goal." + action, ident)
     if action == "status":
         children = [g for g in store.list_goals() if g["parent_id"] == ident]
         return (
@@ -805,6 +849,15 @@ def command(cfg, args, *, actor):
     return f"{ident}: {current['state']}\n{current['reason']}"
 
 
+def _visible_goal(cfg, goal, actor):
+    from orchestrator.reliability import authorize, tenant_for
+    try:
+        authorize(cfg, tenant_for(cfg, goal), actor, "read")
+        return True
+    except DeliveryConflict:
+        return False
+
+
 def main():
     from orchestrator.paths import load_config
 
@@ -816,6 +869,9 @@ def main():
     parser.add_argument("--tick", action="store_true")
     opts = parser.parse_args()
     cfg = load_config()
+    if opts.snapshot or opts.tick:
+        from orchestrator.reliability import authorize
+        authorize(cfg, "controller", "local:" + str(os.getuid()), "admin")
     if opts.snapshot:
         from orchestrator.delivery_metrics import operational_snapshot
 

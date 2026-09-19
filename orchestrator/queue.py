@@ -470,7 +470,8 @@ def _result_contract_text(result: dict) -> str:
     return "\n\n".join(f"{name}:\n{value}" for name, value in sections) + "\n"
 
 def _write_result_contract(worktree: Path, result: dict) -> None:
-    (worktree / ".agent_result.md").write_text(_result_contract_text(result), encoding="utf-8")
+    from orchestrator.worker_artifacts import write_handoff
+    write_handoff(worktree / ".agent_result.md", _result_contract_text(result))
 
 def _extract_ci_remediation_pr_number(meta: dict, body: str) -> int | None:
     issue_title = str(meta.get("github_issue_title", "")).strip()
@@ -1316,10 +1317,20 @@ def handle_telegram_command(
     args = parts[1:]
     root = paths["ROOT"]
     cfg_path = paths["CONFIG"]
+    from orchestrator.reliability import authorize, enforced, settings
+    scoped_controls = enforced(cfg) or bool(settings(cfg).get("principals"))
+    scoped_actor = "telegram:" + str((operator or {}).get("user_id") or "")
+    if scoped_controls and command not in {"goals", "goal", "programs"}:
+        try:
+            authorize(cfg, "controller", scoped_actor, "admin")
+        except DeliveryConflict as exc:
+            return str(exc)
 
     if command in {"goals", "goal", "programs"}:
         from orchestrator.delivery import command as delivery_command
         actor = str((operator or {}).get("username") or (operator or {}).get("chat_id") or "")
+        if scoped_controls:
+            actor = scoped_actor if (operator or {}).get("user_id") else ""
         if not actor:
             return "Authenticated operator identity is required for delivery controls."
         try:
@@ -1707,6 +1718,7 @@ def process_telegram_callbacks(
             try:
                 operator = {
                     "chat_id": message_chat,
+                    "user_id": str((message.get("from") or {}).get("id") or ""),
                     "username": str((message.get("from") or {}).get("username") or "").strip(),
                     "display_name": " ".join(
                         part
@@ -1753,6 +1765,9 @@ def process_telegram_callbacks(
         if message_chat_id != chat_id or not callback_id:
             continue
         try:
+            from orchestrator.reliability import authorize, enforced, settings
+            if enforced(cfg) or settings(cfg).get("principals"):
+                authorize(cfg, "controller", "telegram:" + str((callback.get("from") or {}).get("id") or ""), "admin")
             outcome = handle_telegram_callback(cfg, actions_dir, data, logfile, queue_summary_log)
             answer_telegram_callback(
                 cfg,
@@ -2377,7 +2392,7 @@ def write_prompt(task_id: str, meta: dict, body: str, current_agent: str, prior_
     # --- End enhanced context ---
 
     from orchestrator.delivery_contract import delivery_prompt
-    goal_context = delivery_prompt(root, meta)
+    goal_context = delivery_prompt(root, meta, {**cfg_for_obj, "root_dir": str(root)})
     prompt = f"""You are a delivery worker running in a controlled automation environment.
 
 Use the repository as your workspace. Coding changes stay in this repository;
@@ -2482,11 +2497,18 @@ def run_agent(agent: str, worktree: Path, prompt_file: Path, logfile: Path, time
     runner = root / "bin" / "agent_runner.sh"
     timeout_seconds = max(60, int(timeout_minutes) * 60)
     if delivery_meta and delivery_meta.get("goal_id"):
+        from orchestrator.reliability import enforced
+        if enforced(delivery_cfg):
+            from orchestrator.qualified_worker import run as run_qualified
+            return run_qualified(delivery_cfg, delivery_meta, worktree, prompt_file, timeout_seconds=timeout_seconds)
         from orchestrator.delivery import run_monitored
         run_monitored([str(runner), agent, str(worktree), str(prompt_file)], worktree, logfile,
                       timeout_seconds=timeout_seconds, store=managed_store(delivery_cfg, delivery_meta),
-                      ident=delivery_meta["goal_id"], revision=delivery_meta["goal_revision"])
+                      ident=delivery_meta["goal_id"], revision=delivery_meta["goal_revision"], cfg=delivery_cfg)
     else:
+        from orchestrator.reliability import enforced
+        if delivery_cfg and enforced(delivery_cfg):
+            raise DeliveryConflict("Enforced workers require a managed goal")
         run([runner, agent, worktree, prompt_file], logfile=logfile, timeout=timeout_seconds, queue_summary_log=queue_summary_log)
 
 def _runner_environment_failure_from_log(logfile: Path | None) -> dict | None:
@@ -2545,8 +2567,19 @@ def has_unpushed_commits(worktree: Path, branch: str) -> bool:
     except ValueError:
         return False
 
-def commit_and_push(worktree: Path, branch: str, task_id: str, allow_push: bool, logfile: Path, queue_summary_log: Path):
-    uncommitted = has_changes(worktree)
+def commit_and_push(worktree: Path, branch: str, task_id: str, allow_push: bool, logfile: Path, queue_summary_log: Path, *, cfg=None):
+    git = ["git"]
+    if cfg:
+        from orchestrator.reliability import enforced, workspace_policy
+        if enforced(cfg):
+            workspace_policy(cfg, worktree)
+            git += ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"]
+            configured = subprocess.run(git + ["config", "--get-regexp", r"^(filter\.|include\.|includeif\.)"],
+                                        cwd=worktree, capture_output=True, check=False)
+            if configured.returncode != 1:
+                raise DeliveryConflict("Enforced Git publication forbids executable filters and included config")
+    uncommitted = (bool(subprocess.run(git + ["status", "--porcelain"], cwd=worktree, capture_output=True, text=True, check=True).stdout.strip())
+                   if len(git) > 1 else has_changes(worktree))
     unpushed = has_unpushed_commits(worktree, branch)
 
     if not uncommitted and not unpushed:
@@ -2556,30 +2589,30 @@ def commit_and_push(worktree: Path, branch: str, task_id: str, allow_push: bool,
     _validate_workflow_files(worktree)
 
     if uncommitted:
-        run(["git", "add", "-A"], cwd=worktree, logfile=logfile, queue_summary_log=queue_summary_log)
+        run(git + ["add", "-A"], cwd=worktree, logfile=logfile, queue_summary_log=queue_summary_log)
         # .agent_result.md is a worktree-local artifact (gitignored). Some
         # historical branches tracked it before the ignore landed; defensively
         # unstage and untrack so agent commits never carry it forward into PRs.
         run(
-            ["git", "rm", "--cached", "-f", "--ignore-unmatch", ".agent_result.md", ".agent_actions.json"],
+            git + ["rm", "--cached", "-f", "--ignore-unmatch", ".agent_result.md", ".agent_actions.json"],
             cwd=worktree,
             logfile=logfile,
             queue_summary_log=queue_summary_log,
         )
         commit_msg = with_agent_os_trailer(f"Agent OS: {task_id}")
-        run(["git", "commit", "-m", commit_msg], cwd=worktree, logfile=logfile, queue_summary_log=queue_summary_log)
+        run(git + ["commit", "-m", commit_msg], cwd=worktree, logfile=logfile, queue_summary_log=queue_summary_log)
     else:
         log("Agent already committed changes; pushing unpushed commits.", logfile, queue_summary_log=queue_summary_log)
 
     if allow_push:
         try:
-            run(["git", "push", "-u", "origin", branch], cwd=worktree, logfile=logfile, queue_summary_log=queue_summary_log)
+            run(git + ["push", "-u", "origin", branch], cwd=worktree, logfile=logfile, queue_summary_log=queue_summary_log)
         except CommandExecutionError as e:
             detail = "\n".join(part for part in [e.stdout or "", e.stderr or ""] if part)
             if "non-fast-forward" not in detail.lower():
                 raise
             fetch_ref = f"+refs/heads/{branch}:refs/remotes/origin/{branch}"
-            run(["git", "fetch", "origin", fetch_ref], cwd=worktree, logfile=logfile, queue_summary_log=queue_summary_log)
+            run(git + ["fetch", "origin", fetch_ref], cwd=worktree, logfile=logfile, queue_summary_log=queue_summary_log)
             contains = subprocess.run(
                 ["git", "merge-base", "--is-ancestor", "HEAD", f"origin/{branch}"],
                 cwd=worktree,
@@ -2635,7 +2668,8 @@ def rescue_git_progress(
             validated["decisions"] = decisions
             return validated, False
     try:
-        committed = commit_and_push(worktree, branch, task_id, allow_push, logfile, queue_summary_log)
+        from orchestrator.reliability import enforced
+        committed = commit_and_push(worktree, branch, task_id, allow_push, logfile, queue_summary_log, **({"cfg": cfg} if enforced(cfg) else {}))
     except WorkflowValidationError:
         raise
     except Exception as e:
@@ -2698,7 +2732,13 @@ def parse_agent_result(worktree: Path):
             "raw": raw,
         }
 
-    text = result_file.read_text(encoding="utf-8")
+    from orchestrator.worker_artifacts import read_handoff
+    try:
+        text = read_handoff(result_file)
+    except (OSError, ValueError):
+        return _invalid_result_contract_result(
+            reason="Unsafe or oversized worker result file", raw="", done=[], files_changed=[],
+            tests_run=[], decisions=[], risks=[], attempted_approaches=[], manual_steps="- Inspect the handoff file safely.")
 
     status_match = re.search(r"^STATUS:\s*(.+)$", text, flags=re.MULTILINE)
     all_sections = ["BLOCKER_CODE", "DONE", "BLOCKERS", "NEXT_STEP", "FILES_CHANGED", "TESTS_RUN", "DECISIONS", "RISKS", "ATTEMPTED_APPROACHES", "MANUAL_STEPS", "UNBLOCK_NOTES"]
@@ -2795,6 +2835,12 @@ VALID_ASSIGNABLE_AGENTS = {"auto", "omp", "claude", "codex", "gemini"}
 VALID_FALLBACK_AGENTS = VALID_ASSIGNABLE_AGENTS - {"auto"}
 
 def get_agent_chain(meta: dict, cfg: dict) -> list[str]:
+    from orchestrator.reliability import enforced, worker_adapter
+    if enforced(cfg):
+        if not meta.get("goal_id"):
+            raise DeliveryConflict("Enforced work requires a controller-owned goal")
+        goal = managed_store(cfg, meta).get(meta["goal_id"])
+        return [worker_adapter(cfg, goal["metadata"])]
     task_type = meta.get("task_type", cfg["default_task_type"])
     fallback_map = _repo_agent_fallbacks(meta, cfg) or cfg.get("agent_fallbacks", {})
     task_chain = list(fallback_map.get(task_type, fallback_map.get(cfg["default_task_type"], ["omp", "codex", "claude", "gemini"])))
@@ -3296,16 +3342,23 @@ def run_tests(cfg: dict, repo: Path, worktree: Path, logfile: Path, queue_summar
     log(f"Running tests: {test_command}", logfile, queue_summary_log=queue_summary_log)
 
     try:
-        proc = subprocess.run(
-            test_command,
-            shell=True,
-            cwd=str(worktree),
-            capture_output=True,
-            text=True,
-            timeout=timeout_secs,
-        )
-        passed = proc.returncode == 0
-        status_label = "PASSED" if passed else f"FAILED (exit {proc.returncode})"
+        from orchestrator.reliability import enforced, workspace_policy
+        if enforced(cfg):
+            from orchestrator.worker_isolation import sandbox_command, bounded_command
+            argv, env = sandbox_command(["/bin/bash", "-c", test_command], worktree, workspace_policy(cfg, worktree), controller_root=cfg.get("root_dir"))
+            bounded_command(argv, cwd=worktree, env=env, timeout=min(600, timeout_secs), limit=2*1024*1024)
+            passed, status_label = True, "PASSED (isolated)"
+        else:
+            proc = subprocess.run(
+                test_command,
+                shell=True,
+                cwd=str(worktree),
+                capture_output=True,
+                text=True,
+                timeout=timeout_secs,
+            )
+            passed = proc.returncode == 0
+            status_label = "PASSED" if passed else f"FAILED (exit {proc.returncode})"
     except subprocess.TimeoutExpired:
         passed = False
         status_label = f"TIMEOUT after {timeout_secs}s"
@@ -3319,7 +3372,8 @@ def run_tests(cfg: dict, repo: Path, worktree: Path, logfile: Path, queue_summar
     if not result_path.exists():
         return
 
-    text = result_path.read_text(encoding="utf-8")
+    from orchestrator.worker_artifacts import read_handoff, write_handoff
+    text = read_handoff(result_path)
     test_bullet = f"- {test_command} → {status_label}"
 
     # Append bullet to TESTS_RUN section
@@ -3355,7 +3409,7 @@ def run_tests(cfg: dict, repo: Path, worktree: Path, logfile: Path, queue_summar
         if not re.search(r'^UNBLOCK_NOTES:', text, re.MULTILINE):
             text = text.rstrip('\n') + f'\n\nUNBLOCK_NOTES:\n- blocking_cause: Tests failed ({test_command} → {status_label})\n- next_action: Fix the failing tests and rerun the task.\n'
 
-    result_path.write_text(text, encoding="utf-8")
+    write_handoff(result_path, text)
 
 def record_metrics(
     cfg: dict,
@@ -3694,7 +3748,8 @@ def main():
     worker_id = os.environ.get("QUEUE_WORKER_ID", "w0")
     maybe_run_stall_watchdog(cfg, paths, worker_id=worker_id, queue_summary_log=QUEUE_SUMMARY_LOG)
 
-    cooldown_left = fallback_cooldown_remaining(cfg)
+    from orchestrator.reliability import enforced
+    cooldown_left = 0 if enforced(cfg) else fallback_cooldown_remaining(cfg)
     if cooldown_left > 0:
         mins = (cooldown_left + 59) // 60
         print(f"[{worker_id}] Fallback cooldown active — {mins} min remaining. Skipping this tick.")
@@ -4161,7 +4216,8 @@ def main():
             if rescued_result is not None:
                 final_result = rescued_result
 
-            pushed = False if rescued_result is not None else commit_and_push(worktree, branch, task_id, allow_push, logfile, QUEUE_SUMMARY_LOG)
+            from orchestrator.reliability import enforced
+            pushed = False if rescued_result is not None else commit_and_push(worktree, branch, task_id, allow_push, logfile, QUEUE_SUMMARY_LOG, **({"cfg": cfg} if enforced(cfg) else {}))
 
             if pushed or rescued_push:
                 commit_hash = run(["git", "rev-parse", "HEAD"], cwd=worktree, logfile=logfile, queue_summary_log=QUEUE_SUMMARY_LOG).stdout.strip()

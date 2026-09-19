@@ -27,6 +27,12 @@ python -m orchestrator.dashboard.server --port 8765
 See [persistent delivery and operations](docs/delivery.md) for contracts, controls,
 authority boundaries, migration, private access and deployment. The default planning
 policy manages accepted commitments rather than generating speculative growth work.
+
+The [general reliability contract](docs/reliability.md) adds scoped roles and
+retained memory, measured usage and traces, isolated execution, orchestration
+evaluations, release/drift gates, service targets and tested recovery procedures.
+`/reliability` shows what is qualified and what is missing. These controls are
+opt-in; passing engineering tests is not proof of sustained business performance.
 This is not a claim of unrestricted autonomy or a completed non-coding production pilot.
 
 **Public proof — everything is auditable:**
